@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=78.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "palserver-console"
+version = "0.0.1"
+description = "Windows-local PalServer console"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi==0.115.12",
+    "httpx==0.28.1",
+    "palworld-save-tools==0.24.0",
+    "psutil==7.0.0",
+    "uvicorn[standard]==0.34.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx==0.28.1",
+    "mypy==1.15.0",
+    "pytest==8.3.5",
+    "ruff==0.11.0",
+    "types-psutil==7.0.0.20250401",
+]
+
+[tool.setuptools]
+package-dir = {"" = "backend"}
+
+[tool.setuptools.packages.find]
+where = ["backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+addopts = "-ra"
+markers = [
+    "integration: requires a locally generated sanitized save fixture",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+src = ["backend"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+files = ["backend/palserver_console", "backend/tests"]
+python_version = "3.13"
+strict = true
+warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = ["palworld_save_tools", "palworld_save_tools.*"]
+ignore_missing_imports = true

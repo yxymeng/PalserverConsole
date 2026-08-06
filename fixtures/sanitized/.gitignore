@@ -1,0 +1,3 @@
+# Keep the directory in Git while ignoring every locally generated sample.
+*
+!.gitignore

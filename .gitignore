@@ -1,0 +1,48 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node and frontend build output
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+frontend/artifacts/
+
+# Local runtime state and secrets
+runtime/
+data/
+tmp-m8-prod-data/
+tmp-*/
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+
+# Real and locally generated save data must never be committed.
+*.sav
+*.sav.json
+fixtures/sanitized/*
+!fixtures/sanitized/.gitignore
+
+# Editor and operating-system files
+.vscode/
+.idea/
+*.log
+Thumbs.db
+Desktop.ini
+
+# Local development plans, handoffs, and generated review reports
+/plan.md
+/docs/handoffs/
+/docs/reports/
