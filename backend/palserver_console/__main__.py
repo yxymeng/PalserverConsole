@@ -35,10 +35,24 @@ def main() -> None:
     stored_port = database.get_setting("network.port")
     if stored_port is not None:
         settings = replace(settings, port=int(stored_port))
-    host = "0.0.0.0" if AuthStore(database, settings).password_configured() else "127.0.0.1"
-    _require_available_port(host, settings.port)
+    host = "0.0.0.0" if AuthStore(database, settings).admin_password_configured() else "127.0.0.1"
     local_url = f"http://127.0.0.1:{settings.port}"
-    if not args.no_browser and os.environ.get("PALSERVER_CONSOLE_NO_BROWSER") != "1":
+    should_open_browser = (
+        not args.no_browser and os.environ.get("PALSERVER_CONSOLE_NO_BROWSER") != "1"
+    )
+    try:
+        _require_available_port(host, settings.port)
+    except RuntimeError:
+        if not _is_running_instance(local_url):
+            raise
+        print(
+            f"PalServerConsole is already running at {local_url}. "
+            "Reusing the existing instance."
+        )
+        if should_open_browser:
+            _open_local_url(local_url)
+        return
+    if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
     uvicorn.run(create_app(settings), host=host, port=settings.port, workers=1, log_level="info")
 
@@ -65,6 +79,14 @@ def _is_own_health_response(response: object) -> bool:
         and payload.get("service") == "palserver-console"
         and payload.get("status") == "ok"
     )
+
+
+def _is_running_instance(url: str) -> bool:
+    try:
+        with urllib.request.urlopen(f"{url}/api/health", timeout=1) as response:
+            return _is_own_health_response(response)
+    except (OSError, json.JSONDecodeError):
+        return False
 
 
 def _require_available_port(host: str, port: int) -> None:

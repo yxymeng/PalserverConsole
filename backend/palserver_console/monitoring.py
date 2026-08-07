@@ -69,6 +69,20 @@ def read_connection_config(install_path: Path) -> ServerConnectionConfig:
     return parse_connection_config(text)
 
 
+def read_admin_password(install_path: Path) -> str | None:
+    """Read the game administrator password without exposing it in a response or log."""
+
+    ini_path = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    try:
+        text = ini_path.read_text(encoding="utf-8-sig")
+    except OSError as error:
+        raise MonitoringConfigError(
+            "INI_UNAVAILABLE", f"PalWorldSettings.ini: {type(error).__name__}"
+        ) from error
+    password = _ini_value(text, "AdminPassword")
+    return password or None
+
+
 def parse_connection_config(text: str) -> ServerConnectionConfig:
     password = _ini_value(text, "AdminPassword")
     if password is None:

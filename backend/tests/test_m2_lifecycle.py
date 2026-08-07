@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Literal, cast
 
 import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from palserver_console.config import AppSettings
+from palserver_console.config_editor import ConfigError, ConfigService
 from palserver_console.lifecycle import (
     LifecycleError,
     LifecycleManager,
@@ -91,8 +93,11 @@ def _configured_database(tmp_path: Path) -> tuple[Database, Path]:
     return database, executable.resolve()
 
 
-def _wait_for_terminal(database: Database, operation_id: str) -> dict[str, object]:
-    for _ in range(100):
+def _wait_for_terminal(
+    database: Database, operation_id: str, timeout_seconds: float = 1.0
+) -> dict[str, object]:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
         operation = database.operation(operation_id)
         assert operation is not None
         if operation["state"] not in {"queued", "running"}:
@@ -180,6 +185,25 @@ def test_rest_http_error_does_not_expose_response_body() -> None:
     assert str(error.value) == "PalServer REST returned HTTP 500 for /v1/api/save."
 
 
+def test_rest_shutdown_uses_palserver_accepted_waittime() -> None:
+    captured: dict[str, object] = {}
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        captured.update(cast(dict[str, object], json.loads(request.content)))
+        return httpx.Response(200, request=request)
+
+    controller = PalServerRestController(
+        "http://127.0.0.1:8212", SensitiveValue("test-only-password")
+    )
+    controller._client = httpx.Client(
+        base_url="http://127.0.0.1:8212", transport=httpx.MockTransport(respond)
+    )
+
+    controller.shutdown(1, "maintenance")
+
+    assert captured == {"waittime": 1, "message": "maintenance"}
+
+
 def test_shutdown_timeout_requires_confirmation_before_force_stop(tmp_path: Path) -> None:
     database, _ = _configured_database(tmp_path)
     process = FakeProcessController(exits=False)
@@ -199,23 +223,128 @@ def test_shutdown_timeout_requires_confirmation_before_force_stop(tmp_path: Path
     assert process.force_stopped == [701]
 
 
-def test_successful_stop_calls_pending_config_sync_hook(tmp_path: Path) -> None:
-    database, _ = _configured_database(tmp_path)
+@pytest.mark.parametrize("kind", ["stop", "restart"])
+def test_normal_stop_and_restart_never_apply_pending_config(
+    tmp_path: Path, kind: Literal["stop", "restart"]
+) -> None:
+    database, executable = _configured_database(tmp_path)
     process = FakeProcessController(exits=True)
     rest = FakeRestController()
-    sync_calls: list[str] = []
+    service = ConfigService(
+        database, tmp_path / "data", lambda: executable, lambda: process.running
+    )
+    service.save_draft({"AutoSaveSpan": "900"})
+    config_path = (
+        executable.parent / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    )
+    source_before = config_path.read_text(encoding="utf-8")
+    pending_before = (tmp_path / "data" / "pending" / "PalWorldSettings.ini").read_text(
+        encoding="utf-8"
+    )
     manager = LifecycleManager(
         database,
         process=process,
         rest_factory=lambda _: rest,
-        pending_config_sync=lambda: sync_calls.append("sync"),
     )
+    manager.set_config_apply(service.apply)
 
-    created = manager.begin("stop", "stop-and-sync", countdown_seconds=0)
+    created = manager.begin(kind, f"normal-{kind}", countdown_seconds=0)
     result = _wait_for_terminal(database, cast(str, created["id"]))
     assert result["state"] == "succeeded"
     assert rest.calls == ["save", "shutdown"]
-    assert sync_calls == ["sync"]
+    assert config_path.read_text(encoding="utf-8") == source_before
+    assert (tmp_path / "data" / "pending" / "PalWorldSettings.ini").read_text(
+        encoding="utf-8"
+    ) == pending_before
+    assert database.get_config_draft() is not None
+
+
+def test_explicit_apply_and_restart_stops_before_apply_then_checks_health(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(exits=True)
+    rest = FakeRestController()
+    apply_calls: list[bool] = []
+    manager = LifecycleManager(database, process=process, rest_factory=lambda _: rest)
+
+    def apply_config() -> dict[str, object]:
+        apply_calls.append(process.running)
+        return {"message": "applied"}
+
+    manager.set_config_apply(apply_config)
+
+    created = manager.begin("apply_config_and_restart", "apply-and-restart", countdown_seconds=0)
+    result = _wait_for_terminal(database, cast(str, created["id"]))
+
+    assert result["state"] == "succeeded"
+    assert result["stage"] == "applied_restarted"
+    assert rest.calls == ["save", "shutdown"]
+    assert apply_calls == [False]
+    assert len(process.started) == 1
+
+
+def test_apply_failure_keeps_server_stopped_and_provides_recovery_action(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(exits=True)
+    rest = FakeRestController()
+    manager = LifecycleManager(database, process=process, rest_factory=lambda _: rest)
+
+    def fail_apply() -> dict[str, object]:
+        raise ConfigError("CONFIG_CONFLICT", "检测到配置冲突。")
+
+    manager.set_config_apply(fail_apply)
+    created = manager.begin("apply_config_and_restart", "apply-fails", countdown_seconds=0)
+    result = _wait_for_terminal(database, cast(str, created["id"]))
+
+    assert result["state"] == "failed"
+    assert result["error_code"] == "CONFIG_CONFLICT"
+    assert "PalServer 已停止且不会重启" in str(result["detail"])
+    assert "普通 start" in str(result["detail"])
+    assert process.running is False
+    assert process.started == []
+
+
+def test_apply_with_restart_api_creates_explicit_operation(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(exits=True)
+    lifecycle = LifecycleManager(
+        database, process=process, rest_factory=lambda _: FakeRestController()
+    )
+    app = create_app(
+        AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static"),
+        lifecycle_manager=lifecycle,
+    )
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8223",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        auth = client.get("/api/auth/status").json()
+        headers = {
+            "Origin": "http://127.0.0.1:8223",
+            "X-CSRF-Token": auth["csrfToken"],
+        }
+        draft = client.put(
+            "/api/config/draft",
+            headers=headers,
+            json={"fields": {"AutoSaveSpan": "900"}},
+        )
+        assert draft.status_code == 200
+
+        response = client.post(
+            "/api/config/apply-with-restart",
+            headers={**headers, "Idempotency-Key": "explicit-config-restart"},
+            json={"countdownSeconds": 5, "message": "apply test"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["kind"] == "apply_config_and_restart"
+    result = _wait_for_terminal(
+        database, cast(str, response.json()["operationId"]), timeout_seconds=7.0
+    )
+    assert result["state"] == "succeeded"
+    assert result["stage"] == "applied_restarted"
+    assert process.started
 
 
 def test_idempotency_returns_same_operation(tmp_path: Path) -> None:

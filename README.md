@@ -2,13 +2,13 @@
 
 PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中文本地 Web 控制台。它把服务器启动、状态查看、官方备份、世界数据快照、运行监控、审计记录和配置草稿集中到一个浏览器页面里。
 
-首版的重点是：本地可用、操作有确认、数据有边界。它不会把 PalServer 的管理密码、RCON 密码或 LAN 密码发送给浏览器，也不会默认把控制台暴露到公网。
+首版的重点是：本地可用、操作有确认、数据有边界。控制台不保存独立的 LAN 密码；局域网访问直接使用游戏设置中的 `AdminPassword`，也不会默认把控制台暴露到公网。
 
 ## 你能用它做什么
 
 - 扫描 Steam 库并选择真实的 `PalServer.exe`。
 - 启动、保存、停止和重启 PalServer；停止和重启前会先尝试保存世界。
-- 查看 REST/RCON 状态、在线玩家、进程指标和实时数据新鲜度。
+- 在同一个“服务器管理”页面完成服务器生命周期操作，并查看 REST/RCON 状态、在线玩家、进程指标和实时数据新鲜度。
 - 读取世界快照，查看玩家、据点和据点中的 Pal 数据。
 - 管理官方 `backup\world` 备份，设置保留数量、删除备份和在停服后恢复。
 - 查看运营审计记录，并在配置页编辑 `PalWorldSettings.ini` 草稿。
@@ -16,9 +16,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 ## 界面预览
 
-![实时监控页面](docs/images/live-monitoring.png)
-
-![访问安全与控制台端口](docs/images/access-security.png)
+![服务器管理与实时监控页面](docs/images/live-monitoring.png)
 
 截图使用的是自动化测试中的合成数据，不是任何真实服务器、玩家或存档内容。
 
@@ -37,14 +35,14 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 1. 打开“服务器管理”，点击“扫描 Steam”，或填写实际的 `PalServer.exe` 完整路径。
 2. 检查启动参数和 `PalWorldSettings.ini` 中的 REST/RCON 端口是否一致。
-3. 如果需要局域网访问，在“访问安全”页设置至少 10 位 LAN 密码，然后重启控制台。
-4. 在 Windows Firewall 中将规则限制为 `LocalSubnet`，不要把 `8223` 转发到公网。
+3. 打开“服务器配置 → 面板设置 → 基本信息”，在“管理员密码”输入框中输入或更改游戏 `AdminPassword`，保存草稿并按提示停服应用。
+4. 在“总览”页确认控制台监听端口；修改后重启控制台。在 Windows Firewall 中将规则限制为 `LocalSubnet`，不要把 `8223` 转发到公网。
 
-本机访问默认免登录；局域网访问需要管理员密码。LAN 模式只适合可信内网，不是公网管理方案。
+本机访问默认免登录；局域网访问需要 `PalWorldSettings.ini` 中的游戏管理员密码。LAN 模式只适合可信内网，不是公网管理方案。
 
 ## 安全边界
 
-- 浏览器不会接触 PalServer `AdminPassword`、RCON 密码或 LAN 密码。
+- 已配置的 `AdminPassword` 不会从后端回显；修改时只提交用户当前输入的新值。局域网登录使用游戏管理员密码，因此只应在可信内网使用。
 - 保存世界、停止、重启、备份恢复、备份删除和配置应用都需要明确操作。
 - 备份操作只接受官方 `backup\world` 下的直接子目录；活动世界没有删除 API。
 - 配置先保存为草稿。检测到 `CONFIG_CONFLICT` 时不会自动覆盖外部修改。
@@ -56,7 +54,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 | 页面提示 | 处理方式 |
 | --- | --- |
-| `LAN_PASSWORD_REQUIRED` | 在服务器本机设置 LAN 密码，然后重启控制台。 |
+| `GAME_ADMIN_PASSWORD_REQUIRED` | 在 `PalWorldSettings.ini` 配置游戏 `AdminPassword`，应用后重启控制台以开放可信 LAN 访问。 |
 | `SERVER_NOT_CONFIGURED` | 在“服务器管理”页选择有效的 `PalServer.exe`。 |
 | `REST_CONNECTION_REFUSED` | 检查 PalServer 是否运行、REST 是否启用，以及端口是否与 `PalWorldSettings.ini` 一致。 |
 | `SNAPSHOT_PENDING` | 保存文件变化后等待稳定窗口；成功缓存前世界页面会显示过期状态。 |

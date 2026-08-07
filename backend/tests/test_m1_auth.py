@@ -42,15 +42,28 @@ def _origin(host: str) -> dict[str, str]:
     return {"Origin": host}
 
 
-def _configure_password(settings: AppSettings, password: str = "correct-horse-42") -> None:
-    with _local_client(settings) as client:
-        status = client.get("/api/auth/status").json()
-        response = client.post(
-            "/api/auth/lan-password",
-            headers={**_origin("http://127.0.0.1:8223"), "X-CSRF-Token": status["csrfToken"]},
-            json={"password": password},
-        )
-        assert response.status_code == 200
+def _configure_game_admin_password(
+    settings: AppSettings, password: str = "correct-horse-42"
+) -> Path:
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    config = (
+        executable.parent
+        / "Pal"
+        / "Saved"
+        / "Config"
+        / "WindowsServer"
+        / "PalWorldSettings.ini"
+    )
+    config.parent.mkdir(parents=True)
+    executable.write_bytes(b"exe")
+    config.write_text(
+        f"[/Script/Pal.PalGameWorldSettings]\nOptionSettings=(AdminPassword=\"{password}\")\n",
+        encoding="utf-8",
+    )
+    database = Database(settings.database_path)
+    database.migrate()
+    database.set_setting("server.executable", str(executable))
+    return config
 
 
 def test_database_migration_is_idempotent_and_creates_m1_tables(tmp_path: Path) -> None:
@@ -68,7 +81,6 @@ def test_database_migration_is_idempotent_and_creates_m1_tables(tmp_path: Path) 
     assert version == SCHEMA_VERSION
     assert {
         "settings",
-        "auth_config",
         "sessions",
         "operations",
         "audit_events",
@@ -78,16 +90,54 @@ def test_database_migration_is_idempotent_and_creates_m1_tables(tmp_path: Path) 
     } <= tables
 
 
-def test_local_access_gets_session_and_can_set_hashed_password(tmp_path: Path) -> None:
+def test_legacy_lan_credentials_and_sessions_are_removed_by_migration(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    with database.connect() as connection:
+        connection.execute(
+            """
+            CREATE TABLE auth_config (
+                id INTEGER PRIMARY KEY CHECK (id = 1), password_hash BLOB NOT NULL,
+                salt BLOB NOT NULL, n INTEGER NOT NULL, r INTEGER NOT NULL, p INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO auth_config VALUES(1, X'01', X'02', 1, 1, 1, 1)"
+        )
+        connection.execute(
+            """
+            INSERT INTO sessions(
+                id, token_hash, csrf_hash, peer_ip, is_local, created_at, expires_at
+            )
+            VALUES('legacy-lan-session', X'01', X'02', '192.0.2.55', 0, 1, 9999999999)
+            """
+        )
+        connection.execute("PRAGMA user_version = 3")
+
+    database.migrate()
+
+    with sqlite3.connect(database.path) as connection:
+        auth_table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_config'"
+        ).fetchone()
+        lan_sessions = connection.execute(
+            "SELECT COUNT(*) FROM sessions WHERE is_local = 0"
+        ).fetchone()[0]
+    assert auth_table is None
+    assert lan_sessions == 0
+
+
+def test_local_access_gets_session_without_legacy_lan_password_settings(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
-    password = "private-lan-password"
     with _local_client(settings) as client:
         status_response = client.get("/api/auth/status")
         status = status_response.json()
         assert status == {
             "local": True,
             "authenticated": True,
-            "lanPasswordConfigured": False,
+            "adminPasswordConfigured": False,
             "csrfToken": status["csrfToken"],
             "lanWarning": None,
             "port": 8223,
@@ -100,19 +150,13 @@ def test_local_access_gets_session_and_can_set_hashed_password(tmp_path: Path) -
 
         response = client.post(
             "/api/auth/lan-password",
-            headers={
-                **_origin("http://127.0.0.1:8223"),
-                "X-CSRF-Token": status["csrfToken"],
-            },
-            json={"password": password},
+            headers={**_origin("http://127.0.0.1:8223"), "X-CSRF-Token": status["csrfToken"]},
+            json={"password": "legacy-password"},
         )
-        assert response.status_code == 200
-
-    database_bytes = settings.database_path.read_bytes()
-    assert password.encode() not in database_bytes
+        assert response.status_code == 404
 
 
-def test_lan_is_blocked_until_password_exists_and_xff_is_ignored(tmp_path: Path) -> None:
+def test_lan_is_blocked_until_game_admin_password_exists_and_xff_is_ignored(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     with _lan_client(settings) as client:
         response = client.get(
@@ -120,9 +164,9 @@ def test_lan_is_blocked_until_password_exists_and_xff_is_ignored(tmp_path: Path)
             headers={"X-Forwarded-For": "127.0.0.1"},
         )
         assert response.status_code == 403
-        assert response.json()["errorCode"] == "LAN_PASSWORD_REQUIRED"
+        assert response.json()["errorCode"] == "GAME_ADMIN_PASSWORD_REQUIRED"
 
-    _configure_password(settings)
+    _configure_game_admin_password(settings)
     with _lan_client(settings) as client:
         response = client.get(
             "/api/shell/status",
@@ -135,7 +179,7 @@ def test_lan_is_blocked_until_password_exists_and_xff_is_ignored(tmp_path: Path)
 def test_lan_login_session_csrf_logout_and_rate_limit(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     password = "correct-horse-42"
-    _configure_password(settings, password)
+    _configure_game_admin_password(settings, password)
 
     with _lan_client(settings) as client:
         status = client.get("/api/auth/status").json()
@@ -193,37 +237,35 @@ def test_lan_login_session_csrf_logout_and_rate_limit(tmp_path: Path) -> None:
         assert limited.status_code == 429
 
 
-def test_write_requests_reject_missing_origin_and_csrf(tmp_path: Path) -> None:
+def test_network_settings_reject_missing_origin_and_csrf(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     with _local_client(settings) as client:
         status = client.get("/api/auth/status").json()
-        no_origin = client.post(
-            "/api/auth/lan-password",
+        no_origin = client.put(
+            "/api/settings/network",
             headers={"X-CSRF-Token": status["csrfToken"]},
-            json={"password": "valid-password-123"},
+            json={"port": 8333},
         )
         assert no_origin.status_code == 403
         assert no_origin.json()["errorCode"] == "ORIGIN_REJECTED"
 
-        no_csrf = client.post(
-            "/api/auth/lan-password",
+        no_csrf = client.put(
+            "/api/settings/network",
             headers=_origin("http://127.0.0.1:8223"),
-            json={"password": "valid-password-123"},
+            json={"port": 8333},
         )
         assert no_csrf.status_code == 403
         assert no_csrf.json()["errorCode"] == "CSRF_REJECTED"
 
-        short_secret = "too-short"
-        invalid = client.post(
-            "/api/auth/lan-password",
+        invalid = client.put(
+            "/api/settings/network",
             headers={
                 **_origin("http://127.0.0.1:8223"),
                 "X-CSRF-Token": status["csrfToken"],
             },
-            json={"password": short_secret},
+            json={"port": 0},
         )
         assert invalid.status_code == 422
-        assert short_secret not in invalid.text
 
 
 def test_network_port_can_only_be_changed_locally_with_csrf(tmp_path: Path) -> None:
@@ -242,7 +284,7 @@ def test_network_port_can_only_be_changed_locally_with_csrf(tmp_path: Path) -> N
         assert client.get("/api/auth/status").json()["port"] == 8223
         assert Database(settings.database_path).get_setting("network.port") == "8333"
 
-    _configure_password(settings)
+    _configure_game_admin_password(settings)
     with _lan_client(settings) as client:
         login = client.post(
             "/api/auth/login",
@@ -268,7 +310,7 @@ def test_password_never_appears_in_error_or_logs(
 ) -> None:
     settings = _settings(tmp_path)
     secret = "never-print-this-password"
-    _configure_password(settings, secret)
+    _configure_game_admin_password(settings, secret)
     with _lan_client(settings) as client:
         response = client.post(
             "/api/auth/login",

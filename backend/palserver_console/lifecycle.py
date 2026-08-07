@@ -21,7 +21,9 @@ from .monitoring import MonitoringConfigError, SensitiveValue, read_connection_c
 from .persistence import Database
 from .steam import validate_executable
 
-OperationKind = Literal["start", "save", "stop", "restart", "force_stop"]
+OperationKind = Literal[
+    "start", "save", "stop", "restart", "force_stop", "apply_config_and_restart"
+]
 
 
 class ServerStatus(TypedDict):
@@ -191,7 +193,6 @@ class LifecycleManager:
         database: Database,
         process: ProcessController | None = None,
         rest_factory: Callable[[ServerConfiguration], RestController] | None = None,
-        pending_config_sync: Callable[[], None] | None = None,
         now: Callable[[], float] = time.time,
         audit_callback: Callable[[str, str, dict[str, object]], None] | None = None,
         console_output_sink: Callable[[str], None] | None = None,
@@ -201,11 +202,15 @@ class LifecycleManager:
         self.rest_factory = rest_factory or (
             lambda config: PalServerRestController(config.rest_url, config.admin_password)
         )
-        self.pending_config_sync = pending_config_sync
+        self._config_apply: Callable[[], dict[str, object]] | None = None
         self.audit_callback = audit_callback
         self.now = now
         self._lock = threading.Lock()
         self._cancellations: dict[str, threading.Event] = {}
+
+    def set_config_apply(self, apply: Callable[[], dict[str, object]]) -> None:
+        """Register the only callback allowed to write a pending INI draft."""
+        self._config_apply = apply
 
     def status(self) -> ServerStatus:
         try:
@@ -302,14 +307,23 @@ class LifecycleManager:
                 self._save(operation_id, config)
             elif kind == "force_stop":
                 self._force_stop(operation_id, config)
+            elif kind == "apply_config_and_restart":
+                self._apply_config_and_restart(
+                    operation_id, config, countdown_seconds, message, cancel
+                )
             else:
                 self._stop_or_restart(
                     operation_id, config, kind == "restart", countdown_seconds, message, cancel
                 )
             final = self.database.operation(operation_id)
+            result = "success"
+            if final and final["state"] == "cancelled":
+                result = "cancelled"
+            elif final and final["state"] == "awaiting_force_confirmation":
+                result = "awaiting_confirmation"
             self._audit(
                 operation_id,
-                "cancelled" if final and final["state"] == "cancelled" else "success",
+                result,
             )
         except LifecycleError as error:
             self.database.update_operation(operation_id, "failed", "failed", error.code, str(error))
@@ -372,6 +386,50 @@ class LifecycleManager:
         message: str,
         cancel: threading.Event,
     ) -> None:
+        if not self._graceful_stop(operation_id, config, countdown_seconds, message, cancel):
+            return
+        if restart:
+            self._restart(operation_id, config, error_code="RESTART_FAILED")
+        self.database.update_operation(
+            operation_id, "succeeded", "restarted" if restart else "stopped"
+        )
+
+    def _apply_config_and_restart(
+        self,
+        operation_id: str,
+        config: ServerConfiguration,
+        countdown_seconds: int,
+        message: str,
+        cancel: threading.Event,
+    ) -> None:
+        if self._config_apply is None:
+            raise LifecycleError(
+                "CONFIG_APPLY_UNAVAILABLE", "配置应用器不可用，未执行停服或写入操作。"
+            )
+        if not self._graceful_stop(operation_id, config, countdown_seconds, message, cancel):
+            return
+        self.database.update_operation(operation_id, "running", "applying_config")
+        try:
+            self._config_apply()
+        except Exception as error:
+            code = getattr(error, "code", "CONFIG_APPLY_FAILED")
+            error_code = code if isinstance(code, str) else "CONFIG_APPLY_FAILED"
+            raise LifecycleError(
+                error_code,
+                "配置应用失败，PalServer 已停止且不会重启。请检查草稿或备份后，"
+                f"使用普通 start 恢复服务。原因: {error}",
+            ) from error
+        self._restart(operation_id, config, error_code="HEALTH_CHECK_FAILED")
+        self.database.update_operation(operation_id, "succeeded", "applied_restarted")
+
+    def _graceful_stop(
+        self,
+        operation_id: str,
+        config: ServerConfiguration,
+        countdown_seconds: int,
+        message: str,
+        cancel: threading.Event,
+    ) -> bool:
         pids = self._require_running(config)
         rest = self.rest_factory(config)
         self.database.update_operation(operation_id, "running", "countdown")
@@ -379,11 +437,12 @@ class LifecycleManager:
             rest.announce(message)
             if cancel.wait(countdown_seconds):
                 self.database.update_operation(operation_id, "cancelled", "cancelled")
-                return
+                return False
         self.database.update_operation(operation_id, "running", "saving")
         rest.save()
-        self.database.update_operation(operation_id, "running", "shutting_down")
-        rest.shutdown(0, message)
+        self.database.update_operation(operation_id, "running", "stopping")
+        # PalServer rejects waittime=0 with HTTP 400 even after our own countdown.
+        rest.shutdown(1, message)
         if not self.process.wait_for_exit(pids, timeout=30):
             self.database.update_operation(
                 operation_id,
@@ -392,19 +451,18 @@ class LifecycleManager:
                 "SHUTDOWN_TIMEOUT",
                 "PalServer did not exit within 30 seconds.",
             )
-            return
-        self.database.update_operation(operation_id, "running", "pending_config_sync")
-        if self.pending_config_sync is not None:
-            self.pending_config_sync()
-        if restart:
-            self.database.update_operation(operation_id, "running", "restarting")
-            handle = self.process.start(config.executable, config.arguments)
-            time.sleep(0.2)
-            if handle.poll() is not None:
-                raise LifecycleError("RESTART_FAILED", "PalServer process exited during restart.")
-        self.database.update_operation(
-            operation_id, "succeeded", "restarted" if restart else "stopped"
-        )
+            return False
+        return True
+
+    def _restart(
+        self, operation_id: str, config: ServerConfiguration, *, error_code: str
+    ) -> None:
+        self.database.update_operation(operation_id, "running", "restarting")
+        handle = self.process.start(config.executable, config.arguments)
+        self.database.update_operation(operation_id, "running", "health_check")
+        time.sleep(0.2)
+        if handle.poll() is not None:
+            raise LifecycleError(error_code, "PalServer process exited during health check.")
 
     def _force_stop(self, operation_id: str, config: ServerConfiguration) -> None:
         pids = self._require_running(config)

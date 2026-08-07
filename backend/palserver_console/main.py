@@ -21,7 +21,7 @@ from .audit import DEFAULT_RETENTION_DAYS, AuditService, export_csv, export_json
 from .auth import COOKIE_NAME, AuthStore, Session, is_loopback
 from .backups import BackupError, BackupService
 from .config import AppSettings, default_settings
-from .config_editor import ConfigError, ConfigService
+from .config_editor import ConfigError, ConfigService, parse_draft_request
 from .errors import error_payload, freshness
 from .lifecycle import LifecycleError, LifecycleManager
 from .monitoring import (
@@ -51,14 +51,14 @@ class HealthResponse(BaseModel):
 class AuthStatusResponse(BaseModel):
     local: bool
     authenticated: bool
-    lanPasswordConfigured: bool
+    adminPasswordConfigured: bool
     csrfToken: str | None = None
     lanWarning: str | None = None
     port: int
 
 
 class PasswordRequest(BaseModel):
-    password: str = Field(min_length=10, max_length=256)
+    password: str = Field(min_length=1, max_length=256)
 
 
 class MessageResponse(BaseModel):
@@ -115,10 +115,6 @@ class AuditRetentionRequest(BaseModel):
 
 class BackupRetentionRequest(BaseModel):
     retention: int | None = Field(default=None, ge=0, le=100000)
-
-
-class ConfigDraftRequest(BaseModel):
-    fields: dict[str, str] = Field(default_factory=dict)
 
 
 class ConfigApplyRequest(BaseModel):
@@ -182,17 +178,13 @@ def create_app(
             backup_id, relative_path, observed_at, validation
         ),
     )
-    lifecycle_holder: dict[str, LifecycleManager] = {}
     config_editor = ConfigService(
         database,
         resolved_settings.data_dir,
         executable_for_audit,
-        lambda: bool(
-            lifecycle_holder and lifecycle_holder["manager"].status()["state"] == "running"
-        ),
+        lambda: lifecycle.status()["state"] == "running",
     )
-    lifecycle.pending_config_sync = config_editor.apply_pending_if_safe
-    lifecycle_holder["manager"] = lifecycle
+    lifecycle.set_config_apply(config_editor.apply)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -240,8 +232,12 @@ def create_app(
     ) -> Response:
         peer_ip = _peer_ip(request)
         local = is_loopback(peer_ip)
-        if not local and not auth.password_configured():
-            return _error(403, "LAN_PASSWORD_REQUIRED", "尚未设置局域网密码，只允许本机访问。")
+        if not local and not auth.admin_password_configured():
+            return _error(
+                403,
+                "GAME_ADMIN_PASSWORD_REQUIRED",
+                "游戏 AdminPassword 未配置，只允许本机访问。",
+            )
         if not _valid_host(request, resolved_settings):
             return _error(400, "INVALID_HOST", "Host 不在允许范围内。")
         if request.method in WRITE_METHODS and not _valid_origin(request):
@@ -306,30 +302,11 @@ def create_app(
         return AuthStatusResponse(
             local=local,
             authenticated=local or session is not None,
-            lanPasswordConfigured=auth.password_configured(),
+            adminPasswordConfigured=auth.admin_password_configured(),
             csrfToken=csrf_token,
-            lanWarning=None if local else "仅可信内网使用，禁止公网暴露。",
+            lanWarning=None if local else "仅可信内网使用，请输入游戏设置中的管理员密码。",
             port=resolved_settings.port,
         )
-
-    @app.post("/api/auth/lan-password", response_model=MessageResponse, tags=["auth"])
-    def set_lan_password(
-        request: Request, payload: PasswordRequest
-    ) -> MessageResponse | JSONResponse:
-        peer_ip = _peer_ip(request)
-        if not is_loopback(peer_ip):
-            return _error(403, "LOCAL_ONLY", "LAN 密码只能从本机设置或重置。")
-        session = _require_session(request, auth, peer_ip)
-        if isinstance(session, JSONResponse):
-            return session
-        csrf_error = _require_csrf(request, auth, session)
-        if csrf_error:
-            return csrf_error
-        try:
-            auth.set_password(payload.password)
-        except ValueError as error:
-            return _error(422, "PASSWORD_POLICY", str(error))
-        return MessageResponse(message="局域网管理员密码已保存，重启控制台后将监听局域网。")
 
     @app.post("/api/auth/login", response_model=MessageResponse, tags=["auth"])
     def login(
@@ -340,9 +317,9 @@ def create_app(
             return MessageResponse(message="本机访问无需登录。")
         if auth.too_many_failures(peer_ip):
             return _error(429, "LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试。")
-        if not auth.verify_password(payload.password):
+        if not auth.verify_admin_password(payload.password):
             auth.record_login(peer_ip, False)
-            return _error(401, "INVALID_CREDENTIALS", "局域网管理员密码错误。")
+            return _error(401, "INVALID_CREDENTIALS", "游戏管理员密码错误。")
         auth.record_login(peer_ip, True)
         cookie_value, session = auth.create_session(peer_ip, local=False)
         _set_session_cookies(response, cookie_value, session.csrf_token)
@@ -648,23 +625,23 @@ def create_app(
             return _error(503, error.code, str(error))
 
     @app.put("/api/config/draft", tags=["config"], response_model=None)
-    def config_save_draft(
-        request: Request, payload: ConfigDraftRequest
-    ) -> dict[str, object] | JSONResponse:
+    async def config_save_draft(request: Request) -> dict[str, object] | JSONResponse:
         denied = _require_write(request, auth)
         if denied:
             return denied
         try:
-            result = config_editor.save_draft(payload.fields)
+            fields = parse_draft_request(await request.body())
+            result = config_editor.save_draft(fields)
             audit.record(
                 "config.draft",
                 result="success",
-                detail={"fieldCount": len(payload.fields)},
+                detail={"fieldCount": len(fields)},
                 peer_ip=_peer_ip(request),
             )
             return result
         except ConfigError as error:
-            return _error(409, error.code, str(error))
+            status = 413 if error.code == "CONFIG_REQUEST_TOO_LARGE" else 409
+            return _error(status, error.code, str(error))
 
     @app.delete("/api/config/draft", tags=["config"], response_model=MessageResponse)
     def config_delete_draft(request: Request) -> MessageResponse | JSONResponse:
@@ -717,7 +694,7 @@ def create_app(
             if config_diff.get("conflict"):
                 raise ConfigError("CONFIG_CONFLICT", "检测到外部修改，请先在配置页确认覆盖。")
             operation = lifecycle.begin(
-                "restart",
+                "apply_config_and_restart",
                 request.headers.get("Idempotency-Key", ""),
                 countdown_seconds=payload.countdownSeconds if payload else 30,
                 message=payload.message if payload else LifecycleRequest().message,

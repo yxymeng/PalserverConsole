@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 MIGRATIONS: tuple[str, ...] = (
     """
@@ -103,6 +103,10 @@ MIGRATIONS: tuple[str, ...] = (
         generation INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
     );
+    """,
+    """
+    DROP TABLE IF EXISTS auth_config;
+    DELETE FROM sessions WHERE is_local = 0;
     """,
 )
 

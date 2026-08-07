@@ -6,7 +6,7 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
       json: {
         local: true,
         authenticated: true,
-        lanPasswordConfigured: false,
+        adminPasswordConfigured: false,
         csrfToken: "e2e-csrf-token",
         lanWarning: null,
         port: 8223,
@@ -78,10 +78,14 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
     path: "C:\\PalServer\\Pal\\Saved\\Config\\WindowsServer\\PalWorldSettings.ini",
     sourceHash: "fixture-hash",
     sourceMtimeNs: 1_786_000_000_000_000_000,
-    fields: { ServerName: '"测试世界, 01"', AdminPassword: "已配置", AutoSaveSpan: "600.000000", UnknownFlag: "(A=1,B=2)" },
+    fields: {
+      ServerName: '"测试世界, 01"', AdminPassword: "已配置", AutoSaveSpan: "600.000000",
+      CrossplayPlatforms: "(Steam,Xbox,PS5)", DenyTechnologyList: "(Accessory_AirDash2,DimensionPalStorage,UnknownTechnology)",
+      UnknownFlag: "(A=1,B=2)",
+    },
     unknownFields: { UnknownFlag: "(A=1,B=2)" },
-    schema: ["ServerName", "AdminPassword", "AutoSaveSpan"],
-    fieldOrder: ["ServerName", "AdminPassword", "AutoSaveSpan", "UnknownFlag"],
+    schema: ["ServerName", "AdminPassword", "AutoSaveSpan", "CrossplayPlatforms", "DenyTechnologyList"],
+    fieldOrder: ["ServerName", "AdminPassword", "AutoSaveSpan", "CrossplayPlatforms", "DenyTechnologyList", "UnknownFlag"],
     rawText: "OptionSettings=(ServerName=\"测试世界, 01\",AdminPassword=<已隐藏>,AutoSaveSpan=600.000000,UnknownFlag=(A=1,B=2))",
     adminPasswordConfigured: true,
     worldOptionPresent: true,
@@ -116,11 +120,25 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
   await expect(page.getByRole("heading", { name: "高级字段" })).toBeVisible();
   await page.getByRole("tab", { name: "面板设置" }).click();
   await expect(page.getByRole("heading", { name: "基本信息" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "管理员密码" })).toHaveAttribute("type", "password");
+  await expect(page.getByRole("textbox", { name: "管理员密码" })).toHaveAttribute("placeholder", "已配置；输入新密码以覆盖");
+  await page.getByRole("button", { name: "跨平台与模组" }).click();
+  await expect(page.getByRole("heading", { name: "跨平台与模组" })).toBeVisible();
+  const crossplayField = page.locator('[data-config-key="CrossplayPlatforms"]');
+  await crossplayField.locator("summary").click();
+  await expect(crossplayField.getByText("可选择项")).toBeVisible();
+  await expect(crossplayField.getByText("已选 3 项")).toBeVisible();
+  await expect(crossplayField.getByRole("checkbox", { name: "PlayStation 5" })).toBeChecked();
+  await crossplayField.locator("summary").click();
+  const technologyField = page.locator('[data-config-key="DenyTechnologyList"]');
+  await technologyField.locator("summary").click();
+  await expect(technologyField.getByText("服务器当前配置中的原始值")).toBeVisible();
+  await expect(technologyField.getByRole("checkbox", { name: "UnknownTechnology" })).toBeChecked();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath(`m7-config-${testInfo.project.name}.png`), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath(`m7-config-multiselect-${testInfo.project.name}.png`), fullPage: true });
 
   if (testInfo.project.name === "mobile") await page.locator(".menu-button").click();
-  await page.locator("nav button").nth(5).click();
+  await page.getByRole("button", { name: "官方备份" }).click();
   await page.waitForTimeout(220);
   await expect(page.getByText("官方备份").first()).toBeVisible();
   await expect(page.getByText("2026.08.01-01.02.03")).toBeVisible();
@@ -131,18 +149,11 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
   await page.getByRole("button", { name: "服务器管理" }).click();
   await page.waitForTimeout(220);
   await expect(page.getByRole("heading", { name: "PalServer 安装" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "启动" })).toBeEnabled();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath(`m2-server-${testInfo.project.name}.png`), fullPage: true });
-
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
-  await page.getByRole("button", { name: "实时监控" }).click();
-  await page.waitForTimeout(220);
-  await expect(page.locator(".sidebar")).not.toHaveClass(/open/);
   await expect(page.getByRole("heading", { name: "实时监控" })).toBeVisible();
   await expect(page.getByText("203.0.113.9")).toBeVisible();
+  await expect(page.getByRole("button", { name: "启动" })).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
-  await page.screenshot({ path: testInfo.outputPath(`m3-live-${testInfo.project.name}.png`), fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath(`m2-server-monitoring-${testInfo.project.name}.png`), fullPage: true });
 
   if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   await page.getByRole("button", { name: "运营审计" }).click();
@@ -168,13 +179,13 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
   if (testInfo.project.name === "mobile") {
     await page.getByTitle("打开菜单").click();
   }
-  await page.getByRole("button", { name: "访问安全" }).click();
+  await page.getByRole("button", { name: "总览" }).click();
   await expect(page.locator(".sidebar")).not.toHaveClass(/open/);
   await page.waitForTimeout(220);
-  await expect(page.getByRole("heading", { name: "局域网管理员密码" })).toBeVisible();
-  await expect(page.getByLabel("端口")).toHaveValue("8223");
+  await expect(page.getByRole("heading", { name: "控制台监听端口" })).toBeVisible();
+  await expect(page.getByLabel("控制台监听端口")).toHaveValue("8223");
   await page.screenshot({
-    path: testInfo.outputPath(`m1-settings-${testInfo.project.name}.png`),
+    path: testInfo.outputPath(`m1-overview-port-${testInfo.project.name}.png`),
     fullPage: true,
   });
 });
@@ -185,9 +196,9 @@ test("M1 LAN 登录页无横向溢出", async ({ page }, testInfo) => {
       json: {
         local: false,
         authenticated: false,
-        lanPasswordConfigured: true,
+        adminPasswordConfigured: true,
         csrfToken: null,
-        lanWarning: "仅可信内网使用，禁止公网暴露。",
+        lanWarning: "仅可信内网使用，请输入游戏设置中的管理员密码。",
         port: 8223,
       },
     }),
@@ -195,7 +206,7 @@ test("M1 LAN 登录页无横向溢出", async ({ page }, testInfo) => {
   await page.goto("/");
 
   await expect(page.getByRole("heading", { name: "局域网管理员登录" })).toBeVisible();
-  await expect(page.getByLabel("管理员密码")).toBeVisible();
+  await expect(page.getByLabel("游戏管理员密码")).toBeVisible();
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

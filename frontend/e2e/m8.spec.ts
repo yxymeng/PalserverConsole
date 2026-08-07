@@ -4,7 +4,7 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
   let startCalls = 0;
   await page.on("dialog", async (dialog) => dialog.accept());
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: {
-    local: true, authenticated: true, lanPasswordConfigured: false,
+    local: true, authenticated: true, adminPasswordConfigured: false,
     csrfToken: "m8-csrf", lanWarning: null, port: 8223,
   } }));
   await page.route("**/api/shell/status", (route) => route.fulfill({ json: {
@@ -12,6 +12,19 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     module: "M2", serverState: "stopped", configured: true, pids: [],
     executablePath: "C:\\PalServer\\PalServer.exe",
   } }));
+  const liveSnapshot = {
+    info: { data: { version: "v0.6.1", worldName: "测试世界" }, source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
+    players: { data: [], source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
+    metrics: { data: { server: { serverFps: 60 }, process: { pids: [], cpuPercent: 0, memoryBytes: 0, diskReadBytes: 0, diskWriteBytes: 0 } }, source: "rest+process", observedAt: 1_786_000_000, stale: false, errorCode: null },
+    settings: { data: {}, source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
+  };
+  for (const key of ["info", "players", "metrics", "settings"] as const) {
+    await page.route(`**/api/live/${key}`, (route) => route.fulfill({ json: liveSnapshot[key] }));
+  }
+  await page.route("**/api/events", (route) => route.fulfill({
+    contentType: "text/event-stream",
+    body: `event: snapshot\ndata: ${JSON.stringify(liveSnapshot)}\n\n`,
+  }));
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: {
     executablePath: "C:\\PalServer\\PalServer.exe", launchArguments: "",
   } }));
