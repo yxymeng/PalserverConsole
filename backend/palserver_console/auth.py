@@ -55,8 +55,8 @@ class AuthStore:
         raw_token = secrets.token_urlsafe(32)
         csrf_token = secrets.token_urlsafe(24)
         expires_at = timestamp + self.settings.session_ttl_seconds
+        self.cleanup_expired(now=timestamp)
         with self.database.connect() as connection:
-            connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (timestamp,))
             connection.execute(
                 """
                 INSERT INTO sessions(
@@ -93,6 +93,7 @@ class AuthStore:
         if not hmac.compare_digest(signature, expected_signature):
             return None
         timestamp = int(time.time()) if now is None else now
+        self.cleanup_expired(now=timestamp)
         with self.database.connect() as connection:
             row = connection.execute(
                 """
@@ -120,8 +121,26 @@ class AuthStore:
         with self.database.connect() as connection:
             connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
+    def cleanup_expired(self, now: int | None = None) -> dict[str, int]:
+        """Remove expired sessions and login attempts outside the rate-limit window."""
+
+        timestamp = int(time.time()) if now is None else now
+        cutoff = timestamp - max(0, self.settings.login_window_seconds)
+        with self.database.connect() as connection:
+            sessions_removed = connection.execute(
+                "DELETE FROM sessions WHERE expires_at <= ?", (timestamp,)
+            ).rowcount
+            attempts_removed = connection.execute(
+                "DELETE FROM login_attempts WHERE attempted_at < ?", (cutoff,)
+            ).rowcount
+        return {
+            "sessions": max(0, int(sessions_removed)),
+            "loginAttempts": max(0, int(attempts_removed)),
+        }
+
     def too_many_failures(self, peer_ip: str, now: int | None = None) -> bool:
         timestamp = int(time.time()) if now is None else now
+        self.cleanup_expired(now=timestamp)
         cutoff = timestamp - self.settings.login_window_seconds
         with self.database.connect() as connection:
             count = int(
@@ -137,6 +156,7 @@ class AuthStore:
 
     def record_login(self, peer_ip: str, succeeded: bool, now: int | None = None) -> None:
         timestamp = int(time.time()) if now is None else now
+        self.cleanup_expired(now=timestamp)
         with self.database.connect() as connection:
             connection.execute(
                 "INSERT INTO login_attempts(peer_ip, attempted_at, succeeded) VALUES(?, ?, ?)",

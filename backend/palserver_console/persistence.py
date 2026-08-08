@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 MIGRATIONS: tuple[str, ...] = (
     """
@@ -127,6 +127,27 @@ MIGRATIONS: tuple[str, ...] = (
         updated_at INTEGER NOT NULL
     );
     """,
+    """
+    CREATE TABLE IF NOT EXISTS restore_journal (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        journal_id TEXT NOT NULL UNIQUE,
+        world_id TEXT NOT NULL,
+        world_path TEXT NOT NULL,
+        source_backup_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        safety_copy_path TEXT NOT NULL,
+        staging_path TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        component TEXT,
+        completed_components_json TEXT NOT NULL DEFAULT '[]',
+        checksums_json TEXT NOT NULL DEFAULT '{}',
+        error_type TEXT,
+        error_message TEXT,
+        original_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+    """,
 )
 
 
@@ -138,6 +159,10 @@ class OperationReservationError(RuntimeError):
 
 
 class OperationTransitionError(RuntimeError):
+    pass
+
+
+class RestoreJournalConflictError(RuntimeError):
     pass
 
 
@@ -370,6 +395,114 @@ class Database:
                 ORDER BY created_at DESC LIMIT 1"""
             ).fetchone()
         return dict(row) if row is not None else None
+
+    def restore_journal(self) -> dict[str, object] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT journal_id, world_id, world_path, source_backup_id,
+                source_path, safety_copy_path, staging_path, phase, component,
+                completed_components_json, checksums_json, error_type,
+                error_message, original_error, created_at, updated_at
+                FROM restore_journal WHERE id = 1"""
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def begin_restore_journal(
+        self,
+        journal_id: str,
+        world_id: str,
+        world_path: str,
+        source_backup_id: str,
+        source_path: str,
+        safety_copy_path: str,
+        staging_path: str,
+        phase: str,
+        checksums_json: str = "{}",
+    ) -> None:
+        now = int(time.time())
+        with self.connect() as connection:
+            existing = connection.execute(
+                "SELECT phase FROM restore_journal WHERE id = 1"
+            ).fetchone()
+            if existing is not None and str(existing["phase"]) not in {
+                "completed",
+                "rolled_back",
+            }:
+                raise RestoreJournalConflictError(
+                    "A restore journal requires resume or rollback before another restore."
+                )
+            connection.execute(
+                """
+                INSERT INTO restore_journal(
+                    id, journal_id, world_id, world_path, source_backup_id,
+                    source_path, safety_copy_path, staging_path, phase, component,
+                    completed_components_json, checksums_json, error_type,
+                    error_message, original_error, created_at, updated_at
+                ) VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '[]', ?, NULL, NULL, NULL, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    journal_id=excluded.journal_id,
+                    world_id=excluded.world_id,
+                    world_path=excluded.world_path,
+                    source_backup_id=excluded.source_backup_id,
+                    source_path=excluded.source_path,
+                    safety_copy_path=excluded.safety_copy_path,
+                    staging_path=excluded.staging_path,
+                    phase=excluded.phase,
+                    component=excluded.component,
+                    completed_components_json=excluded.completed_components_json,
+                    checksums_json=excluded.checksums_json,
+                    error_type=excluded.error_type,
+                    error_message=excluded.error_message,
+                    original_error=excluded.original_error,
+                    created_at=excluded.created_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    journal_id,
+                    world_id,
+                    world_path,
+                    source_backup_id,
+                    source_path,
+                    safety_copy_path,
+                    staging_path,
+                    phase,
+                    checksums_json,
+                    now,
+                    now,
+                ),
+            )
+
+    def update_restore_journal(
+        self,
+        *,
+        phase: str,
+        component: str | None,
+        completed_components_json: str,
+        checksums_json: str,
+        error_type: str | None = None,
+        error_message: str | None = None,
+        original_error: str | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE restore_journal
+                SET phase = ?, component = ?, completed_components_json = ?,
+                    checksums_json = ?, error_type = ?, error_message = ?,
+                    original_error = ?, updated_at = ?
+                WHERE id = 1
+                """,
+                (
+                    phase,
+                    component,
+                    completed_components_json,
+                    checksums_json,
+                    error_type,
+                    error_message,
+                    original_error,
+                    int(time.time()),
+                ),
+            )
 
     def create_operation(
         self,

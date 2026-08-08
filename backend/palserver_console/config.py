@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
+import logging.handlers
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +11,63 @@ from .persistence import Database
 from .steam import assert_no_reparse_points, validate_executable
 
 WORLD_ROOT_PARTS = ("Pal", "Saved", "SaveGames", "0")
+LOG_MAX_BYTES = 5 * 1024 * 1024
+LOG_BACKUP_COUNT = 5
+
+_SENSITIVE_LOG_VALUE = re.compile(
+    r"(?i)\b(AdminPassword|RCONPassword|password|token|secret|cookie|authorization)\b"
+    r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^,\s;}\]]+)"
+)
+
+
+def redact_log_text(value: str) -> str:
+    """Redact credential-like key/value pairs before they reach the persistent log."""
+
+    return _SENSITIVE_LOG_VALUE.sub(r"\1\2[REDACTED]", value)[:4096]
+
+
+class _RedactingFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return redact_log_text(super().format(record))
+
+
+class _ConsoleRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    _palserver_console_handler = True
+
+
+def configure_logging(
+    data_dir: Path,
+    *,
+    max_bytes: int = LOG_MAX_BYTES,
+    backup_count: int = LOG_BACKUP_COUNT,
+) -> logging.Logger:
+    """Configure the bounded application log for the current data directory."""
+
+    log_directory = data_dir / "logs"
+    log_directory.mkdir(parents=True, exist_ok=True)
+    log_path = log_directory / "palserver-console.log"
+    logger = logging.getLogger("palserver_console")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    for handler in tuple(logger.handlers):
+        if getattr(handler, "_palserver_console_handler", False):
+            logger.removeHandler(handler)
+            handler.close()
+
+    handler = _ConsoleRotatingFileHandler(
+        log_path,
+        maxBytes=max_bytes,
+        backupCount=backup_count,
+        encoding="utf-8",
+    )
+    handler.setFormatter(
+        _RedactingFormatter(
+            "%(asctime)s %(levelname)s %(name)s %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
+    )
+    logger.addHandler(handler)
+    return logger
 
 
 @dataclass(frozen=True)

@@ -7,7 +7,7 @@ from typing import cast
 import pytest
 from fastapi.testclient import TestClient
 
-from palserver_console.auth import COOKIE_NAME
+from palserver_console.auth import COOKIE_NAME, AuthStore
 from palserver_console.config import AppSettings
 from palserver_console.config_editor import ConfigService
 from palserver_console.main import CSRF_COOKIE_NAME, create_app
@@ -89,6 +89,22 @@ def test_database_migration_is_idempotent_and_creates_m1_tables(tmp_path: Path) 
         "snapshot_versions",
         "backup_index",
     } <= tables
+
+
+def test_expired_sessions_and_login_attempts_are_cleaned(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    database = Database(settings.database_path)
+    database.migrate()
+    auth = AuthStore(database, settings)
+
+    auth.create_session("192.0.2.55", local=False, now=100)
+    auth.record_login("192.0.2.55", False, now=100)
+    cleanup = auth.cleanup_expired(now=100 + settings.session_ttl_seconds + 1)
+
+    assert cleanup == {"sessions": 1, "loginAttempts": 1}
+    with database.connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM sessions").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM login_attempts").fetchone()[0] == 0
 
 
 def test_legacy_lan_credentials_and_sessions_are_removed_by_migration(tmp_path: Path) -> None:

@@ -25,6 +25,7 @@ from .config import (
     ProfileError,
     ServerProfileService,
     WorldCandidate,
+    configure_logging,
     default_settings,
 )
 from .config_editor import ConfigError, ConfigService, parse_draft_request
@@ -150,6 +151,7 @@ def create_app(
     world_service: WorldSnapshotService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or default_settings()
+    logger = configure_logging(resolved_settings.data_dir)
     database = Database(resolved_settings.database_path)
     auth = AuthStore(database, resolved_settings)
     profiles = ServerProfileService(database)
@@ -158,7 +160,11 @@ def create_app(
         raw = database.get_setting("server.executable")
         return Path(raw) if raw else None
 
-    audit = AuditService(database, executable_for_audit)
+    audit = AuditService(
+        database,
+        executable_for_audit,
+        maintenance_callback=auth.cleanup_expired,
+    )
 
     def monitor_config() -> tuple[Path, ServerConnectionConfig]:
         try:
@@ -207,6 +213,7 @@ def create_app(
             backup_id, relative_path, observed_at, validation
         ),
         profiles.profile,
+        database=database,
     )
     config_editor = ConfigService(
         database,
@@ -220,6 +227,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         database.migrate()
+        cleanup = auth.cleanup_expired()
+        logger.info(
+            "console startup data_dir=%s cleaned_sessions=%d cleaned_login_attempts=%d",
+            resolved_settings.data_dir,
+            cleanup["sessions"],
+            cleanup["loginAttempts"],
+        )
         interrupted_operations = database.recover_incomplete_operations()
         for interrupted in interrupted_operations:
             audit.record(
@@ -235,6 +249,20 @@ def create_app(
                     "errorCode": "CONSOLE_RESTARTED",
                 },
             )
+        recovery = backups.recovery_status()
+        if recovery["active"]:
+            journal = recovery.get("journal")
+            detail = journal if isinstance(journal, dict) else {}
+            audit.record(
+                "backup.restore.recovery_required",
+                result="blocked",
+                detail={
+                    "journalId": detail.get("journalId"),
+                    "worldId": detail.get("worldId"),
+                    "sourceBackupId": detail.get("sourceBackupId"),
+                    "phase": detail.get("phase"),
+                },
+            )
         if database.get_setting("audit.retention_days") is None:
             database.set_setting("audit.retention_days", str(DEFAULT_RETENTION_DAYS))
         audit.start()
@@ -246,6 +274,7 @@ def create_app(
             world_data.stop()
             live_monitor.stop()
             audit.stop()
+            logger.info("console shutdown")
 
     app = FastAPI(
         title="PalServerConsole",
@@ -256,6 +285,7 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.database = database
+    app.state.logger = logger
     app.state.auth = auth
     app.state.lifecycle = lifecycle
     app.state.monitor = live_monitor
@@ -302,6 +332,13 @@ def create_app(
     @app.get("/api/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:
         return HealthResponse()
+
+    @app.get("/api/monitoring/status", tags=["system"], response_model=None)
+    def monitoring_status(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_authenticated_request(request, auth)
+        if denied:
+            return denied
+        return {"monitor": live_monitor.status(), "audit": audit.status()}
 
     @app.get("/api/bootstrap", tags=["system"], response_model=None)
     def bootstrap(request: Request) -> dict[str, object] | JSONResponse:
@@ -364,8 +401,10 @@ def create_app(
             return _error(429, "LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试。")
         if not auth.verify_admin_password(payload.password):
             auth.record_login(peer_ip, False)
+            logger.info("auth login rejected peer=%s", peer_ip)
             return _error(401, "INVALID_CREDENTIALS", "游戏管理员密码错误。")
         auth.record_login(peer_ip, True)
+        logger.info("auth login accepted peer=%s", peer_ip)
         cookie_value, session = auth.create_session(peer_ip, local=False)
         _set_session_cookies(response, cookie_value, session.csrf_token)
         return MessageResponse(message="登录成功。")
@@ -889,6 +928,35 @@ def create_app(
             return MessageResponse(message="备份已恢复。")
         except BackupError as error:
             return _error(409, error.code, str(error))
+
+    @app.get("/api/backups/restore/recovery", tags=["backups"], response_model=None)
+    def backup_restore_recovery(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_authenticated_request(request, auth)
+        if denied:
+            return denied
+        return backups.recovery_status()
+
+    @app.post("/api/backups/restore/resume", tags=["backups"], response_model=None)
+    def backup_restore_resume(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_write(request, auth)
+        if denied:
+            return denied
+        try:
+            return backups.resume_restore()
+        except BackupError as error:
+            status = 500 if error.code == "ROLLBACK_FAILED" else 409
+            return _error(status, error.code, str(error))
+
+    @app.post("/api/backups/restore/rollback", tags=["backups"], response_model=None)
+    def backup_restore_rollback(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_write(request, auth)
+        if denied:
+            return denied
+        try:
+            return backups.rollback_restore()
+        except BackupError as error:
+            status = 500 if error.code == "ROLLBACK_FAILED" else 409
+            return _error(status, error.code, str(error))
 
     @app.post("/api/backups/open-directory", tags=["backups"], response_model=None)
     def backup_open_directory(request: Request) -> dict[str, str] | JSONResponse:
