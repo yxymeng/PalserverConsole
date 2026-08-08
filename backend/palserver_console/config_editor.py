@@ -13,7 +13,9 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
+from .config import ProfileError, ServerProfile
 from .persistence import Database
+from .steam import validate_executable
 
 SCHEMA_SOURCE = (
     "Palworld official configuration guide (checked 2026-08-06) + Bluefissure/pal-conf main"
@@ -534,13 +536,21 @@ class ConfigService:
         data_dir: Path,
         executable_getter: Callable[[], Path | None],
         running: Callable[[], bool],
+        profile_provider: Callable[[], ServerProfile] | None = None,
     ) -> None:
         self.database = database
         self.data_dir = data_dir
         self.executable_getter = executable_getter
         self.running = running
+        self.profile_provider = profile_provider
 
     def path(self) -> Path:
+        if self.profile_provider is not None:
+            try:
+                install = self.profile_provider().install_path
+            except ProfileError as error:
+                raise ConfigError(error.code, str(error)) from error
+            return install / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
         executable = self.executable_getter()
         if executable is None:
             raise ConfigError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
@@ -553,6 +563,21 @@ class ConfigService:
             / "PalWorldSettings.ini"
         )
         return path
+
+    def folder_path(self) -> Path:
+        try:
+            return self.path().parent
+        except ConfigError as error:
+            if error.code != "WORLD_PROFILE_REQUIRED":
+                raise
+        executable = self.executable_getter()
+        if executable is None:
+            raise ConfigError("SERVER_NOT_CONFIGURED", "PalServer.exe has not been selected.")
+        try:
+            validated = validate_executable(executable)
+        except (OSError, ValueError) as error:
+            raise ConfigError("INVALID_SERVER_PATH", str(error)) from error
+        return validated.parent / "Pal" / "Saved" / "Config" / "WindowsServer"
 
     def _read(
         self, path: Path | None = None
@@ -725,6 +750,12 @@ class ConfigService:
                 raise ConfigError("CONFIG_DRAFT_INVALID", f"配置草稿字段 {key} 未通过规范化校验。")
 
     def _world_option_present(self) -> bool:
+        if self.profile_provider is not None:
+            try:
+                world = self.profile_provider().world_path
+            except ProfileError as error:
+                raise ConfigError(error.code, str(error)) from error
+            return (world / "WorldOption.sav").is_file()
         executable = self.executable_getter()
         if executable is None:
             return False

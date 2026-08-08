@@ -10,6 +10,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TypedDict, cast
 
+from .config import ProfileError, ServerProfile
+
 BACKUP_NAME = re.compile(r"^\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}$")
 REQUIRED_FILES = ("Level.sav", "LevelMeta.sav")
 
@@ -38,6 +40,7 @@ class BackupService:
         retention_setter: Callable[[int | None], None],
         audit: Callable[[str, str, dict[str, object]], None] | None = None,
         index_upsert: Callable[[str, str, int, str], None] | None = None,
+        profile_provider: Callable[[], ServerProfile] | None = None,
     ) -> None:
         self.executable_provider = executable_provider
         self.running_provider = running_provider
@@ -45,8 +48,14 @@ class BackupService:
         self.retention_setter = retention_setter
         self.audit = audit
         self.index_upsert = index_upsert
+        self.profile_provider = profile_provider
 
     def world(self) -> Path:
+        if self.profile_provider is not None:
+            try:
+                return self.profile_provider().world_path
+            except ProfileError as error:
+                raise BackupError(error.code, str(error)) from error
         executable = self.executable_provider()
         if executable is None:
             raise BackupError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
@@ -61,11 +70,16 @@ class BackupService:
             ) from error
         if not candidates:
             raise BackupError("WORLD_NOT_FOUND", "未发现包含 Level.sav 的当前世界。")
-        return max(candidates, key=lambda p: (p / "Level.sav").stat().st_mtime_ns)
+        if len(candidates) > 1:
+            raise BackupError(
+                "WORLD_SELECTION_REQUIRED", "Multiple worlds were found; select a World ID first."
+            )
+        return candidates[0]
 
     def backup_root(self) -> Path:
-        root = (self.world() / "backup" / "world").resolve(strict=False)
-        raw_root = self.world() / "backup" / "world"
+        world = self.world()
+        raw_root = world / "backup" / "world"
+        root = raw_root.resolve(strict=False)
         if raw_root.is_symlink() or _is_junction(raw_root):
             raise BackupError("BACKUP_PATH_INVALID", "官方备份根目录不能是链接。")
         root.mkdir(parents=True, exist_ok=True)

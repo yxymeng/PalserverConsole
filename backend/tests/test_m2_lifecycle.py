@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
@@ -10,7 +12,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
-from palserver_console.config import AppSettings
+from palserver_console.config import AppSettings, ServerProfileService
 from palserver_console.config_editor import ConfigError, ConfigService
 from palserver_console.lifecycle import (
     LifecycleError,
@@ -22,7 +24,7 @@ from palserver_console.lifecycle import (
 from palserver_console.main import create_app
 from palserver_console.monitoring import SensitiveValue
 from palserver_console.persistence import Database
-from palserver_console.steam import discover_palserver, parse_vdf
+from palserver_console.steam import discover_palserver, parse_vdf, validate_executable
 
 
 class FakeHandle:
@@ -36,11 +38,12 @@ class FakeProcessController:
     def __init__(self, running: bool = True, exits: bool = True) -> None:
         self.running = running
         self.exits = exits
+        self.pids = [701]
         self.started: list[tuple[Path, tuple[str, ...]]] = []
         self.force_stopped: list[int] = []
 
     def matching_pids(self, executable: Path) -> list[int]:
-        return [701] if self.running else []
+        return list(self.pids) if self.running else []
 
     def start(self, executable: Path, arguments: tuple[str, ...]) -> FakeHandle:
         self.started.append((executable, arguments))
@@ -304,7 +307,12 @@ def test_apply_failure_keeps_server_stopped_and_provides_recovery_action(tmp_pat
 
 
 def test_apply_with_restart_api_creates_explicit_operation(tmp_path: Path) -> None:
-    database, _ = _configured_database(tmp_path)
+    database, executable = _configured_database(tmp_path)
+    world = executable.parent / "Pal" / "Saved" / "SaveGames" / "0" / "configured-world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    ServerProfileService(database).bind(executable, "configured-world")
     process = FakeProcessController(exits=True)
     lifecycle = LifecycleManager(
         database, process=process, rest_factory=lambda _: FakeRestController()
@@ -360,6 +368,159 @@ def test_idempotency_returns_same_operation(tmp_path: Path) -> None:
     assert len(process.started) == 1
 
 
+def test_operation_state_transitions_are_audited(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(running=False)
+    events: list[tuple[str, str, dict[str, object]]] = []
+    manager = LifecycleManager(
+        database,
+        process=process,
+        rest_factory=lambda _: FakeRestController(),
+        audit_callback=lambda event_type, result, detail: events.append(
+            (event_type, result, detail)
+        ),
+    )
+
+    created = manager.begin("start", "audited-start")
+    _wait_for_terminal(database, cast(str, created["id"]))
+
+    transitions = [event for event in events if event[0] == "server.operation.transition"]
+    stages = [event[2]["stage"] for event in transitions]
+    assert stages[0] == "starting"
+    assert "process_running" in stages
+    assert all(event[1] == "state_changed" for event in transitions)
+
+
+def test_concurrent_idempotency_across_managers_returns_one_operation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database, _ = _configured_database(tmp_path)
+    managers = [
+        LifecycleManager(
+            database,
+            process=FakeProcessController(running=False),
+            rest_factory=lambda _: FakeRestController(),
+        )
+        for _ in range(2)
+    ]
+    original_create = Database.create_operation
+    barrier = threading.Barrier(2)
+
+    def block_legacy_create(
+        self: Database, operation_id: str, kind: str, idempotency_key: str
+    ) -> dict[str, object]:
+        barrier.wait(timeout=2)
+        return original_create(self, operation_id, kind, idempotency_key)
+
+    monkeypatch.setattr(Database, "create_operation", block_legacy_create)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(manager.begin, "start", "concurrent-request")
+            for manager in managers
+        ]
+        results = [future.result(timeout=3) for future in futures]
+
+    assert results[0]["id"] == results[1]["id"]
+    assert len(database.operation_by_idempotency("concurrent-request") or {}) > 0
+    assert len([row for row in (database.operation(str(results[0]["id"])),) if row]) == 1
+
+
+def test_waiting_force_confirmation_blocks_other_operations(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(exits=False)
+    manager = LifecycleManager(
+        database, process=process, rest_factory=lambda _: FakeRestController()
+    )
+
+    created = manager.begin("stop", "waiting-stop", countdown_seconds=0)
+    operation_id = cast(str, created["id"])
+    result = _wait_for_terminal(database, operation_id)
+    assert result["state"] == "awaiting_force_confirmation"
+
+    with pytest.raises(LifecycleError, match="已有服务器操作正在进行") as error:
+        manager.begin("start", "blocked-by-confirmation")
+    assert error.value.code == "OPERATION_IN_PROGRESS"
+
+
+def test_force_stop_rejects_pid_set_changed_after_confirmation_request(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(exits=False)
+    manager = LifecycleManager(
+        database, process=process, rest_factory=lambda _: FakeRestController()
+    )
+
+    created = manager.begin("stop", "pid-bound-stop", countdown_seconds=0)
+    parent_id = cast(str, created["id"])
+    waiting = _wait_for_terminal(database, parent_id)
+    assert waiting["state"] == "awaiting_force_confirmation"
+    assert waiting["target_pids"] == [701]
+    assert isinstance(waiting["confirmation_expires_at"], int)
+
+    process.pids = [902]
+    forced = manager.confirm_force_stop(parent_id, "pid-bound-force")
+    child_id = cast(str, forced["id"])
+    child = _wait_for_terminal(database, child_id)
+
+    assert child["parent_operation_id"] == parent_id
+    assert child["target_pids"] == [701]
+    assert child["state"] == "failed"
+    assert child["error_code"] == "FORCE_STOP_TARGET_CHANGED"
+    assert process.force_stopped == []
+
+
+def test_expired_force_confirmation_is_invalidated_and_unblocks_operations(
+    tmp_path: Path,
+) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(exits=False)
+    clock = [100.0]
+    manager = LifecycleManager(
+        database,
+        process=process,
+        rest_factory=lambda _: FakeRestController(),
+        now=lambda: clock[0],
+    )
+
+    created = manager.begin("stop", "expiring-stop", countdown_seconds=0)
+    parent_id = cast(str, created["id"])
+    waiting = _wait_for_terminal(database, parent_id)
+    expires_at = cast(int, waiting["confirmation_expires_at"])
+    clock[0] = float(expires_at + 1)
+
+    with pytest.raises(LifecycleError) as error:
+        manager.confirm_force_stop(parent_id, "expired-force")
+    assert error.value.code == "FORCE_CONFIRMATION_EXPIRED"
+    expired = database.operation(parent_id)
+    assert expired is not None
+    assert expired["state"] == "failed"
+    assert expired["stage"] == "force_confirmation_expired"
+
+    process.running = False
+    next_operation = manager.begin("start", "after-expiration")
+    assert next_operation["kind"] == "start"
+
+
+def test_startup_recovery_invalidates_waiting_confirmation(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    operation = database.create_operation("awaiting-before-restart", "stop", "old-stop")
+    database.update_operation(str(operation["id"]), "running", "stopping")
+    database.bind_operation_target(str(operation["id"]), [701], 9_999_999_999)
+    database.update_operation(
+        str(operation["id"]),
+        "awaiting_force_confirmation",
+        "shutdown_timeout",
+        "SHUTDOWN_TIMEOUT",
+        "PalServer did not exit within 30 seconds.",
+    )
+
+    assert database.fail_incomplete_operations() == 1
+    recovered = database.operation("awaiting-before-restart")
+    assert recovered is not None
+    assert recovered["state"] == "failed"
+    assert recovered["stage"] == "interrupted"
+    assert recovered["error_code"] == "CONSOLE_RESTARTED"
+
+
 def test_incomplete_operation_is_recovered_after_console_restart(tmp_path: Path) -> None:
     database, _ = _configured_database(tmp_path)
     operation = database.create_operation("left-running", "restart", "previous-request")
@@ -405,4 +566,59 @@ def test_m2_api_settings_and_force_stop_boundary(tmp_path: Path) -> None:
             headers={**headers, "Idempotency-Key": "bypass"},
             json={"countdownSeconds": 30, "message": "test"},
         )
-        assert denied.status_code == 422
+    assert denied.status_code == 422
+
+
+def test_lifecycle_profile_provider_fails_closed_without_world_binding(tmp_path: Path) -> None:
+    database, executable = _configured_database(tmp_path)
+    profiles = ServerProfileService(database)
+    manager = LifecycleManager(
+        database,
+        process=FakeProcessController(running=False),
+        profile_provider=profiles.profile,
+    )
+
+    with pytest.raises(LifecycleError) as error:
+        manager.load_configuration()
+
+    assert error.value.code == "WORLD_PROFILE_REQUIRED"
+    assert executable.exists()
+
+
+def test_config_writes_fail_closed_when_bound_world_moves(tmp_path: Path) -> None:
+    database, executable = _configured_database(tmp_path)
+    world = executable.parent / "Pal" / "Saved" / "SaveGames" / "0" / "world-a"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    profiles = ServerProfileService(database)
+    profiles.bind(executable, "world-a")
+    world.rename(world.parent / "moved")
+    editor = ConfigService(
+        database,
+        tmp_path / "data",
+        lambda: executable,
+        lambda: False,
+        profiles.profile,
+    )
+
+    with pytest.raises(ConfigError) as error:
+        editor.save_draft({"AutoSaveSpan": "900"})
+
+    assert error.value.code == "WORLD_BINDING_INVALID"
+
+
+def test_validate_executable_rejects_windows_reparse_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executable = tmp_path / "PalServer" / "PalServer.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"exe")
+    original_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == executable.parent or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+    with pytest.raises(ValueError, match="reparse point"):
+        validate_executable(executable)

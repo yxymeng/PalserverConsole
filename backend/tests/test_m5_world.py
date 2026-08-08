@@ -10,12 +10,79 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from palserver_console.config import AppSettings
+from palserver_console.config import AppSettings, ProfileError, ServerProfileService
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import verify_stable_parse
 from palserver_console.world.cache import build_world_cache, query_cache
 from palserver_console.world.service import WorldDataError, WorldSnapshotService
+
+
+def _profile_fixture(tmp_path: Path) -> tuple[Database, Path, Path, Path]:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    executable = tmp_path / "PalServer" / "PalServer.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"exe")
+    root = executable.parent / "Pal" / "Saved" / "SaveGames" / "0"
+    worlds = []
+    for world_id in ("world-a", "world-b"):
+        world = root / world_id
+        (world / "Players").mkdir(parents=True)
+        (world / "Level.sav").write_bytes(world_id.encode())
+        (world / "LevelMeta.sav").write_bytes(b"meta")
+        worlds.append(world)
+    database.set_setting("server.executable", str(executable))
+    return database, executable, worlds[0], worlds[1]
+
+
+def test_server_profile_is_explicit_and_stable_when_world_mtime_changes(tmp_path: Path) -> None:
+    database, executable, selected, other = _profile_fixture(tmp_path)
+    profiles = ServerProfileService(database)
+
+    assert [item.world_id for item in profiles.candidates(executable)] == [
+        "world-a",
+        "world-b",
+    ]
+    bound = profiles.bind(executable, "world-a")
+    assert bound.world_path == selected.resolve()
+
+    os.utime(other / "Level.sav", ns=(9_000_000_000, 9_000_000_000))
+    os.utime(selected / "Level.sav", ns=(1_000_000_000, 1_000_000_000))
+
+    assert profiles.profile().world_id == "world-a"
+    service = WorldSnapshotService(
+        database,
+        lambda: executable,
+        tmp_path / "data",
+        profile_provider=profiles.profile,
+    )
+    assert service._world_directory() == selected.resolve()
+
+    selected.rename(tmp_path / "PalServer" / "Pal" / "Saved" / "SaveGames" / "0" / "moved")
+    with pytest.raises(ProfileError) as error:
+        profiles.profile()
+    assert error.value.code == "WORLD_BINDING_INVALID"
+
+
+def test_world_service_refuses_ambiguous_legacy_world_target(tmp_path: Path) -> None:
+    database, executable, _, _ = _profile_fixture(tmp_path)
+    service = WorldSnapshotService(database, lambda: executable, tmp_path / "data")
+
+    with pytest.raises(WorldDataError) as error:
+        service._world_directory()
+
+    assert error.value.code == "WORLD_SELECTION_REQUIRED"
+
+
+def test_world_id_path_traversal_is_rejected(tmp_path: Path) -> None:
+    database, executable, _, _ = _profile_fixture(tmp_path)
+    profiles = ServerProfileService(database)
+
+    with pytest.raises(ProfileError) as error:
+        profiles.bind(executable, "..\\outside")
+
+    assert error.value.code == "INVALID_WORLD_ID"
 
 
 def _property(value: Any, type_name: str = "StructProperty") -> dict[str, Any]:

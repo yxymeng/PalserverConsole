@@ -53,12 +53,22 @@ type ShellStatus = {
   executablePath: string | null;
 };
 
-type ServerSettings = { executablePath: string | null; launchArguments: string };
+type WorldCandidate = { worldId: string; worldPath: string; modifiedAt: number };
+type ServerSettings = {
+  executablePath: string | null;
+  launchArguments: string;
+  worldId?: string | null;
+  worldPath?: string | null;
+  worldCandidates?: WorldCandidate[];
+  bindingValid?: boolean;
+  bindingErrorCode?: string | null;
+};
 type DiscoveryCandidate = {
   libraryPath: string;
   installPath: string;
   executablePath: string;
   manifestValid: boolean;
+  worldCandidates: WorldCandidate[];
 };
 type Operation = {
   id: string;
@@ -908,10 +918,18 @@ function ServerManagement({ auth, initialStatus }: { auth: AuthStatus; initialSt
       {message && <p className="form-success" role="status">{message}</p>}
       <section className="settings-section embedded-settings">
         <div className="section-heading"><div><h2>PalServer 安装</h2><p>{settings.executablePath || "尚未选择 PalServer.exe"}</p></div>{auth.local && <button className="quiet-button" disabled={busy} onClick={() => void discover()}><FolderSearch size={18} />扫描 Steam</button>}</div>
-        {candidates.length > 0 && <div className="candidate-list">{candidates.map((candidate) => <button key={candidate.executablePath} onClick={() => setSettings({ ...settings, executablePath: candidate.executablePath })}><Server size={18} /><span><strong>{candidate.installPath}</strong><small>{candidate.manifestValid ? "manifest 已验证" : "manifest 未验证"}</small></span></button>)}</div>}
+        {candidates.length > 0 && <div className="candidate-list">{candidates.map((candidate) => <button key={candidate.executablePath} onClick={() => setSettings({ ...settings, executablePath: candidate.executablePath, worldId: null, worldCandidates: candidate.worldCandidates })}><Server size={18} /><span><strong>{candidate.installPath}</strong><small>{candidate.manifestValid ? "manifest 已验证" : "manifest 未验证"}</small></span></button>)}</div>}
         {auth.local ? <form className="settings-form server-form" onSubmit={saveSettings}>
           <label htmlFor="server-executable">PalServer.exe 路径</label>
           <input id="server-executable" value={settings.executablePath || ""} onChange={(event) => setSettings({ ...settings, executablePath: event.target.value })} required />
+          {(settings.worldCandidates?.length || 0) > 0 && <>
+            <label htmlFor="server-world">World ID（必须明确选择）</label>
+            <select id="server-world" value={settings.worldId || ""} onChange={(event) => setSettings({ ...settings, worldId: event.target.value || null })} required>
+              <option value="">请选择世界</option>
+              {settings.worldCandidates?.map((world) => <option key={world.worldId} value={world.worldId}>{world.worldId}</option>)}
+            </select>
+          </>}
+          {settings.bindingErrorCode && <p className="form-error" role="alert">世界绑定不可用：{settings.bindingErrorCode}</p>}
           <label htmlFor="launch-arguments">启动参数</label>
           <input id="launch-arguments" value={settings.launchArguments} onChange={(event) => setSettings({ ...settings, launchArguments: event.target.value })} />
           <button className="primary-button" disabled={busy} type="submit"><Save size={18} />保存设置</button>

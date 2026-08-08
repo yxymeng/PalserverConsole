@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from ..config import ProfileError, ServerProfile
 from ..persistence import Database
 from .cache import player_detail, query_cache, validate_cache_file
 
@@ -32,6 +33,7 @@ class WorldSnapshotService:
         stability_seconds: float = 5.0,
         poll_seconds: float = 1.0,
         worker_timeout_seconds: float = 180.0,
+        profile_provider: Callable[[], ServerProfile] | None = None,
     ) -> None:
         self.database = database
         self.executable_provider = executable_provider
@@ -40,6 +42,7 @@ class WorldSnapshotService:
         self.stability_seconds = stability_seconds
         self.poll_seconds = poll_seconds
         self.worker_timeout_seconds = worker_timeout_seconds
+        self.profile_provider = profile_provider
         self._stop = threading.Event()
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
@@ -204,6 +207,11 @@ class WorldSnapshotService:
             self._wake.clear()
 
     def _world_directory(self) -> Path:
+        if self.profile_provider is not None:
+            try:
+                return self.profile_provider().world_path
+            except ProfileError as error:
+                raise WorldDataError(error.code, str(error)) from error
         executable = self.executable_provider()
         if executable is None:
             raise WorldDataError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
@@ -219,7 +227,11 @@ class WorldSnapshotService:
         ]
         if not candidates:
             raise WorldDataError("WORLD_NOT_FOUND", "未发现包含 Level.sav 的当前世界。")
-        return max(candidates, key=lambda path: (path / "Level.sav").stat().st_mtime_ns)
+        if len(candidates) > 1:
+            raise WorldDataError(
+                "WORLD_SELECTION_REQUIRED", "Multiple worlds were found; select a World ID first."
+            )
+        return candidates[0]
 
     def _fingerprint(self, world: Path) -> tuple[tuple[str, int, int], ...]:
         required = [world / "Level.sav", world / "LevelMeta.sav", world / "Players"]
@@ -357,9 +369,16 @@ class WorldSnapshotService:
         if configured:
             candidate = Path(configured).resolve(strict=False)
             return candidate if candidate.is_file() else None
-        executable = self.executable_provider()
-        if executable is None:
-            return None
+        executable: Path | None
+        if self.profile_provider is not None:
+            try:
+                executable = self.profile_provider().executable_path
+            except ProfileError:
+                return None
+        else:
+            executable = self.executable_provider()
+            if executable is None:
+                return None
         try:
             return next(executable.resolve(strict=True).parent.rglob("libooz.dll"), None)
         except OSError:
