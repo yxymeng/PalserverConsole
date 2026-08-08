@@ -9,6 +9,7 @@ import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
@@ -139,9 +140,80 @@ SCHEMA_FIELDS: tuple[str, ...] = (
     "BuildingNameDisplayCacheTTLSeconds",
 )
 SECRET_FIELDS = frozenset({"AdminPassword"})
+MASKED_SECRET_VALUES = frozenset({"已配置", "未配置"})
+MAX_CONFIG_DRAFT_BYTES = 64 * 1024
+MAX_CONFIG_DRAFT_FIELDS = 128
+MAX_CONFIG_FIELD_KEY_LENGTH = 128
+MAX_CONFIG_FIELD_VALUE_LENGTH = 4096
+_FIELD_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 _OPTION_RE = re.compile(
     r"(?m)^(?P<prefix>\s*OptionSettings\s*=\s*)(?P<value>.*?)(?P<newline>\r?\n|$)"
 )
+
+BOOL_FIELDS = frozenset(
+    {
+        "bIsUseBackupSaveData",
+        "bIsRandomizerPalLevelRandom",
+        "bEnableVoiceChat",
+        "bEnableInvaderEnemy",
+        "EnablePredatorBossPal",
+        "bEnablePlayerToPlayerDamage",
+        "bEnableFriendlyFire",
+        "bActiveUNKO",
+        "bEnableAimAssistPad",
+        "bEnableAimAssistKeyboard",
+        "bAutoResetGuildNoOnlinePlayers",
+        "bIsMultiplay",
+        "bIsPvP",
+        "bHardcore",
+        "bPalLost",
+        "bCharacterRecreateInHardcore",
+        "bCanPickupOtherGuildDeathPenaltyDrop",
+        "bEnableNonLoginPenalty",
+        "bEnableFastTravel",
+        "bEnableFastTravelOnlyBaseCamp",
+        "bIsStartLocationSelectByMap",
+        "bExistPlayerAfterLogout",
+        "bEnableDefenseOtherGuildPlayer",
+        "bInvisibleOtherGuildBaseCampAreaFX",
+        "bBuildAreaLimit",
+        "bShowPlayerList",
+        "bAllowGlobalPalboxExport",
+        "bAllowGlobalPalboxImport",
+        "RCONEnabled",
+        "RESTAPIEnabled",
+        "bUseAuth",
+        "bAllowClientMod",
+        "bIsShowJoinLeftMessage",
+        "bDisplayPvPItemNumOnWorldMap_BaseCamp",
+        "bDisplayPvPItemNumOnWorldMap_Player",
+        "bAdditionalDropItemWhenPlayerKillingInPvPMode",
+        "bAllowEnhanceStat_Health",
+        "bAllowEnhanceStat_Attack",
+        "bAllowEnhanceStat_Stamina",
+        "bAllowEnhanceStat_Weight",
+        "bAllowEnhanceStat_WorkSpeed",
+        "bEnableBuildingPlayerUIdDisplay",
+    }
+)
+TEXT_FIELDS = frozenset(
+    {
+        "ServerName",
+        "ServerDescription",
+        "ServerPassword",
+        "PublicIP",
+        "LogFormatType",
+        "RandomizerType",
+        "RandomizerSeed",
+        "DeathPenalty",
+        "Region",
+        "BanListURL",
+        "DenyTechnologyList",
+        "AdditionalDropItemWhenPlayerKillingInPvPMode",
+    }
+)
+TUPLE_FIELDS = frozenset({"CrossplayPlatforms"})
+SCHEMA_FIELD_SET = frozenset(SCHEMA_FIELDS)
 
 
 class ConfigError(RuntimeError):
@@ -167,29 +239,56 @@ def _version(path: Path) -> FileVersion:
         raise ConfigError("CONFIG_NOT_FOUND", f"无法读取 PalWorldSettings.ini: {error}") from error
 
 
+def _is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    cursor = index - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        backslashes += 1
+        cursor -= 1
+    return bool(backslashes % 2)
+
+
 def _split_values(value: str) -> list[str]:
     text = value.strip()
-    if text.startswith("(") and text.endswith(")"):
+    if text.startswith("(") != text.endswith(")"):
+        raise ConfigError("CONFIG_PARSE_ERROR", "OptionSettings 括号不完整。")
+    if text.startswith("("):
         text = text[1:-1]
+    if not text:
+        return []
     parts: list[str] = []
     start = 0
     quote = False
     depth = 0
     for index, char in enumerate(text):
-        if char == '"' and (index == 0 or text[index - 1] != "\\"):
+        if char == '"' and not _is_escaped(text, index):
             quote = not quote
         elif not quote:
             if char == "(":
                 depth += 1
             elif char == ")":
-                depth = max(0, depth - 1)
+                depth -= 1
+                if depth < 0:
+                    raise ConfigError("CONFIG_PARSE_ERROR", "OptionSettings 括号不匹配。")
             elif char == "," and depth == 0:
-                parts.append(text[start:index].strip())
+                item = text[start:index].strip()
+                if not item:
+                    raise ConfigError("CONFIG_PARSE_ERROR", "OptionSettings 包含空字段。")
+                parts.append(item)
                 start = index + 1
+    if quote or depth:
+        raise ConfigError("CONFIG_PARSE_ERROR", "OptionSettings 引号或括号不匹配。")
     tail = text[start:].strip()
-    if tail:
-        parts.append(tail)
+    if not tail:
+        raise ConfigError("CONFIG_PARSE_ERROR", "OptionSettings 包含空字段。")
+    parts.append(tail)
     return parts
+
+
+def _validate_field_key(key: str, *, source: bool = False) -> None:
+    if len(key) > MAX_CONFIG_FIELD_KEY_LENGTH or not _FIELD_KEY_RE.fullmatch(key):
+        code = "CONFIG_PARSE_ERROR" if source else "CONFIG_INVALID_FIELD_KEY"
+        raise ConfigError(code, "配置字段名只能包含字母、数字和下划线，且必须以字母开头。")
 
 
 def _parse_document(raw: str) -> tuple[dict[str, str], list[str], str | None]:
@@ -200,9 +299,12 @@ def _parse_document(raw: str) -> tuple[dict[str, str], list[str], str | None]:
         order: list[str] = []
         for item in _split_values(option_text):
             if "=" not in item:
-                continue
+                raise ConfigError("CONFIG_PARSE_ERROR", "OptionSettings 字段缺少等号。")
             key, value = item.split("=", 1)
             key = key.strip()
+            _validate_field_key(key, source=True)
+            if key in fields:
+                raise ConfigError("CONFIG_DUPLICATE_KEY", f"OptionSettings 包含重复字段: {key}")
             fields[key] = value.strip()
             order.append(key)
         return fields, order, match.group(0)
@@ -213,9 +315,13 @@ def _parse_document(raw: str) -> tuple[dict[str, str], list[str], str | None]:
             continue
         key, value = line.split("=", 1)
         key = key.strip()
-        if key and key not in fields:
-            fields[key] = value.strip()
-            order.append(key)
+        if not key:
+            continue
+        _validate_field_key(key, source=True)
+        if key in fields:
+            raise ConfigError("CONFIG_DUPLICATE_KEY", f"配置文件包含重复字段: {key}")
+        fields[key] = value.strip()
+        order.append(key)
     return fields, order, None
 
 
@@ -234,6 +340,168 @@ def _replace_option(raw: str, fields: dict[str, str], order: list[str]) -> str:
         return raw[: match.start()] + replacement + raw[match.end() :]
     lines = raw.splitlines(keepends=True)
     return "".join(lines) + "OptionSettings=" + _render_values(fields, order) + "\n"
+
+
+def _ordered_keys(fields: dict[str, str], order: list[str]) -> list[str]:
+    return [*order, *(key for key in fields if key not in order)]
+
+
+def _render_verified(raw: str, fields: dict[str, str], order: list[str]) -> str:
+    rendered = _replace_option(raw, fields, order)
+    parsed_fields, parsed_order, _ = _parse_document(rendered)
+    if parsed_fields != fields or parsed_order != _ordered_keys(fields, order):
+        raise ConfigError("CONFIG_SERIALIZATION_FAILED", "配置序列化后的内容与草稿不一致。")
+    return rendered
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ConfigError("CONFIG_DUPLICATE_KEY", f"请求包含重复字段: {key}")
+        result[key] = value
+    return result
+
+
+def parse_draft_request(body: bytes) -> dict[str, str]:
+    if len(body) > MAX_CONFIG_DRAFT_BYTES:
+        raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置草稿请求超过大小限制。")
+    try:
+        payload = json.loads(body.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ConfigError(
+            "CONFIG_INVALID_REQUEST", "配置草稿必须是有效的 UTF-8 JSON 对象。"
+        ) from error
+    if not isinstance(payload, dict) or set(payload) != {"fields"}:
+        raise ConfigError("CONFIG_INVALID_REQUEST", "配置草稿只能包含 fields 对象。")
+    fields = payload["fields"]
+    if not isinstance(fields, dict):
+        raise ConfigError("CONFIG_INVALID_REQUEST", "fields 必须是对象。")
+    if len(fields) > MAX_CONFIG_DRAFT_FIELDS:
+        raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置字段数量超过限制。")
+    if not all(isinstance(key, str) and isinstance(value, str) for key, value in fields.items()):
+        raise ConfigError("CONFIG_INVALID_REQUEST", "配置字段和值必须是字符串。")
+    return cast(dict[str, str], fields)
+
+
+def _invalid_value(key: str) -> ConfigError:
+    return ConfigError("CONFIG_INVALID_FIELD_VALUE", f"配置字段 {key} 的值格式不合法。")
+
+
+def _normalise_bool(key: str, value: str) -> str:
+    normalized = value.strip().casefold()
+    if normalized == "true":
+        return "True"
+    if normalized == "false":
+        return "False"
+    raise _invalid_value(key)
+
+
+def _normalise_number(key: str, value: str, *, integer: bool) -> str:
+    text = value.strip()
+    if not text or not re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", text):
+        raise _invalid_value(key)
+    if integer:
+        if "." in text:
+            raise _invalid_value(key)
+        return str(int(text))
+    try:
+        normalized = format(Decimal(text).normalize(), "f")
+    except InvalidOperation as error:
+        raise _invalid_value(key) from error
+    return "0" if normalized in {"-0", ""} else normalized
+
+
+def _normalise_text(key: str, value: str) -> str:
+    if any(char in value for char in "\r\n\x00"):
+        raise _invalid_value(key)
+    candidate = value.strip()
+    if candidate.startswith('"') or candidate.endswith('"'):
+        try:
+            text = json.loads(candidate)
+        except json.JSONDecodeError as error:
+            raise _invalid_value(key) from error
+        if not isinstance(text, str):
+            raise _invalid_value(key)
+    else:
+        text = value
+    if any(ord(char) < 0x20 for char in text):
+        raise _invalid_value(key)
+    return json.dumps(text, ensure_ascii=False)
+
+
+def _normalise_tuple(key: str, value: str) -> str:
+    if any(char in value for char in "\r\n\x00"):
+        raise _invalid_value(key)
+    candidate = value.strip()
+    if candidate.startswith('"') or candidate.endswith('"'):
+        try:
+            decoded = json.loads(candidate)
+        except json.JSONDecodeError as error:
+            raise _invalid_value(key) from error
+        if not isinstance(decoded, str):
+            raise _invalid_value(key)
+        candidate = decoded.strip()
+    if candidate.startswith("(") != candidate.endswith(")"):
+        raise _invalid_value(key)
+    source = candidate if candidate.startswith("(") else f"({candidate})"
+    try:
+        items = _split_values(source)
+    except ConfigError as error:
+        raise _invalid_value(key) from error
+    normalized_items: list[str] = []
+    for item in items:
+        token = item.strip()
+        if token.startswith('"') or token.endswith('"'):
+            try:
+                decoded = json.loads(token)
+            except json.JSONDecodeError as error:
+                raise _invalid_value(key) from error
+            if not isinstance(decoded, str):
+                raise _invalid_value(key)
+            token = decoded
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", token):
+            raise _invalid_value(key)
+        normalized_items.append(token)
+    return "(" + ",".join(normalized_items) + ")"
+
+
+def _normalise_unknown_value(key: str, value: str, source_value: str) -> str:
+    source = source_value.strip()
+    if source.startswith('"') or source.endswith('"'):
+        return _normalise_text(key, value)
+    if source.casefold() in {"true", "false"}:
+        return _normalise_bool(key, value)
+    if re.fullmatch(r"[+-]?\d+", source):
+        return _normalise_number(key, value, integer=True)
+    if re.fullmatch(r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)", source):
+        return _normalise_number(key, value, integer=False)
+    if source.startswith("("):
+        candidate = value.strip()
+        if any(char in candidate for char in "\r\n\x00"):
+            raise _invalid_value(key)
+        if not candidate.startswith("(") or not candidate.endswith(")"):
+            raise _invalid_value(key)
+        _split_values(candidate)
+        return candidate
+    candidate = value.strip()
+    if not candidate or any(char in candidate for char in ',()="\r\n\x00'):
+        raise _invalid_value(key)
+    return candidate
+
+
+def _normalise_schema_value(key: str, value: str) -> str:
+    if key in BOOL_FIELDS:
+        return _normalise_bool(key, value)
+    if key in TUPLE_FIELDS:
+        return _normalise_tuple(key, value)
+    if key in TEXT_FIELDS:
+        return _normalise_text(key, value)
+    return _normalise_number(key, value, integer=False)
+
+
+def _normalise_admin_password(value: str) -> str:
+    return _normalise_text("AdminPassword", value)
 
 
 def _masked_fields(fields: dict[str, str]) -> dict[str, str]:
@@ -290,7 +558,12 @@ class ConfigService:
         self, path: Path | None = None
     ) -> tuple[Path, str, FileVersion, dict[str, str], list[str]]:
         target = path or self.path()
-        raw = target.read_text(encoding="utf-8-sig")
+        try:
+            raw = target.read_text(encoding="utf-8-sig")
+        except OSError as error:
+            raise ConfigError(
+                "CONFIG_NOT_FOUND", f"无法读取 PalWorldSettings.ini: {error}"
+            ) from error
         version = _version(target)
         fields, order, _ = _parse_document(raw)
         return target, raw, version, fields, order
@@ -321,16 +594,13 @@ class ConfigService:
         return current
 
     def save_draft(self, fields: dict[str, str]) -> dict[str, object]:
-        target, raw, source, original, order = self._read()
-        if any(key in SECRET_FIELDS for key in fields):
-            raise ConfigError(
-                "SECRET_FIELD_FORBIDDEN", "AdminPassword 只能显示配置状态，不能查看或修改。"
-            )
+        _, raw, source, original, order = self._read()
         merged = dict(original)
-        merged.update({str(key): str(value) for key, value in fields.items()})
+        updates = self._validate_updates(fields, original)
+        merged.update(updates)
         pending = self.data_dir / "pending" / "PalWorldSettings.ini"
         pending.parent.mkdir(parents=True, exist_ok=True)
-        pending.write_text(_replace_option(raw, merged, order), encoding="utf-8", newline="")
+        pending.write_text(_render_verified(raw, merged, order), encoding="utf-8", newline="")
         self.database.save_config_draft(str(pending), source.sha256, source.mtime_ns, "draft", None)
         return self.draft()
 
@@ -362,7 +632,7 @@ class ConfigService:
             raise ConfigError(
                 "SERVER_RUNNING", "PalServer 运行中不能写入真实 INI，请先停止服务器。"
             )
-        target, raw, source, _, _ = self._read()
+        target, _, _, original, order = self._read()
         row = self.database.get_config_draft()
         if row is None:
             raise ConfigError("CONFIG_DRAFT_NOT_FOUND", "没有待应用配置草稿。")
@@ -375,7 +645,11 @@ class ConfigService:
                 "CONFIG_CONFLICT", "检测到 PalWorldSettings.ini 已被外部修改，请先查看差异。"
             )
         draft_path = Path(str(row["draft_path"]))
-        draft_raw = draft_path.read_text(encoding="utf-8-sig")
+        try:
+            draft_raw = draft_path.read_text(encoding="utf-8-sig")
+        except OSError as error:
+            raise ConfigError("CONFIG_DRAFT_NOT_FOUND", f"无法读取配置草稿: {error}") from error
+        self._validate_pending_document(draft_raw, original, order)
         backup = target.with_name(f"{target.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
         shutil.copy2(target, backup)
         temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
@@ -392,13 +666,63 @@ class ConfigService:
         self.database.set_setting("config.last_backup", str(backup))
         return {"message": "PalWorldSettings.ini 已原子替换。", "backupPath": str(backup)}
 
-    def apply_pending_if_safe(self) -> None:
-        if self.database.get_config_draft() is None or self.running():
-            return
-        try:
-            self.apply()
-        except ConfigError:
-            return
+    @staticmethod
+    def _validate_updates(fields: dict[str, str], original: dict[str, str]) -> dict[str, str]:
+        if len(fields) > MAX_CONFIG_DRAFT_FIELDS:
+            raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置字段数量超过限制。")
+        updates: dict[str, str] = {}
+        for key, value in fields.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                raise ConfigError("CONFIG_INVALID_REQUEST", "配置字段和值必须是字符串。")
+            _validate_field_key(key)
+            if len(value) > MAX_CONFIG_FIELD_VALUE_LENGTH:
+                raise ConfigError("CONFIG_REQUEST_TOO_LARGE", f"配置字段 {key} 的值超过长度限制。")
+            if key in SECRET_FIELDS:
+                if value in MASKED_SECRET_VALUES:
+                    continue
+                updates[key] = _normalise_admin_password(value)
+                continue
+            if key in SCHEMA_FIELD_SET:
+                updates[key] = _normalise_schema_value(key, value)
+                continue
+            if key not in original:
+                raise ConfigError("CONFIG_UNKNOWN_FIELD", f"未知配置字段不能新增: {key}")
+            updates[key] = _normalise_unknown_value(key, value, original[key])
+        return updates
+
+    @staticmethod
+    def _validate_pending_document(
+        draft_raw: str, original: dict[str, str], order: list[str]
+    ) -> None:
+        fields, draft_order, _ = _parse_document(draft_raw)
+        added_keys = set(fields) - set(original)
+        if (
+            not set(original).issubset(fields)
+            or not added_keys.issubset(SCHEMA_FIELD_SET)
+            or draft_order != _ordered_keys(fields, order)
+        ):
+            raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿包含新增、删除或重排字段。")
+        for key, value in fields.items():
+            if key in SECRET_FIELDS:
+                if value == original.get(key):
+                    continue
+                normalized = _normalise_admin_password(value)
+                if value != normalized:
+                    raise ConfigError(
+                        "CONFIG_DRAFT_INVALID", "配置草稿字段 AdminPassword 未通过规范化校验。"
+                    )
+                continue
+            source_value = original.get(key)
+            if source_value is not None and value == source_value:
+                continue
+            if key in SCHEMA_FIELD_SET:
+                normalized = _normalise_schema_value(key, value)
+            elif source_value is not None:
+                normalized = _normalise_unknown_value(key, value, source_value)
+            else:
+                raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿包含新增、删除或重排字段。")
+            if value != normalized:
+                raise ConfigError("CONFIG_DRAFT_INVALID", f"配置草稿字段 {key} 未通过规范化校验。")
 
     def _world_option_present(self) -> bool:
         executable = self.executable_getter()

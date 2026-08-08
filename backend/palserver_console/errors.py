@@ -16,7 +16,7 @@ class ErrorDefinition:
 ERRORS: dict[str, ErrorDefinition] = {
     "INVALID_INPUT": ErrorDefinition(422, False),
     "INVALID_AUTH_INPUT": ErrorDefinition(422, False),
-    "LAN_PASSWORD_REQUIRED": ErrorDefinition(403, False),
+    "GAME_ADMIN_PASSWORD_REQUIRED": ErrorDefinition(403, False),
     "INVALID_HOST": ErrorDefinition(400, False),
     "ORIGIN_REJECTED": ErrorDefinition(403, False),
     "CSRF_REJECTED": ErrorDefinition(403, False),

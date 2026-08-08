@@ -439,7 +439,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .candidate-list strong { overflow: hidden; text-overflow: ellipsis; }
 .candidate-list small { color: var(--muted); }
 
-.live-page { gap: 18px; }
+.live-page, .live-monitoring-panel { display: grid; gap: 18px; }
 .live-toolbar {
   display: flex;
   align-items: center;
@@ -791,7 +791,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .config-range-control { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: center; gap: 15px; }
 .config-number-input, .config-text-input, .config-select-control, .config-multi-control { width: 100%; min-height: 38px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-subtle); color: var(--foreground); }
 .config-number-input, .config-text-input { padding: 0 10px; outline: 0; font: inherit; font-size: 14px; }
-.config-number-input:focus, .config-text-input:focus, .config-select-control:focus-within, .config-multi-control[open] summary { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
+.config-number-input:focus, .config-text-input:focus, .config-select-control:focus-within, .config-multi-control[open] { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 13%, transparent); }
 .config-range-wrap { min-width: 0; }
 .config-range-input { display: block; width: 100%; height: 5px; margin: 0; appearance: none; border-radius: 999px; outline: 0; background: linear-gradient(to right, var(--primary) var(--config-progress), var(--surface-muted) var(--config-progress)); cursor: pointer; }
 .config-range-input::-webkit-slider-thumb { width: 16px; height: 16px; appearance: none; border: 0; border-radius: 50%; background: var(--primary); box-shadow: 0 1px 3px color-mix(in srgb, var(--foreground) 24%, transparent); }
@@ -804,14 +804,26 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .config-select-control select { width: 100%; min-height: 36px; padding: 0 34px 0 10px; appearance: none; border: 0; outline: 0; background: transparent; color: var(--foreground); font: inherit; font-size: 13px; cursor: pointer; }
 .config-select-control svg { position: absolute; right: 10px; pointer-events: none; color: var(--muted); }
 .config-multi-control { position: relative; padding: 0; }
-.config-multi-control summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 36px; padding: 0 10px; list-style: none; cursor: pointer; }
+.config-multi-control summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 42px; padding: 0 10px; list-style: none; cursor: pointer; }
 .config-multi-control summary::-webkit-details-marker { display: none; }
-.config-multi-control summary span { overflow: hidden; color: var(--foreground); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.config-multi-control summary svg { flex: 0 0 auto; color: var(--muted); }
-.config-multi-menu { position: absolute; z-index: 10; top: calc(100% + 6px); right: 0; left: 0; max-height: 240px; overflow: auto; padding: 6px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-card); }
-.config-multi-option { display: flex; align-items: center; gap: 9px; min-height: 34px; padding: 0 7px; border-radius: 5px; color: var(--foreground); font-size: 12px; cursor: pointer; }
+.config-multi-control summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.config-multi-summary { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+.config-multi-summary-count { color: var(--primary); font-size: 11px; font-weight: 700; white-space: nowrap; }
+.config-multi-summary-value { overflow: hidden; color: var(--foreground); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.config-multi-control summary svg { flex: 0 0 auto; color: var(--muted); transition: transform .16s ease, color .16s ease; }
+.config-multi-control[open] summary svg { color: var(--primary); transform: rotate(180deg); }
+.config-multi-menu { position: absolute; z-index: 30; top: calc(100% + 8px); right: 0; left: 0; max-height: min(328px, calc(100vh - 132px)); overflow: auto; padding: 8px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-card); }
+.config-multi-menu-header { display: flex; align-items: center; justify-content: space-between; padding: 3px 6px 8px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.config-multi-menu-header strong { color: var(--primary); font-size: 11px; }
+.config-multi-options { display: grid; gap: 2px; padding-top: 5px; }
+.config-multi-option { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; gap: 9px; min-height: 44px; padding: 5px 7px; border-radius: 5px; color: var(--foreground); cursor: pointer; }
 .config-multi-option:hover { background: var(--surface-hover); }
-.config-multi-option input { accent-color: var(--primary); }
+.config-multi-option.is-selected { background: color-mix(in srgb, var(--primary) 10%, transparent); }
+.config-multi-option input { width: 15px; height: 15px; margin: 0; accent-color: var(--primary); cursor: pointer; }
+.config-multi-option-copy { display: grid; gap: 2px; min-width: 0; }
+.config-multi-option-copy strong, .config-multi-option-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.config-multi-option-copy strong { color: var(--foreground); font-size: 12px; line-height: 1.25; }
+.config-multi-option-copy small { color: var(--muted); font: 10px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace; }
 
 .config-switch { position: relative; width: 42px; height: 24px; padding: 3px; border: 0; border-radius: 999px; background: var(--border-strong); cursor: pointer; transition: background .16s ease; }
 .config-switch.is-on { background: var(--primary); }
@@ -823,7 +835,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .config-empty-results { display: grid; justify-items: center; gap: 10px; padding: 58px 20px; color: var(--muted); text-align: center; }
 .config-empty-results p { margin: 0; }
 
-@media (max-width: 820px) {
+  @media (max-width: 820px) {
   .config-editor-tabs { padding-inline: 16px; }
   .config-editor-toolbar { align-items: stretch; flex-direction: column; gap: 10px; padding: 12px; }
   .config-search { width: 100%; }
@@ -836,7 +848,8 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
   .config-field-copy { grid-column: 1; }
   .config-field-control { grid-column: 1 / -1; }
   .config-reset-button { grid-column: 2; grid-row: 1; }
-  .config-kind-boolean { grid-column: 1 / -1; justify-content: flex-start; }
+    .config-kind-boolean { grid-column: 1 / -1; justify-content: flex-start; }
+    .config-multi-menu { position: static; max-height: 300px; margin: 0 6px 7px; }
   .config-range-control { grid-template-columns: 82px minmax(0, 1fr); gap: 12px; }
   .config-section-header { padding: 19px 14px 16px; }
   .config-section-total { display: none; }

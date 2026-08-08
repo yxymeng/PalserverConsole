@@ -86,6 +86,32 @@ def test_open_when_ready_does_not_open_another_service(
     assert opened == []
 
 
+def test_is_running_instance_accepts_palserver_console(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: nullcontext(
+            BytesIO(b'{"service":"palserver-console","status":"ok"}')
+        ),
+    )
+
+    assert console_main._is_running_instance("http://127.0.0.1:18223") is True
+
+
+def test_is_running_instance_rejects_another_service(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: nullcontext(BytesIO(b'{"service":"another-service"}')),
+    )
+
+    assert console_main._is_running_instance("http://127.0.0.1:18223") is False
+
+
 def test_require_available_port_rejects_an_occupied_port() -> None:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
         occupied.bind(("127.0.0.1", 0))

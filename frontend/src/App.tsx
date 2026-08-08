@@ -16,7 +16,6 @@ import {
   Menu,
   MonitorCog,
   Moon,
-  Radio,
   RefreshCw,
   RotateCcw,
   RotateCw,
@@ -39,7 +38,7 @@ import { CSSProperties, FormEvent, useCallback, useEffect, useState } from "reac
 type AuthStatus = {
   local: boolean;
   authenticated: boolean;
-  lanPasswordConfigured: boolean;
+  adminPasswordConfigured: boolean;
   csrfToken: string | null;
   lanWarning: string | null;
   port: number;
@@ -137,14 +136,12 @@ const text = {
   product: "PalServerConsole",
   overview: "总览",
   server: "服务器管理",
-  live: "实时监控",
-  security: "访问安全",
   config: "服务器配置",
   audit: "运营审计",
   world: "世界数据",
   loading: "正在连接本机控制台...",
   loginTitle: "局域网管理员登录",
-  password: "管理员密码",
+  password: "游戏管理员密码",
   login: "登录",
   logout: "退出登录",
   retry: "重新连接",
@@ -327,7 +324,7 @@ function LoginScreen({ warning, onSuccess, theme, onThemeToggle }: { warning: st
           <input
             id="login-password"
             autoComplete="current-password"
-            minLength={10}
+            minLength={1}
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
@@ -355,7 +352,7 @@ function ConsoleShell({
   theme: Theme;
   onThemeToggle: () => void;
 }) {
-  const [active, setActive] = useState<"overview" | "server" | "live" | "audit" | "world" | "backups" | "config" | "security">("overview");
+  const [active, setActive] = useState<"overview" | "server" | "audit" | "world" | "backups" | "config">("overview");
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className="app-shell">
@@ -374,9 +371,6 @@ function ConsoleShell({
           <button className={active === "server" ? "active" : ""} onClick={() => { setActive("server"); setMenuOpen(false); }}>
             <Server size={19} />{text.server}
           </button>
-          <button className={active === "live" ? "active" : ""} onClick={() => { setActive("live"); setMenuOpen(false); }}>
-            <Radio size={19} />{text.live}
-          </button>
           <button className={active === "audit" ? "active" : ""} onClick={() => { setActive("audit"); setMenuOpen(false); }}>
             <FileClock size={19} />{text.audit}
           </button>
@@ -388,9 +382,6 @@ function ConsoleShell({
           </button>
           <button className={active === "config" ? "active" : ""} onClick={() => { setActive("config"); setMenuOpen(false); }}>
             <FileCog size={19} />{text.config}
-          </button>
-          <button className={active === "security" ? "active" : ""} onClick={() => { setActive("security"); setMenuOpen(false); }}>
-            <Settings size={19} />{text.security}
           </button>
         </nav>
         <div className="sidebar-foot">
@@ -405,7 +396,7 @@ function ConsoleShell({
             <button className="icon-button menu-button" title="打开菜单" onClick={() => setMenuOpen(true)}><Menu size={21} /></button>
             <div>
               <p className="eyebrow">{text.product}</p>
-              <h1>{active === "overview" ? text.overview : active === "server" ? text.server : active === "live" ? text.live : active === "audit" ? text.audit : active === "world" ? text.world : active === "backups" ? "官方备份" : active === "config" ? text.config : text.security}</h1>
+              <h1>{active === "overview" ? text.overview : active === "server" ? text.server : active === "audit" ? text.audit : active === "world" ? text.world : active === "backups" ? "官方备份" : text.config}</h1>
             </div>
             <div className="topbar-actions">
               <ThemeToggle theme={theme} onToggle={onThemeToggle} />
@@ -413,20 +404,18 @@ function ConsoleShell({
             </div>
           </div>
         </header>
-        {active === "overview" && <Overview shell={shell} auth={auth} />}
+        {active === "overview" && <Overview shell={shell} auth={auth} onAuthChanged={onAuthChanged} />}
         {active === "server" && <ServerManagement auth={auth} initialStatus={shell} />}
-        {active === "live" && <LiveMonitoring auth={auth} />}
         {active === "audit" && <AuditPage auth={auth} />}
         {active === "world" && <WorldDataPage auth={auth} />}
         {active === "backups" && <BackupsPage auth={auth} />}
         {active === "config" && <ConfigPage auth={auth} />}
-        {active === "security" && <SecuritySettings auth={auth} onSaved={onAuthChanged} />}
       </main>
     </div>
   );
 }
 
-function LiveMonitoring({ auth }: { auth: AuthStatus }) {
+function LiveMonitoring({ auth, embedded = false }: { auth: AuthStatus; embedded?: boolean }) {
   const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [unbanId, setUnbanId] = useState("");
@@ -476,7 +465,8 @@ function LiveMonitoring({ auth }: { auth: AuthStatus }) {
 
   const players = playersFrom(snapshot?.players.data);
   const process = snapshot?.metrics.data.process;
-  return <div className="page-stack live-page">
+  return <div className={embedded ? "live-monitoring-panel" : "page-stack live-page"}>
+    {embedded && <section className="section-heading live-monitoring-heading"><div><h2>实时监控</h2><p>在线玩家、服务器状态和进程指标</p></div></section>}
     {!auth.local && <div className="warning-strip"><AlertTriangle size={18} />仅可信内网使用，禁止公网暴露。</div>}
     <section className="live-toolbar">
       <div><span className={snapshot?.info.stale ? "status-dot stale-dot" : "status-dot"} /><strong>{snapshot?.info.stale ? "实时数据已过期" : "实时数据正常"}</strong><small>{liveStatus(snapshot?.info)}</small></div>
@@ -484,14 +474,15 @@ function LiveMonitoring({ auth }: { auth: AuthStatus }) {
     </section>
     <section className="metric-grid live-metrics" aria-label="实时服务器指标">
       <article><span>在线玩家</span><strong>{players.length}</strong><small>{sourceLabel(snapshot?.players)}</small></article>
-      <article><span>Server FPS</span><strong>{displayValue(snapshot?.metrics.data.server, ["serverFps", "ServerFPS", "fps"])}</strong><small>{sourceLabel(snapshot?.metrics)}</small></article>
+      <article><span>Server FPS</span><strong>{displayValue(snapshot?.metrics.data.server, ["serverfps", "serverFps", "ServerFPS", "fps"])}</strong><small>{sourceLabel(snapshot?.metrics)}</small></article>
       <article><span>进程 CPU</span><strong>{process ? `${process.cpuPercent}%` : "不可用"}</strong><small>{process ? `内存 ${formatBytes(process.memoryBytes)}` : sourceLabel(snapshot?.metrics)}</small></article>
     </section>
     <section className="live-section">
       <div className="section-heading"><div><h2>服务器状态</h2><p>{sourceLabel(snapshot?.info)} · {formatObservedAt(snapshot?.info.observedAt)}</p></div><span className={snapshot?.info.stale ? "badge warning" : "badge success"}>{snapshot?.info.stale ? "已过期" : "最新"}</span></div>
       <dl className="live-detail-grid">
+        <div><dt>服务器</dt><dd>{displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"] )}</dd></div>
         <div><dt>版本</dt><dd>{displayValue(snapshot?.info.data, ["version", "Version"])}</dd></div>
-        <div><dt>世界</dt><dd>{displayValue(snapshot?.info.data, ["worldName", "WorldName", "worldId"] )}</dd></div>
+        <div><dt>世界</dt><dd>{displayValue(snapshot?.info.data, ["worldguid", "worldName", "WorldName", "worldId"] )}</dd></div>
         <div><dt>磁盘读取</dt><dd>{process ? formatBytes(process.diskReadBytes) : "不可用"}</dd></div>
         <div><dt>磁盘写入</dt><dd>{process ? formatBytes(process.diskWriteBytes) : "不可用"}</dd></div>
       </dl>
@@ -719,13 +710,45 @@ function auditDetail(item: AuditItem) { const detail = item.detail; if (typeof d
 
 function playerText(player: Record<string, unknown>, keys: string[], fallback: string) { return displayValue(player, keys, fallback); }
 function playerId(player: Record<string, unknown>) { return displayValue(player, ["userId", "userid", "playerId", "id"], ""); }
-function displayValue(value: Record<string, unknown> | undefined, keys: string[], fallback = "不可用") { for (const key of keys) { const item = value?.[key]; if (item !== undefined && item !== null && String(item)) return String(item); } return fallback; }
+function displayValue(value: Record<string, unknown> | undefined, keys: string[], fallback = "不可用") {
+  if (!value) return fallback;
+  const entries = Object.entries(value);
+  for (const key of keys) {
+    const direct = value[key];
+    const item = direct ?? entries.find(([actual]) => actual.toLowerCase() === key.toLowerCase())?.[1];
+    if (item !== undefined && item !== null && String(item)) return String(item);
+  }
+  return fallback;
+}
 function formatBytes(value: number) { if (!Number.isFinite(value)) return "不可用"; const units = ["B", "KB", "MB", "GB", "TB"]; let size = value; let unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; } return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`; }
 function formatObservedAt(value?: number) { return value ? new Date(value * 1000).toLocaleTimeString("zh-CN") : "尚未采集"; }
 function sourceLabel(value?: LiveValue<unknown>) { if (!value) return "尚未采集"; return value.stale ? `${value.source} · ${value.errorCode || "数据已过期"}` : value.source; }
 function liveStatus(value?: LiveValue<unknown>) { return value ? `${sourceLabel(value)} · ${formatObservedAt(value.observedAt)}` : "尚未采集"; }
 
-function Overview({ shell, auth }: { shell: ShellStatus | null; auth: AuthStatus }) {
+function Overview({ shell, auth, onAuthChanged }: { shell: ShellStatus | null; auth: AuthStatus; onAuthChanged: () => void }) {
+  const [port, setPort] = useState(String(auth.port));
+  const [portMessage, setPortMessage] = useState("");
+  const [portError, setPortError] = useState("");
+
+  useEffect(() => { setPort(String(auth.port)); }, [auth.port]);
+
+  async function savePort(event: FormEvent) {
+    event.preventDefault();
+    setPortMessage("");
+    setPortError("");
+    try {
+      const result = await requestJson<{ message: string }>("/api/settings/network", {
+        method: "PUT",
+        headers: { "X-CSRF-Token": auth.csrfToken || "" },
+        body: JSON.stringify({ port: Number(port) }),
+      });
+      setPortMessage(result.message);
+      onAuthChanged();
+    } catch (caught) {
+      setPortError(caught instanceof Error ? caught.message : "保存端口失败");
+    }
+  }
+
   return (
     <div className="page-stack">
       {!auth.local && <div className="warning-strip"><AlertTriangle size={18} />仅可信内网使用，禁止公网暴露。</div>}
@@ -739,8 +762,18 @@ function Overview({ shell, auth }: { shell: ShellStatus | null; auth: AuthStatus
       </section>
       <section className="metric-grid" aria-label="基础状态">
         <article><span>控制台后端</span><strong>运行中</strong><small>FastAPI 单进程</small></article>
-        <article><span>访问模式</span><strong>{auth.local ? "本机免登录" : "LAN 已认证"}</strong><small>{auth.lanPasswordConfigured ? "LAN 密码已设置" : "仅监听 127.0.0.1"}</small></article>
+        <article><span>访问模式</span><strong>{auth.local ? "本机免登录" : "LAN 已认证"}</strong><small>{auth.adminPasswordConfigured ? "使用游戏管理员密码" : "仅监听 127.0.0.1"}</small></article>
         <article><span>PalServer</span><strong>{serverStateLabel(shell?.serverState)}</strong><small>{shell ? new Date(shell.observedAt * 1000).toLocaleTimeString("zh-CN") : "状态不可用"}</small></article>
+      </section>
+      <section className="settings-section overview-network-settings">
+        <div className="section-heading"><div><h2>控制台监听端口</h2><p>当前端口：{auth.port}。修改后需重启控制台才会生效。</p></div></div>
+        {auth.local ? <form className="settings-form port-form" onSubmit={savePort}>
+          <label htmlFor="console-port">控制台监听端口</label>
+          <input id="console-port" type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} required />
+          {portError && <p className="form-error" role="alert">{portError}</p>}
+          {portMessage && <p className="form-success" role="status">{portMessage}</p>}
+          <button className="primary-button" type="submit"><Settings size={18} />保存端口</button>
+        </form> : <div className="notice-band"><AlertTriangle size={20} /><span>监听端口只能在服务器本机的总览页面修改。</span></div>}
       </section>
     </div>
   );
@@ -884,6 +917,7 @@ function ServerManagement({ auth, initialStatus }: { auth: AuthStatus; initialSt
           <button className="primary-button" disabled={busy} type="submit"><Save size={18} />保存设置</button>
         </form> : <div className="notice-band"><ShieldCheck size={20} /><span>安装路径和启动参数只能在服务器本机修改。</span></div>}
       </section>
+      <LiveMonitoring auth={auth} embedded />
     </div>
   );
 }
@@ -958,7 +992,7 @@ type ConfigCategoryId =
   | "character"
   | "advanced";
 
-type ConfigKind = "text" | "number" | "boolean" | "select" | "multi-select";
+type ConfigKind = "text" | "password" | "number" | "boolean" | "select" | "multi-select";
 type ConfigOption = { value: string; label: string; description?: string };
 type ConfigFieldMeta = {
   key: string;
@@ -1102,7 +1136,7 @@ const CONFIG_DESCRIPTIONS: Record<string, string> = {
 type ConfigCategoryGroup = { id: ConfigCategoryId; tab: ConfigEditorTab; label: string; description: string; keys: string[] };
 
 const CONFIG_CATEGORY_GROUPS: ConfigCategoryGroup[] = [
-  { id: "server", tab: "panel", label: "基本信息", description: "名称、描述、密码、地区与玩家人数", keys: ["ServerName", "ServerDescription", "ServerPassword", "PublicIP", "PublicPort", "ServerPlayerMaxNum", "Region"] },
+  { id: "server", tab: "panel", label: "基本信息", description: "名称、描述、密码、地区与玩家人数", keys: ["ServerName", "ServerDescription", "AdminPassword", "ServerPassword", "PublicIP", "PublicPort", "ServerPlayerMaxNum", "Region"] },
   { id: "runtime", tab: "panel", label: "运行与存档", description: "自动保存、备份与服务器运行行为", keys: ["bIsUseBackupSaveData", "AutoSaveSpan", "bIsMultiplay"] },
   { id: "network", tab: "panel", label: "网络与接口", description: "RCON、REST API 与封禁列表", keys: ["RCONEnabled", "RCONPort", "RESTAPIEnabled", "RESTAPIPort", "BanListURL"] },
   { id: "mods", tab: "panel", label: "跨平台与模组", description: "平台联机、客户端 Mod 与科技限制", keys: ["CrossplayPlatforms", "bAllowClientMod", "bAllowGlobalPalboxExport", "bAllowGlobalPalboxImport", "DenyTechnologyList"] },
@@ -1212,20 +1246,20 @@ const CONFIG_SELECT_OPTIONS: Record<string, ConfigOption[]> = {
 
 const CONFIG_MULTI_OPTIONS: Record<string, ConfigOption[]> = {
   CrossplayPlatforms: [
-    { value: "Steam", label: "Steam" },
-    { value: "Xbox", label: "Xbox" },
-    { value: "PS5", label: "PlayStation 5" },
-    { value: "Mac", label: "Mac" },
+    { value: "Steam", label: "Steam", description: "PC（Steam）" },
+    { value: "Xbox", label: "Xbox", description: "Xbox / Microsoft Store" },
+    { value: "PS5", label: "PlayStation 5", description: "PlayStation 5" },
+    { value: "Mac", label: "Mac", description: "macOS" },
   ],
   DenyTechnologyList: [
-    { value: "Accessory_AirDash2", label: "空中冲刺 II" },
-    { value: "Accessory_AirDash3", label: "空中冲刺 III" },
-    { value: "Accessory_JumpCount_Increase1", label: "二段跳" },
-    { value: "Accessory_JumpCount_Increase2", label: "三段跳" },
-    { value: "Accessory_Nonkilling", label: "不杀生" },
-    { value: "Accessory_TalentChecker", label: "天赋查看器" },
-    { value: "DimensionPalStorage", label: "跨界帕鲁终端" },
-    { value: "Battle_Sword_01", label: "单手剑" },
+    { value: "Accessory_AirDash2", label: "空中冲刺 II", description: "Accessory_AirDash2" },
+    { value: "Accessory_AirDash3", label: "空中冲刺 III", description: "Accessory_AirDash3" },
+    { value: "Accessory_JumpCount_Increase1", label: "二段跳", description: "Accessory_JumpCount_Increase1" },
+    { value: "Accessory_JumpCount_Increase2", label: "三段跳", description: "Accessory_JumpCount_Increase2" },
+    { value: "Accessory_Nonkilling", label: "不杀生", description: "Accessory_Nonkilling" },
+    { value: "Accessory_TalentChecker", label: "天赋查看器", description: "Accessory_TalentChecker" },
+    { value: "DimensionPalStorage", label: "跨界帕鲁终端", description: "DimensionPalStorage" },
+    { value: "Battle_Sword_01", label: "单手剑", description: "Battle_Sword_01" },
   ],
 };
 
@@ -1248,6 +1282,14 @@ function configLabelFor(key: string): string {
 }
 
 function configMetaFor(key: string, value: string): ConfigFieldMeta {
+  if (key === "AdminPassword") {
+    return {
+      key,
+      label: configLabelFor(key),
+      description: "密码不会回显。输入新密码后保存草稿，再停服应用到游戏设置。",
+      kind: "password",
+    };
+  }
   const range = CONFIG_NUMERIC_RANGES[key];
   if (range) {
     return {
@@ -1301,12 +1343,29 @@ function configArrayValues(value: string): string[] {
     .filter(Boolean);
 }
 
+function configTupleValues(value: string): string[] {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(trimmed);
+      if (typeof decoded === "string") return configArrayValues(decoded);
+    } catch {
+      return [];
+    }
+  }
+  return configArrayValues(value);
+}
+
 function serializeConfigArray(values: string[], previousValue: string): string {
   const previous = previousValue.trim();
   const wrapped = previous.startsWith("(") && previous.endsWith(")");
   const quoted = /(^|,)\s*"/.test(previous.replace(/^\(|\)$/g, ""));
   const content = values.map((value) => (quoted ? `"${value}"` : value)).join(",");
   return wrapped ? `(${content})` : content;
+}
+
+function serializeConfigTuple(values: string[]): string {
+  return `(${values.join(",")})`;
 }
 
 function configNumberValue(value: string, fallback: number): number {
@@ -1336,6 +1395,11 @@ function serializeConfigTextValue(displayValue: string, previousValue: string): 
   return displayValue;
 }
 
+function serializeConfigPassword(value: string): string {
+  if (!value) return "";
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
 function configRangePercent(value: string, min: number, max: number): number {
   const numeric = configNumberValue(value, min);
   return Math.min(100, Math.max(0, ((numeric - min) / (max - min)) * 100));
@@ -1354,11 +1418,14 @@ function ConfigFieldEditor({
   onChange: (value: string) => void;
   onReset: () => void;
 }) {
-  const selectedValues = configArrayValues(value);
-  const options = [...(meta.options || [])];
-  for (const selected of selectedValues) {
-    if (!options.some((option) => option.value === selected)) options.push({ value: selected, label: selected });
-  }
+  const isCrossplayPlatforms = meta.key === "CrossplayPlatforms";
+  const selectedValues = [...new Set(isCrossplayPlatforms ? configTupleValues(value) : configArrayValues(value))];
+  const configuredOptions = meta.options || [];
+  const configuredValues = new Set(configuredOptions.map((option) => option.value));
+  const serverOptions = selectedValues
+    .filter((selected) => !configuredValues.has(selected))
+    .map((selected) => ({ value: selected, label: selected, description: "服务器当前配置中的原始值" }));
+  const options = [...configuredOptions, ...serverOptions];
   const selectionLabel = selectedValues.length
     ? selectedValues.map((selected) => options.find((option) => option.value === selected)?.label || selected).join("、")
     : "未选择";
@@ -1421,18 +1488,33 @@ function ConfigFieldEditor({
         )}
         {meta.kind === "multi-select" && (
           <details className="config-multi-control">
-            <summary><span>{selectionLabel}</span><ChevronDown size={16} aria-hidden="true" /></summary>
-            <div className="config-multi-menu">
-              {options.map((option) => {
-                const checked = selectedValues.includes(option.value);
-                return <label key={option.value} className="config-multi-option"><input type="checkbox" checked={checked} onChange={() => onChange(serializeConfigArray(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value], value))} /><span>{option.label}</span></label>;
-              })}
+            <summary aria-label={`${meta.label}：${selectedValues.length ? `已选 ${selectedValues.length} 项` : "未选择"}`}>
+              <span className="config-multi-summary">
+                <span className="config-multi-summary-count">{selectedValues.length ? `已选 ${selectedValues.length} 项` : "未选择"}</span>
+                <span className="config-multi-summary-value" title={selectionLabel}>{selectionLabel}</span>
+              </span>
+              <ChevronDown size={16} aria-hidden="true" />
+            </summary>
+            <div className="config-multi-menu" role="group" aria-label={`${meta.label}选项`}>
+              <div className="config-multi-menu-header"><span>可选择项</span><strong>{selectedValues.length} / {options.length}</strong></div>
+              <div className="config-multi-options">
+                {options.map((option) => {
+                  const checked = selectedValues.includes(option.value);
+                  return (
+                    <label key={option.value} className={`config-multi-option ${checked ? "is-selected" : ""}`}>
+                      <input type="checkbox" checked={checked} aria-label={option.label} onChange={() => onChange(isCrossplayPlatforms ? serializeConfigTuple(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value]) : serializeConfigArray(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value], value))} />
+                      <span className="config-multi-option-copy"><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>
+                    </label>
+                  );
+                })}
+              </div>
             </div>
           </details>
         )}
+        {meta.kind === "password" && <input className="config-text-input" type="password" autoComplete="new-password" value={configTextDisplayValue(value)} placeholder={sourceValue === "已配置" ? "已配置；输入新密码以覆盖" : "输入游戏管理员密码"} aria-label={meta.label} onChange={(event) => onChange(serializeConfigPassword(event.target.value))} />}
         {meta.kind === "text" && <input className="config-text-input" value={configTextDisplayValue(value)} aria-label={meta.label} onChange={(event) => onChange(serializeConfigTextValue(event.target.value, value))} />}
       </div>
-      <button className="config-reset-button" type="button" title="恢复原值" aria-label={`恢复${meta.label}原值`} onClick={onReset} disabled={value === sourceValue}><RotateCcw size={15} /></button>
+      <button className="config-reset-button" type="button" title="恢复原值" aria-label={`恢复${meta.label}原值`} onClick={onReset} disabled={meta.kind === "password" ? !value : value === sourceValue}><RotateCcw size={15} /></button>
     </div>
   );
 }
@@ -1451,14 +1533,18 @@ function ConfigPage({ auth }: { auth: AuthStatus }) {
     try {
       const next = await requestJson<ConfigDocument>("/api/config/draft");
       setDocument(next);
-      setFields(next.draft?.fields || next.fields);
+      const nextFields = { ...(next.draft?.fields || next.fields) };
+      delete nextFields.AdminPassword;
+      setFields(nextFields);
       setDiff(await requestJson<typeof diff>("/api/config/diff"));
     } catch (caught) { setError(caught instanceof Error ? caught.message : "配置读取失败"); }
   }, []);
   useEffect(() => { void load(); }, [load]);
   async function saveDraft(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
-    try { await requestJson("/api/config/draft", { method: "PUT", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ fields }) }); setMessage("配置草稿已保存，尚未写入真实 INI。"); await load(); }
+    const fieldsToSave = { ...fields };
+    if (!fieldsToSave.AdminPassword) delete fieldsToSave.AdminPassword;
+    try { await requestJson("/api/config/draft", { method: "PUT", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ fields: fieldsToSave }) }); setMessage("配置草稿已保存，尚未写入真实 INI。"); await load(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "草稿保存失败"); } finally { setBusy(false); }
   }
   async function apply(force = false) {
@@ -1476,8 +1562,8 @@ function ConfigPage({ auth }: { auth: AuthStatus }) {
   if (!document) return <div className="page-stack"><p className="muted">正在读取 PalWorldSettings.ini...</p></div>;
 
   const allKeys = [
-    ...document.schema.filter((key) => key !== "AdminPassword").filter((key) => key in fields),
-    ...Object.keys(fields).filter((key) => !document.schema.includes(key) && key !== "AdminPassword"),
+    ...document.schema.filter((key) => key === "AdminPassword" || key in fields),
+    ...Object.keys(fields).filter((key) => !document.schema.includes(key)),
   ];
   const configOrder = new Map<string, number>();
   CONFIG_CATEGORY_GROUPS.forEach((group, groupIndex) => group.keys.forEach((key, keyIndex) => configOrder.set(key, groupIndex * 1000 + keyIndex)));
@@ -1525,7 +1611,15 @@ function ConfigPage({ auth }: { auth: AuthStatus }) {
             <div className="config-field-list">
               {visibleKeys.map((key) => {
                 const meta = configMetaFor(key, fields[key] || "");
-                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={document.fields[key] || ""} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => ({ ...current, [key]: document.fields[key] || "" }))} />;
+                const sourceValue = key === "AdminPassword" ? (document.adminPasswordConfigured ? "已配置" : "未配置") : document.fields[key] || "";
+                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => {
+                  if (meta.kind === "password") {
+                    const next = { ...current };
+                    delete next[key];
+                    return next;
+                  }
+                  return { ...current, [key]: document.fields[key] || "" };
+                })} />;
               })}
               {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>没有找到匹配的配置。</p><button className="quiet-button" type="button" onClick={() => { setQuery(""); setSelectedCategory("server"); }}>清除搜索</button></div>}
             </div>
@@ -1589,89 +1683,6 @@ function ConfigPageLegacy({ auth }: { auth: AuthStatus }) {
     {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}
     {diff?.hasDraft && <section className={diff.conflict ? "config-diff conflict" : "config-diff"}><div className="section-heading"><div><h2>草稿差异</h2><p>{diff.conflict ? "检测到外部修改，应用前必须确认覆盖。" : "当前草稿尚未写入真实 INI。"}</p></div>{diff.conflict && <button className="danger-button" type="button" onClick={() => void apply(true)}>确认覆盖外部修改</button>}</div><pre>{diff.text || "字段值有变化，但文本差异为空。"}</pre></section>}
   </div>;
-}
-
-function SecuritySettings({ auth, onSaved }: { auth: AuthStatus; onSaved: () => void }) {
-  const [password, setPassword] = useState("");
-  const [confirm, setConfirm] = useState("");
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [port, setPort] = useState(String(auth.port));
-  const [portMessage, setPortMessage] = useState("");
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setMessage("");
-    setError("");
-    if (password !== confirm) {
-      setError("两次输入的密码不一致。");
-      return;
-    }
-    setBusy(true);
-    try {
-      const result = await requestJson<{ message: string }>("/api/auth/lan-password", {
-        method: "POST",
-        headers: { "X-CSRF-Token": auth.csrfToken || "" },
-        body: JSON.stringify({ password }),
-      });
-      setMessage(result.message);
-      setPassword("");
-      setConfirm("");
-      onSaved();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "保存失败");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function savePort(event: FormEvent) {
-    event.preventDefault();
-    setError("");
-    setPortMessage("");
-    try {
-      const result = await requestJson<{ message: string }>("/api/settings/network", {
-        method: "PUT",
-        headers: { "X-CSRF-Token": auth.csrfToken || "" },
-        body: JSON.stringify({ port: Number(port) }),
-      });
-      setPortMessage(result.message);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "保存失败");
-    }
-  }
-
-  if (!auth.local) {
-    return <div className="notice-band"><ShieldCheck size={20} /><span>LAN 密码只能在服务器本机设置或重置。</span></div>;
-  }
-  return (
-    <section className="settings-section">
-      <div className="section-heading">
-        <div><h2>局域网管理员密码</h2><p>状态：{auth.lanPasswordConfigured ? "已配置" : "未配置"}</p></div>
-        <span className={auth.lanPasswordConfigured ? "badge success" : "badge"}>{auth.lanPasswordConfigured ? "已保护" : "仅本机"}</span>
-      </div>
-      <form className="settings-form" onSubmit={submit}>
-        <label htmlFor="new-password">{auth.lanPasswordConfigured ? "新密码" : "设置密码"}</label>
-        <input id="new-password" type="password" autoComplete="new-password" minLength={10} maxLength={256} value={password} onChange={(event) => setPassword(event.target.value)} required />
-        <label htmlFor="confirm-password">确认密码</label>
-        <input id="confirm-password" type="password" autoComplete="new-password" minLength={10} maxLength={256} value={confirm} onChange={(event) => setConfirm(event.target.value)} required />
-        {error && <p className="form-error" role="alert">{error}</p>}
-        {message && <p className="form-success" role="status">{message}</p>}
-        <button className="primary-button" disabled={busy} type="submit"><ShieldCheck size={18} />{busy ? "正在保存..." : "保存密码"}</button>
-      </form>
-      <div className="notice-band"><AlertTriangle size={20} /><span>重启控制台后监听局域网。请将 Windows Firewall 规则限制为 LocalSubnet。</span></div>
-      <div className="section-heading compact-heading">
-        <div><h2>控制台监听端口</h2><p>当前端口：{auth.port}</p></div>
-      </div>
-      <form className="settings-form port-form" onSubmit={savePort}>
-        <label htmlFor="console-port">端口</label>
-        <input id="console-port" type="number" min={1} max={65535} value={port} onChange={(event) => setPort(event.target.value)} required />
-        {portMessage && <p className="form-success" role="status">{portMessage}</p>}
-        <button className="primary-button" type="submit"><Settings size={18} />保存端口</button>
-      </form>
-    </section>
-  );
 }
 
 function LogoutButton({ csrfToken, onDone }: { csrfToken: string | null; onDone: () => void }) {

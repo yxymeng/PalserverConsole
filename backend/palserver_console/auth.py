@@ -7,13 +7,12 @@ import secrets
 import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
+from pathlib import Path
 
 from .config import AppSettings
+from .monitoring import MonitoringConfigError, read_admin_password
 from .persistence import Database
 
-SCRYPT_N = 2**14
-SCRYPT_R = 8
-SCRYPT_P = 1
 COOKIE_NAME = "palconsole_session"
 
 
@@ -41,42 +40,12 @@ class AuthStore:
         self.database = database
         self.settings = settings
 
-    def password_configured(self) -> bool:
-        with self.database.connect() as connection:
-            row = connection.execute("SELECT 1 FROM auth_config WHERE id = 1").fetchone()
-            return row is not None
+    def admin_password_configured(self) -> bool:
+        return self._game_admin_password() is not None
 
-    def set_password(self, password: str, now: int | None = None) -> None:
-        _validate_password(password)
-        timestamp = int(time.time()) if now is None else now
-        salt = secrets.token_bytes(16)
-        password_hash = _derive_password(password, salt, SCRYPT_N, SCRYPT_R, SCRYPT_P)
-        with self.database.connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO auth_config(id, password_hash, salt, n, r, p, updated_at)
-                VALUES(1, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET
-                    password_hash=excluded.password_hash,
-                    salt=excluded.salt,
-                    n=excluded.n,
-                    r=excluded.r,
-                    p=excluded.p,
-                    updated_at=excluded.updated_at
-                """,
-                (password_hash, salt, SCRYPT_N, SCRYPT_R, SCRYPT_P, timestamp),
-            )
-            connection.execute("DELETE FROM sessions WHERE is_local = 0")
-
-    def verify_password(self, password: str) -> bool:
-        with self.database.connect() as connection:
-            row = connection.execute(
-                "SELECT password_hash, salt, n, r, p FROM auth_config WHERE id = 1"
-            ).fetchone()
-        if row is None:
-            return False
-        candidate = _derive_password(password, row["salt"], row["n"], row["r"], row["p"])
-        return hmac.compare_digest(candidate, row["password_hash"])
+    def verify_admin_password(self, password: str) -> bool:
+        configured = self._game_admin_password()
+        return configured is not None and hmac.compare_digest(password, configured)
 
     def create_session(
         self, peer_ip: str, *, local: bool, now: int | None = None
@@ -193,13 +162,11 @@ class AuthStore:
             raise RuntimeError("Unable to initialize the session signing secret.")
         return urlsafe_b64decode(row["value"].encode("ascii"))
 
-
-def _derive_password(password: str, salt: bytes, n: int, r: int, p: int) -> bytes:
-    return hashlib.scrypt(password.encode("utf-8"), salt=salt, n=n, r=r, p=p, dklen=32)
-
-
-def _validate_password(password: str) -> None:
-    if len(password) < 10:
-        raise ValueError("LAN password must contain at least 10 characters.")
-    if len(password) > 256:
-        raise ValueError("LAN password must contain no more than 256 characters.")
+    def _game_admin_password(self) -> str | None:
+        executable = self.database.get_setting("server.executable")
+        if not executable:
+            return None
+        try:
+            return read_admin_password(Path(executable).parent)
+        except (MonitoringConfigError, OSError):
+            return None
