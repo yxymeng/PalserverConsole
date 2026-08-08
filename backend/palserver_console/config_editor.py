@@ -202,7 +202,6 @@ TEXT_FIELDS = frozenset(
         "ServerDescription",
         "ServerPassword",
         "PublicIP",
-        "CrossplayPlatforms",
         "LogFormatType",
         "RandomizerType",
         "RandomizerSeed",
@@ -213,6 +212,7 @@ TEXT_FIELDS = frozenset(
         "AdditionalDropItemWhenPlayerKillingInPvPMode",
     }
 )
+TUPLE_FIELDS = frozenset({"CrossplayPlatforms"})
 SCHEMA_FIELD_SET = frozenset(SCHEMA_FIELDS)
 
 
@@ -430,6 +430,42 @@ def _normalise_text(key: str, value: str) -> str:
     return json.dumps(text, ensure_ascii=False)
 
 
+def _normalise_tuple(key: str, value: str) -> str:
+    if any(char in value for char in "\r\n\x00"):
+        raise _invalid_value(key)
+    candidate = value.strip()
+    if candidate.startswith('"') or candidate.endswith('"'):
+        try:
+            decoded = json.loads(candidate)
+        except json.JSONDecodeError as error:
+            raise _invalid_value(key) from error
+        if not isinstance(decoded, str):
+            raise _invalid_value(key)
+        candidate = decoded.strip()
+    if candidate.startswith("(") != candidate.endswith(")"):
+        raise _invalid_value(key)
+    source = candidate if candidate.startswith("(") else f"({candidate})"
+    try:
+        items = _split_values(source)
+    except ConfigError as error:
+        raise _invalid_value(key) from error
+    normalized_items: list[str] = []
+    for item in items:
+        token = item.strip()
+        if token.startswith('"') or token.endswith('"'):
+            try:
+                decoded = json.loads(token)
+            except json.JSONDecodeError as error:
+                raise _invalid_value(key) from error
+            if not isinstance(decoded, str):
+                raise _invalid_value(key)
+            token = decoded
+        if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", token):
+            raise _invalid_value(key)
+        normalized_items.append(token)
+    return "(" + ",".join(normalized_items) + ")"
+
+
 def _normalise_unknown_value(key: str, value: str, source_value: str) -> str:
     source = source_value.strip()
     if source.startswith('"') or source.endswith('"'):
@@ -457,9 +493,15 @@ def _normalise_unknown_value(key: str, value: str, source_value: str) -> str:
 def _normalise_schema_value(key: str, value: str) -> str:
     if key in BOOL_FIELDS:
         return _normalise_bool(key, value)
+    if key in TUPLE_FIELDS:
+        return _normalise_tuple(key, value)
     if key in TEXT_FIELDS:
         return _normalise_text(key, value)
     return _normalise_number(key, value, integer=False)
+
+
+def _normalise_admin_password(value: str) -> str:
+    return _normalise_text("AdminPassword", value)
 
 
 def _masked_fields(fields: dict[str, str]) -> dict[str, str]:
@@ -636,11 +678,9 @@ class ConfigService:
             if len(value) > MAX_CONFIG_FIELD_VALUE_LENGTH:
                 raise ConfigError("CONFIG_REQUEST_TOO_LARGE", f"配置字段 {key} 的值超过长度限制。")
             if key in SECRET_FIELDS:
-                if value not in MASKED_SECRET_VALUES:
-                    raise ConfigError(
-                        "CONFIG_SECRET_FIELD_READ_ONLY",
-                        "AdminPassword 只能保留，不能通过控制台修改。",
-                    )
+                if value in MASKED_SECRET_VALUES:
+                    continue
+                updates[key] = _normalise_admin_password(value)
                 continue
             if key in SCHEMA_FIELD_SET:
                 updates[key] = _normalise_schema_value(key, value)
@@ -658,22 +698,29 @@ class ConfigService:
         added_keys = set(fields) - set(original)
         if (
             not set(original).issubset(fields)
-            or not added_keys.issubset(SCHEMA_FIELD_SET - SECRET_FIELDS)
+            or not added_keys.issubset(SCHEMA_FIELD_SET)
             or draft_order != _ordered_keys(fields, order)
         ):
             raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿包含新增、删除或重排字段。")
         for key, value in fields.items():
             if key in SECRET_FIELDS:
-                if value != original.get(key):
-                    raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿试图修改 AdminPassword。")
+                if value == original.get(key):
+                    continue
+                normalized = _normalise_admin_password(value)
+                if value != normalized:
+                    raise ConfigError(
+                        "CONFIG_DRAFT_INVALID", "配置草稿字段 AdminPassword 未通过规范化校验。"
+                    )
                 continue
             source_value = original.get(key)
             if source_value is not None and value == source_value:
                 continue
-            normalized = _normalise_schema_value(key, value)
-            if key not in SCHEMA_FIELD_SET:
-                assert source_value is not None
+            if key in SCHEMA_FIELD_SET:
+                normalized = _normalise_schema_value(key, value)
+            elif source_value is not None:
                 normalized = _normalise_unknown_value(key, value, source_value)
+            else:
+                raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿包含新增、删除或重排字段。")
             if value != normalized:
                 raise ConfigError("CONFIG_DRAFT_INVALID", f"配置草稿字段 {key} 未通过规范化校验。")
 

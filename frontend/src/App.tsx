@@ -1343,12 +1343,29 @@ function configArrayValues(value: string): string[] {
     .filter(Boolean);
 }
 
+function configTupleValues(value: string): string[] {
+  const trimmed = value.trim();
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(trimmed);
+      if (typeof decoded === "string") return configArrayValues(decoded);
+    } catch {
+      return [];
+    }
+  }
+  return configArrayValues(value);
+}
+
 function serializeConfigArray(values: string[], previousValue: string): string {
   const previous = previousValue.trim();
   const wrapped = previous.startsWith("(") && previous.endsWith(")");
   const quoted = /(^|,)\s*"/.test(previous.replace(/^\(|\)$/g, ""));
   const content = values.map((value) => (quoted ? `"${value}"` : value)).join(",");
   return wrapped ? `(${content})` : content;
+}
+
+function serializeConfigTuple(values: string[]): string {
+  return `(${values.join(",")})`;
 }
 
 function configNumberValue(value: string, fallback: number): number {
@@ -1379,6 +1396,7 @@ function serializeConfigTextValue(displayValue: string, previousValue: string): 
 }
 
 function serializeConfigPassword(value: string): string {
+  if (!value) return "";
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
@@ -1400,7 +1418,8 @@ function ConfigFieldEditor({
   onChange: (value: string) => void;
   onReset: () => void;
 }) {
-  const selectedValues = [...new Set(configArrayValues(value))];
+  const isCrossplayPlatforms = meta.key === "CrossplayPlatforms";
+  const selectedValues = [...new Set(isCrossplayPlatforms ? configTupleValues(value) : configArrayValues(value))];
   const configuredOptions = meta.options || [];
   const configuredValues = new Set(configuredOptions.map((option) => option.value));
   const serverOptions = selectedValues
@@ -1483,7 +1502,7 @@ function ConfigFieldEditor({
                   const checked = selectedValues.includes(option.value);
                   return (
                     <label key={option.value} className={`config-multi-option ${checked ? "is-selected" : ""}`}>
-                      <input type="checkbox" checked={checked} aria-label={option.label} onChange={() => onChange(serializeConfigArray(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value], value))} />
+                      <input type="checkbox" checked={checked} aria-label={option.label} onChange={() => onChange(isCrossplayPlatforms ? serializeConfigTuple(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value]) : serializeConfigArray(checked ? selectedValues.filter((item) => item !== option.value) : [...selectedValues, option.value], value))} />
                       <span className="config-multi-option-copy"><strong>{option.label}</strong>{option.description && <small>{option.description}</small>}</span>
                     </label>
                   );
@@ -1523,7 +1542,9 @@ function ConfigPage({ auth }: { auth: AuthStatus }) {
   useEffect(() => { void load(); }, [load]);
   async function saveDraft(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
-    try { await requestJson("/api/config/draft", { method: "PUT", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ fields }) }); setMessage("配置草稿已保存，尚未写入真实 INI。"); await load(); }
+    const fieldsToSave = { ...fields };
+    if (!fieldsToSave.AdminPassword) delete fieldsToSave.AdminPassword;
+    try { await requestJson("/api/config/draft", { method: "PUT", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ fields: fieldsToSave }) }); setMessage("配置草稿已保存，尚未写入真实 INI。"); await load(); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "草稿保存失败"); } finally { setBusy(false); }
   }
   async function apply(force = false) {
@@ -1590,7 +1611,8 @@ function ConfigPage({ auth }: { auth: AuthStatus }) {
             <div className="config-field-list">
               {visibleKeys.map((key) => {
                 const meta = configMetaFor(key, fields[key] || "");
-                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={document.fields[key] || ""} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => {
+                const sourceValue = key === "AdminPassword" ? (document.adminPasswordConfigured ? "已配置" : "未配置") : document.fields[key] || "";
+                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => {
                   if (meta.kind === "password") {
                     const next = { ...current };
                     delete next[key];

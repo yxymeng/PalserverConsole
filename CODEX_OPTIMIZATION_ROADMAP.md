@@ -31,16 +31,17 @@
 
 ## OPT-01 配置输入与序列化安全
 
-- 目标：阻止字段名、逗号、括号、换行和重复键向 `OptionSettings` 注入额外配置；`AdminPassword` 只能保留。
+- 目标：阻止字段名、逗号、括号、换行和重复键向 `OptionSettings` 注入额外配置；`AdminPassword` 不回显，未输入新值时保留原值，输入新值时安全规范化后写入。
 - 入口：`backend/palserver_console/config_editor.py`、`main.py`、`backend/tests/test_m7_config.py`。
 - 实现：服务端限制键集合和请求规模，按类型规范化值；生成后重新解析并比对键和值；未知键只能编辑源文件已存在项。
 - 验收：恶意 payload 返回稳定错误码；合法值 round-trip 不增删键、不改变密码、不丢未知字段；后端相关与全量检查通过。
 
 完成记录：2026-08-08
-- 修改：`config_editor.py` 解析并限制 JSON 草稿、字段和值，规范化布尔/数值/文本，拒绝重复键和未知新增字段；序列化后回读比对，并在应用前复核草稿。`main.py` 使用原始 JSON 解析以拦截重复键；`test_m7_config.py` 覆盖注入、密码保留、round-trip 和 API 错误码。
+- 修改：`config_editor.py` 解析并限制 JSON 草稿、字段和值，规范化布尔/数值/文本/tuple，拒绝重复键和未知新增字段；`AdminPassword` 只返回配置状态，未输入新值时保留原值，输入新值时安全序列化；序列化后回读比对，并在应用前复核草稿。`main.py` 使用原始 JSON 解析以拦截重复键；`test_m7_config.py` 覆盖注入、密码保留与安全修改、tuple round-trip 和 API 错误码。
 - 验证：`.\.venv\Scripts\python.exe -m pytest backend/tests/test_m7_config.py`（12 passed）；`.\.venv\Scripts\python.exe -m ruff check backend/palserver_console/config_editor.py backend/palserver_console/main.py backend/tests/test_m7_config.py`（All checks passed）；`.\.venv\Scripts\python.exe -m mypy`（Success: no issues found in 31 source files）；`.\.venv\Scripts\python.exe -m pytest`（66 passed, 2 skipped）。
 - 未验证：未对真实 PalServer 或真实 `PalWorldSettings.ini` 执行写入；2 个既有存档集成测试因 `PALSERVER_M5_LEVEL_SAV`、`PALSERVER_OOZ_DLL`/`libooz.dll` 未配置而跳过。
 - 风险/回滚：历史 INI 若本身含有重复键、无效字段名或不成对引号/括号，将被安全拒绝而不能创建草稿；回滚仅需还原本模块改动的三个后端文件和本路线记录，未修改任何真实配置或存档。
+- 本轮回归（2026-08-09）：`frontend` 的 `lint`、`typecheck`、`test`、`build` 均通过，`test:e2e` 为 `6 passed`；后端 `ruff check backend` 通过，`pytest -q` 为 `74 passed, 2 skipped`。初始 `mypy` 在 `test_m7_config.py` 发现 15 个类型错误，补充局部 `cast` 后最终为 `Success: no issues found in 31 source files`，该文件测试为 `15 passed`。
 
 ## OPT-02 显式配置应用工作流
 
@@ -54,6 +55,7 @@
 - 验证：`.\.venv\Scripts\python.exe -m pytest backend/tests/test_m2_lifecycle.py backend/tests/test_m7_config.py`（28 passed）；`.\.venv\Scripts\python.exe -m ruff check backend/palserver_console/config_editor.py backend/palserver_console/lifecycle.py backend/palserver_console/main.py backend/tests/test_m2_lifecycle.py backend/tests/test_m7_config.py`（All checks passed）；`.\.venv\Scripts\python.exe -m mypy`（Success: no issues found in 31 source files）；`.\.venv\Scripts\python.exe -m pytest`（71 passed, 2 skipped）。
 - 未验证：未在真实 PalServer 或真实 `PalWorldSettings.ini` 上执行 stop、apply、restart；2 个既有存档集成测试因 `PALSERVER_M5_LEVEL_SAV`、`PALSERVER_OOZ_DLL`/`libooz.dll` 未配置而跳过。
 - 风险/回滚：真实环境的 `health_check` 只确认重启后进程未立即退出，尚未替代 REST 健康探测；如需回滚，恢复本模块的三处后端代码、两处测试和本路线记录，真实 INI 保持在操作前备份中，应用失败不会自动重启服务器。
+- 本轮回归（2026-08-09）：`backend/tests/test_m2_lifecycle.py backend/tests/test_m7_config.py -q` 为 `30 passed`；完整 `pytest -q` 为 `74 passed, 2 skipped`，`ruff check backend` 通过，最终 `mypy` 为 `Success: no issues found in 31 source files`，前端常规四项及 E2E `6 passed`。未执行真实 PalServer/真实 INI 的 stop、apply、restart。
 
 ## OPT-03 生命周期状态与幂等性
 

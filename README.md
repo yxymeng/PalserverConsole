@@ -2,7 +2,7 @@
 
 PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中文本地 Web 控制台。它把服务器启动、状态查看、官方备份、世界数据快照、运行监控、审计记录和配置草稿集中到一个浏览器页面里。
 
-首版的重点是：本地可用、操作有确认、数据有边界。控制台不保存独立的 LAN 密码；局域网访问直接使用游戏设置中的 `AdminPassword`，也不会默认把控制台暴露到公网。
+首版的重点是：本地可用、操作有确认、数据有边界。控制台不保存独立的 LAN 密码；局域网访问直接使用游戏设置中的 `AdminPassword`。未配置 `AdminPassword` 时只监听 `127.0.0.1`，不会默认把控制台暴露到公网。
 
 ## 你能用它做什么
 
@@ -35,14 +35,14 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 1. 打开“服务器管理”，点击“扫描 Steam”，或填写实际的 `PalServer.exe` 完整路径。
 2. 检查启动参数和 `PalWorldSettings.ini` 中的 REST/RCON 端口是否一致。
-3. 打开“服务器配置 → 面板设置 → 基本信息”，在“管理员密码”输入框中输入或更改游戏 `AdminPassword`，保存草稿并按提示停服应用。
+3. 打开“服务器配置 → 面板设置 → 基本信息”，在“管理员密码”输入框中输入或更改游戏 `AdminPassword`，保存草稿并按提示停服应用；不输入新密码则保留原值。
 4. 在“总览”页确认控制台监听端口；修改后重启控制台。在 Windows Firewall 中将规则限制为 `LocalSubnet`，不要把 `8223` 转发到公网。
 
-本机访问默认免登录；局域网访问需要 `PalWorldSettings.ini` 中的游戏管理员密码。LAN 模式只适合可信内网，不是公网管理方案。
+本机访问默认免登录；局域网访问需要 `PalWorldSettings.ini` 中的游戏管理员密码。控制台启动时根据是否已配置 `AdminPassword` 决定监听地址；首次设置并应用密码后，需重启 PalServerConsole 才会开放 LAN。LAN 模式只适合可信内网，不是公网管理方案。
 
 ## 安全边界
 
-- 已配置的 `AdminPassword` 不会从后端回显；修改时只提交用户当前输入的新值。局域网登录使用游戏管理员密码，因此只应在可信内网使用。
+- 已配置的 `AdminPassword` 不会从后端回显；未输入新密码时保留原值，修改时只提交用户当前输入的新值。局域网登录使用游戏管理员密码，因此只应在可信内网使用。
 - 保存世界、停止、重启、备份恢复、备份删除和配置应用都需要明确操作。
 - 备份操作只接受官方 `backup\world` 下的直接子目录；活动世界没有删除 API。
 - 配置先保存为草稿。检测到 `CONFIG_CONFLICT` 时不会自动覆盖外部修改。
@@ -54,7 +54,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 | 页面提示 | 处理方式 |
 | --- | --- |
-| `GAME_ADMIN_PASSWORD_REQUIRED` | 在 `PalWorldSettings.ini` 配置游戏 `AdminPassword`，应用后重启控制台以开放可信 LAN 访问。 |
+| `GAME_ADMIN_PASSWORD_REQUIRED` | 在 `PalWorldSettings.ini` 配置游戏 `AdminPassword`，应用后重启控制台以开放可信 LAN 访问；未配置时仅监听 `127.0.0.1`。 |
 | `SERVER_NOT_CONFIGURED` | 在“服务器管理”页选择有效的 `PalServer.exe`。 |
 | `REST_CONNECTION_REFUSED` | 检查 PalServer 是否运行、REST 是否启用，以及端口是否与 `PalWorldSettings.ini` 一致。 |
 | `SNAPSHOT_PENDING` | 保存文件变化后等待稳定窗口；成功缓存前世界页面会显示过期状态。 |

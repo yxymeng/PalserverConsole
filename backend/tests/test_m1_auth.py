@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from palserver_console.auth import COOKIE_NAME
 from palserver_console.config import AppSettings
+from palserver_console.config_editor import ConfigService
 from palserver_console.main import CSRF_COOKIE_NAME, create_app
 from palserver_console.persistence import SCHEMA_VERSION, Database
 
@@ -235,6 +236,60 @@ def test_lan_login_session_csrf_logout_and_rate_limit(tmp_path: Path) -> None:
             json={"password": "incorrect-password"},
         )
         assert limited.status_code == 429
+
+
+def test_lan_login_uses_new_admin_password_after_config_apply(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    old_password = "old-password"
+    new_password = "new-password"
+    config = _configure_game_admin_password(settings, old_password)
+
+    with _lan_client(settings) as client:
+        old_login = client.post(
+            "/api/auth/login",
+            headers=_origin("http://192.0.2.20:8223"),
+            json={"password": old_password},
+        )
+        assert old_login.status_code == 200
+        assert old_password not in old_login.text
+        assert new_password not in old_login.text
+
+        wrong_login = client.post(
+            "/api/auth/login",
+            headers=_origin("http://192.0.2.20:8223"),
+            json={"password": "wrong-password"},
+        )
+        assert wrong_login.status_code == 401
+        assert old_password not in wrong_login.text
+        assert new_password not in wrong_login.text
+
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    database = Database(settings.database_path)
+    database.migrate()
+    config_service = ConfigService(database, settings.data_dir, lambda: executable, lambda: False)
+    config_service.save_draft({"AdminPassword": f'"{new_password}"'})
+    config_service.apply()
+    assert f'AdminPassword="{new_password}"' in config.read_text(encoding="utf-8")
+
+    with _lan_client(settings) as client:
+        new_login = client.post(
+            "/api/auth/login",
+            headers=_origin("http://192.0.2.20:8223"),
+            json={"password": new_password},
+        )
+        assert new_login.status_code == 200
+        assert old_password not in new_login.text
+        assert new_password not in new_login.text
+
+    with _lan_client(settings) as client:
+        old_login = client.post(
+            "/api/auth/login",
+            headers=_origin("http://192.0.2.20:8223"),
+            json={"password": old_password},
+        )
+        assert old_login.status_code == 401
+        assert old_password not in old_login.text
+        assert new_password not in old_login.text
 
 
 def test_network_settings_reject_missing_origin_and_csrf(tmp_path: Path) -> None:
