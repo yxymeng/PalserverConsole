@@ -34,7 +34,7 @@
 - 目标：阻止字段名、逗号、括号、换行和重复键向 `OptionSettings` 注入额外配置；`AdminPassword` 不回显，未输入新值时保留原值，输入新值时安全规范化后写入。
 - 入口：`backend/palserver_console/config_editor.py`、`main.py`、`backend/tests/test_m7_config.py`。
 - 实现：服务端限制键集合和请求规模，按类型规范化值；生成后重新解析并比对键和值；未知键只能编辑源文件已存在项。
-- 验收：恶意 payload 返回稳定错误码；合法值 round-trip 不增删键、不改变密码、不丢未知字段；后端相关与全量检查通过。
+- 验收：恶意 payload 返回稳定错误码；合法值 round-trip 不增删键、不丢未知字段；未输入新 `AdminPassword` 时保持原值，明确输入新值时安全覆盖；API、`rawText`、`diff`、日志和审计不得泄漏密码明文；后端相关与全量检查通过。
 
 完成记录：2026-08-08
 - 修改：`config_editor.py` 解析并限制 JSON 草稿、字段和值，规范化布尔/数值/文本/tuple，拒绝重复键和未知新增字段；`AdminPassword` 只返回配置状态，未输入新值时保留原值，输入新值时安全序列化；序列化后回读比对，并在应用前复核草稿。`main.py` 使用原始 JSON 解析以拦截重复键；`test_m7_config.py` 覆盖注入、密码保留与安全修改、tuple round-trip 和 API 错误码。
