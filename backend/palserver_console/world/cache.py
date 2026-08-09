@@ -97,6 +97,8 @@ def build_world_cache(
     *,
     snapshot_id: str,
     source_observed_at: int,
+    collected_at: int | None = None,
+    parse_started_at: int | None = None,
 ) -> dict[str, int]:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if cache_path.exists():
@@ -146,6 +148,10 @@ def build_world_cache(
             "created_at": str(int(time.time())),
             "counts": json.dumps(counts, separators=(",", ":")),
         }
+        if collected_at is not None:
+            metadata["collected_at"] = str(collected_at)
+        if parse_started_at is not None:
+            metadata["parse_started_at"] = str(parse_started_at)
         connection.executemany("INSERT INTO cache_info(key, value) VALUES(?, ?)", metadata.items())
         connection.executemany(
             "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", player_rows
@@ -177,6 +183,18 @@ def build_world_cache(
         with suppress(Exception):
             connection.close()
     return counts
+
+
+def read_cache_metadata(path: Path) -> dict[str, str]:
+    resolved = path.resolve(strict=True)
+    if not resolved.is_file() or resolved.suffix.casefold() != ".sqlite":
+        raise ValueError("World cache must be a regular .sqlite file.")
+    connection = sqlite3.connect(f"file:{resolved.as_posix()}?mode=ro", uri=True)
+    try:
+        rows = connection.execute("SELECT key, value FROM cache_info").fetchall()
+        return {str(key): str(value) for key, value in rows}
+    finally:
+        connection.close()
 
 
 def validate_cache_file(path: Path) -> dict[str, int]:

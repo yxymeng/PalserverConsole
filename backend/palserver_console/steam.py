@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 PALSERVER_APP_ID = "2394010"
+WINDOWS_REPARSE_POINT = 0x400
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,37 @@ class SteamCandidate:
 
 class VdfParseError(ValueError):
     pass
+
+
+def is_reparse_point(path: Path) -> bool:
+    """Return whether a path is a symlink, junction, or Windows reparse point."""
+    try:
+        if path.is_symlink():
+            return True
+        is_junction = getattr(path, "is_junction", None)
+        if callable(is_junction) and is_junction():
+            return True
+        attributes = int(getattr(os.lstat(path), "st_file_attributes", 0))
+        return bool(attributes & WINDOWS_REPARSE_POINT)
+    except OSError:
+        return False
+
+
+def assert_no_reparse_points(path: Path) -> None:
+    """Reject a path whose existing components can redirect outside its tree."""
+    candidate = path.expanduser()
+    if not candidate.is_absolute():
+        candidate = Path.cwd() / candidate
+    components: list[Path] = []
+    current = candidate
+    while True:
+        components.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for component in reversed(components):
+        if is_reparse_point(component):
+            raise ValueError(f"Path contains a Windows reparse point: {component}")
 
 
 def parse_vdf(text: str) -> dict[str, Any]:
@@ -159,7 +191,12 @@ def discover_palserver(steam_path: Path | None = None) -> list[SteamCandidate]:
 
 
 def validate_executable(path: Path) -> Path:
-    resolved = path.expanduser().resolve(strict=True)
+    assert_no_reparse_points(path)
+    try:
+        resolved = path.expanduser().resolve(strict=True)
+    except RuntimeError as error:
+        raise ValueError(f"Unable to resolve executable path: {error}") from error
     if not resolved.is_file() or resolved.name.casefold() != "palserver.exe":
         raise ValueError("所选路径必须指向存在的 PalServer.exe。")
+    assert_no_reparse_points(resolved)
     return resolved

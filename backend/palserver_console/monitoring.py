@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import re
 import socket
 import struct
@@ -15,6 +16,10 @@ from typing import Any, Protocol
 
 import httpx
 import psutil
+
+from .config import redact_sensitive_text
+
+logger = logging.getLogger(__name__)
 
 
 class MonitoringConfigError(RuntimeError):
@@ -175,6 +180,7 @@ class PalServerRestClient:
             base_url=config.rest_url.rstrip("/"),
             headers={"Authorization": f"Basic {credential}"},
             timeout=timeout,
+            trust_env=False,
         )
 
     def info(self) -> Any:
@@ -246,10 +252,7 @@ class PalServerRestClient:
 
 
 def _safe_error_text(text: str) -> str:
-    scrubbed = re.sub(
-        r"(?i)(AdminPassword|password|token|secret)\s*[:=]\s*[^,;\s]+", r"\1=[REDACTED]", text
-    )
-    return scrubbed[:300]
+    return redact_sensitive_text(text, max_length=300)
 
 
 class RconReadonly(Protocol):
@@ -433,6 +436,8 @@ class MonitorCoordinator:
         process_metrics: ProcessMetricsCollector | None = None,
         interval_seconds: float = 5.0,
         players_observer: Callable[[Any, str], None] | None = None,
+        retry_base_seconds: float = 1.0,
+        retry_max_seconds: float = 60.0,
     ) -> None:
         self.config_loader = config_loader
         self.rest_factory = rest_factory or PalServerRestClient
@@ -440,19 +445,36 @@ class MonitorCoordinator:
         self.process_metrics = process_metrics or ProcessMetricsCollector()
         self.players_observer = players_observer
         self.interval_seconds = interval_seconds
+        self.retry_base_seconds = max(0.0, retry_base_seconds)
+        self.retry_max_seconds = max(self.retry_base_seconds, retry_max_seconds)
         self.state = LiveState()
         self._lock = threading.RLock()
         self._condition = threading.Condition(self._lock)
         self._sequence = 0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
+        self._started_at: int | None = None
+        self._last_run_at: int | None = None
+        self._last_success_at: int | None = None
+        self._last_error: dict[str, object] | None = None
+        self._consecutive_failures = 0
+        self._retry_delay_seconds = 0.0
+        self._cycle_succeeded = False
 
     def start(self) -> None:
-        if self._thread and self._thread.is_alive():
-            return
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._run, name="palconsole-live", daemon=True)
-        self._thread.start()
+        with self._lock:
+            if self._thread and self._thread.is_alive():
+                return
+            self._stop.clear()
+            self._started_at = int(time.time())
+            self._last_run_at = None
+            self._last_success_at = None
+            self._last_error = None
+            self._consecutive_failures = 0
+            self._retry_delay_seconds = 0.0
+            self._cycle_succeeded = False
+            self._thread = threading.Thread(target=self._run, name="palconsole-live", daemon=True)
+            self._thread.start()
 
     def stop(self) -> None:
         self._stop.set()
@@ -462,10 +484,25 @@ class MonitorCoordinator:
             self._thread.join(timeout=2)
         self._thread = None
 
+    def status(self) -> dict[str, object]:
+        with self._lock:
+            thread = self._thread
+            return {
+                "name": "live-monitor",
+                "alive": bool(thread and thread.is_alive()),
+                "startedAt": self._started_at,
+                "lastRunAt": self._last_run_at,
+                "lastSuccessAt": self._last_success_at,
+                "lastError": dict(self._last_error) if self._last_error else None,
+                "consecutiveFailures": self._consecutive_failures,
+                "retryDelaySeconds": self._retry_delay_seconds,
+            }
+
     def collect_once(self) -> dict[str, Any]:
         try:
             executable, config = self.config_loader()
         except MonitoringConfigError as error:
+            self._record_failure(error.code, error)
             self._mark_error(error.code)
             return self.snapshot()
         now = int(time.time())
@@ -500,6 +537,7 @@ class MonitorCoordinator:
         finally:
             _close_source(rest)
         self._publish()
+        self._record_success()
         return self.snapshot()
 
     def snapshot(self) -> dict[str, Any]:
@@ -544,8 +582,41 @@ class MonitorCoordinator:
 
     def _run(self) -> None:
         while not self._stop.is_set():
-            self.collect_once()
-            self._stop.wait(self.interval_seconds)
+            try:
+                self.collect_once()
+            except Exception as error:
+                self._record_failure("MONITOR_LOOP_ERROR", error)
+            with self._lock:
+                delay = (
+                    self.interval_seconds
+                    if self._cycle_succeeded
+                    else self._retry_delay_seconds
+                )
+            if self._stop.wait(delay):
+                return
+
+    def _record_success(self) -> None:
+        now = int(time.time())
+        with self._lock:
+            self._last_run_at = now
+            self._last_success_at = now
+            self._consecutive_failures = 0
+            self._retry_delay_seconds = 0.0
+            self._cycle_succeeded = True
+
+    def _record_failure(self, code: str, error: BaseException) -> None:
+        now = int(time.time())
+        error_type = type(error).__name__
+        with self._lock:
+            self._last_run_at = now
+            self._last_error = {"code": code, "type": error_type, "observedAt": now}
+            self._consecutive_failures += 1
+            exponent = min(self._consecutive_failures - 1, 30)
+            self._retry_delay_seconds = min(
+                self.retry_max_seconds, self.retry_base_seconds * (2**exponent)
+            )
+            self._cycle_succeeded = False
+        logger.warning("monitor background cycle failed code=%s error_type=%s", code, error_type)
 
     def _collect_value(
         self,

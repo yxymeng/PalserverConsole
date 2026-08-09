@@ -20,7 +20,14 @@ from pydantic import BaseModel, Field
 from .audit import DEFAULT_RETENTION_DAYS, AuditService, export_csv, export_json
 from .auth import COOKIE_NAME, AuthStore, Session, is_loopback
 from .backups import BackupError, BackupService
-from .config import AppSettings, default_settings
+from .config import (
+    AppSettings,
+    ProfileError,
+    ServerProfileService,
+    WorldCandidate,
+    configure_logging,
+    default_settings,
+)
 from .config_editor import ConfigError, ConfigService, parse_draft_request
 from .errors import error_payload, freshness
 from .lifecycle import LifecycleError, LifecycleManager
@@ -81,14 +88,26 @@ class ShellStatusResponse(BaseModel):
     executablePath: str | None
 
 
+class WorldCandidateResponse(BaseModel):
+    worldId: str
+    worldPath: str
+    modifiedAt: int
+
+
 class ServerSettingsRequest(BaseModel):
     executablePath: str = Field(min_length=1, max_length=2048)
     launchArguments: str = Field(default="", max_length=4096)
+    worldId: str | None = Field(default=None, max_length=256)
 
 
 class ServerSettingsResponse(BaseModel):
     executablePath: str | None
     launchArguments: str
+    worldId: str | None = None
+    worldPath: str | None = None
+    worldCandidates: list[WorldCandidateResponse] = Field(default_factory=list)
+    bindingValid: bool = False
+    bindingErrorCode: str | None = None
 
 
 class DiscoveryCandidateResponse(BaseModel):
@@ -96,6 +115,7 @@ class DiscoveryCandidateResponse(BaseModel):
     installPath: str
     executablePath: str
     manifestValid: bool
+    worldCandidates: list[WorldCandidateResponse] = Field(default_factory=list)
 
 
 class LifecycleRequest(BaseModel):
@@ -131,16 +151,27 @@ def create_app(
     world_service: WorldSnapshotService | None = None,
 ) -> FastAPI:
     resolved_settings = settings or default_settings()
+    logger = configure_logging(resolved_settings.data_dir)
     database = Database(resolved_settings.database_path)
     auth = AuthStore(database, resolved_settings)
+    profiles = ServerProfileService(database)
 
     def executable_for_audit() -> Path | None:
         raw = database.get_setting("server.executable")
         return Path(raw) if raw else None
 
-    audit = AuditService(database, executable_for_audit)
+    audit = AuditService(
+        database,
+        executable_for_audit,
+        maintenance_callback=auth.cleanup_expired,
+    )
 
     def monitor_config() -> tuple[Path, ServerConnectionConfig]:
+        try:
+            profile = profiles.profile()
+            return profile.executable_path, read_connection_config(profile.install_path)
+        except ProfileError as error:
+            raise MonitoringConfigError(error.code, str(error)) from error
         raw_executable = database.get_setting("server.executable")
         if not raw_executable:
             raise MonitoringConfigError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
@@ -161,12 +192,16 @@ def create_app(
         process=None,
         audit_callback=audit_operation,
         console_output_sink=audit_console_line,
+        profile_provider=profiles.profile,
     )
     live_monitor = monitor or MonitorCoordinator(
         monitor_config, players_observer=audit.observe_players
     )
     world_data = world_service or WorldSnapshotService(
-        database, executable_for_audit, resolved_settings.data_dir
+        database,
+        executable_for_audit,
+        resolved_settings.data_dir,
+        profile_provider=profiles.profile,
     )
     backups = BackupService(
         executable_for_audit,
@@ -177,19 +212,59 @@ def create_app(
         lambda backup_id, relative_path, observed_at, validation: database.upsert_backup_index(
             backup_id, relative_path, observed_at, validation
         ),
+        profiles.profile,
+        database=database,
+        control_lock=lifecycle.control_lock,
     )
     config_editor = ConfigService(
         database,
         resolved_settings.data_dir,
         executable_for_audit,
         lambda: lifecycle.status()["state"] == "running",
+        profiles.profile,
+        control_lock=lifecycle.control_lock,
     )
     lifecycle.set_config_apply(config_editor.apply)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         database.migrate()
-        database.fail_incomplete_operations()
+        cleanup = auth.cleanup_expired()
+        logger.info(
+            "console startup data_dir=%s cleaned_sessions=%d cleaned_login_attempts=%d",
+            resolved_settings.data_dir,
+            cleanup["sessions"],
+            cleanup["loginAttempts"],
+        )
+        interrupted_operations = database.recover_incomplete_operations()
+        for interrupted in interrupted_operations:
+            audit.record(
+                "server.operation.transition",
+                result="interrupted",
+                detail={
+                    "operationId": interrupted.get("id"),
+                    "kind": interrupted.get("kind"),
+                    "fromState": interrupted.get("state"),
+                    "fromStage": interrupted.get("stage"),
+                    "state": "failed",
+                    "stage": "interrupted",
+                    "errorCode": "CONSOLE_RESTARTED",
+                },
+            )
+        recovery = backups.recovery_status()
+        if recovery["active"]:
+            journal = recovery.get("journal")
+            detail = journal if isinstance(journal, dict) else {}
+            audit.record(
+                "backup.restore.recovery_required",
+                result="blocked",
+                detail={
+                    "journalId": detail.get("journalId"),
+                    "worldId": detail.get("worldId"),
+                    "sourceBackupId": detail.get("sourceBackupId"),
+                    "phase": detail.get("phase"),
+                },
+            )
         if database.get_setting("audit.retention_days") is None:
             database.set_setting("audit.retention_days", str(DEFAULT_RETENTION_DAYS))
         audit.start()
@@ -201,6 +276,7 @@ def create_app(
             world_data.stop()
             live_monitor.stop()
             audit.stop()
+            logger.info("console shutdown")
 
     app = FastAPI(
         title="PalServerConsole",
@@ -211,6 +287,7 @@ def create_app(
     )
     app.state.settings = resolved_settings
     app.state.database = database
+    app.state.logger = logger
     app.state.auth = auth
     app.state.lifecycle = lifecycle
     app.state.monitor = live_monitor
@@ -257,6 +334,13 @@ def create_app(
     @app.get("/api/health", response_model=HealthResponse, tags=["system"])
     def health() -> HealthResponse:
         return HealthResponse()
+
+    @app.get("/api/monitoring/status", tags=["system"], response_model=None)
+    def monitoring_status(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_authenticated_request(request, auth)
+        if denied:
+            return denied
+        return {"monitor": live_monitor.status(), "audit": audit.status()}
 
     @app.get("/api/bootstrap", tags=["system"], response_model=None)
     def bootstrap(request: Request) -> dict[str, object] | JSONResponse:
@@ -319,8 +403,10 @@ def create_app(
             return _error(429, "LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试。")
         if not auth.verify_admin_password(payload.password):
             auth.record_login(peer_ip, False)
+            logger.info("auth login rejected peer=%s", peer_ip)
             return _error(401, "INVALID_CREDENTIALS", "游戏管理员密码错误。")
         auth.record_login(peer_ip, True)
+        logger.info("auth login accepted peer=%s", peer_ip)
         cookie_value, session = auth.create_session(peer_ip, local=False)
         _set_session_cookies(response, cookie_value, session.csrf_token)
         return MessageResponse(message="登录成功。")
@@ -382,9 +468,36 @@ def create_app(
         denied = _require_authenticated_request(request, auth)
         if denied:
             return denied
+        raw_executable = database.get_setting("server.executable")
+        candidates: list[WorldCandidate] = []
+        binding_error: str | None = None
+        profile = None
+        if raw_executable:
+            try:
+                candidates = profiles.candidates(raw_executable)
+            except ProfileError as error:
+                binding_error = error.code
+            try:
+                profile = profiles.profile()
+            except ProfileError as error:
+                binding_error = error.code
+        elif database.get_server_profile() is not None:
+            binding_error = "WORLD_PROFILE_REQUIRED"
         return ServerSettingsResponse(
-            executablePath=database.get_setting("server.executable"),
+            executablePath=raw_executable,
             launchArguments=database.get_setting("server.arguments") or "",
+            worldId=profile.world_id if profile else None,
+            worldPath=str(profile.world_path) if profile else None,
+            worldCandidates=[
+                WorldCandidateResponse(
+                    worldId=item.world_id,
+                    worldPath=str(item.world_path),
+                    modifiedAt=int(item.modified_at_ns),
+                )
+                for item in candidates
+            ],
+            bindingValid=profile is not None,
+            bindingErrorCode=binding_error,
         )
 
     @app.put("/api/server/settings", response_model=MessageResponse, tags=["server"])
@@ -396,8 +509,39 @@ def create_app(
             return denied
         try:
             executable = validate_executable(Path(payload.executablePath))
-        except (OSError, ValueError) as error:
-            return _error(422, "INVALID_SERVER_PATH", str(error))
+            candidates = profiles.candidates(executable)
+        except (OSError, ValueError, ProfileError) as error:
+            code = (
+                error.code
+                if isinstance(error, ProfileError)
+                else (
+                    "PATH_REPARSE_POINT"
+                    if "reparse point" in str(error).lower()
+                    else "INVALID_SERVER_PATH"
+                )
+            )
+            return _error(422, code, str(error))
+        selected_profile = None
+        if payload.worldId is not None:
+            try:
+                selected_profile = profiles.bind(executable, payload.worldId)
+            except ProfileError as error:
+                return _error(422, error.code, str(error))
+        else:
+            try:
+                existing = profiles.profile()
+            except ProfileError:
+                existing = None
+            if existing is not None and existing.executable_path == executable:
+                selected_profile = existing
+            elif candidates:
+                return _error(
+                    409,
+                    "WORLD_SELECTION_REQUIRED",
+                    "Select a World ID before saving server settings.",
+                )
+            else:
+                database.clear_server_profile()
         database.set_setting("server.executable", str(executable))
         database.set_setting("server.arguments", payload.launchArguments)
         audit.record(
@@ -405,6 +549,7 @@ def create_app(
             detail={
                 "executablePath": str(executable),
                 "hasLaunchArguments": bool(payload.launchArguments),
+                "worldId": selected_profile.world_id if selected_profile else None,
             },
             peer_ip=_peer_ip(request),
         )
@@ -416,6 +561,20 @@ def create_app(
         tags=["server"],
     )
     def discover(request: Request) -> list[DiscoveryCandidateResponse] | JSONResponse:
+        def candidate_worlds(executable: Path) -> list[WorldCandidateResponse]:
+            try:
+                worlds = profiles.candidates(executable)
+            except ProfileError:
+                return []
+            return [
+                WorldCandidateResponse(
+                    worldId=world.world_id,
+                    worldPath=str(world.world_path),
+                    modifiedAt=int(world.modified_at_ns),
+                )
+                for world in worlds
+            ]
+
         if not is_loopback(_peer_ip(request)):
             return _error(403, "LOCAL_ONLY", "Steam 路径发现结果只在服务器本机显示。")
         return [
@@ -424,6 +583,7 @@ def create_app(
                 installPath=str(item.install_path),
                 executablePath=str(item.executable_path),
                 manifestValid=item.manifest_valid,
+                worldCandidates=candidate_worlds(item.executable_path),
             )
             for item in discover_palserver()
         ]
@@ -714,7 +874,7 @@ def create_app(
         if not is_loopback(_peer_ip(request)):
             return _error(403, "LOCAL_ONLY", "打开配置目录只能在服务器本机执行。")
         try:
-            path = config_editor.path().parent
+            path = config_editor.folder_path()
             path.mkdir(parents=True, exist_ok=True)
             if os.name == "nt":
                 os.startfile(str(path))
@@ -770,6 +930,35 @@ def create_app(
             return MessageResponse(message="备份已恢复。")
         except BackupError as error:
             return _error(409, error.code, str(error))
+
+    @app.get("/api/backups/restore/recovery", tags=["backups"], response_model=None)
+    def backup_restore_recovery(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_authenticated_request(request, auth)
+        if denied:
+            return denied
+        return backups.recovery_status()
+
+    @app.post("/api/backups/restore/resume", tags=["backups"], response_model=None)
+    def backup_restore_resume(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_write(request, auth)
+        if denied:
+            return denied
+        try:
+            return backups.resume_restore()
+        except BackupError as error:
+            status = 500 if error.code == "ROLLBACK_FAILED" else 409
+            return _error(status, error.code, str(error))
+
+    @app.post("/api/backups/restore/rollback", tags=["backups"], response_model=None)
+    def backup_restore_rollback(request: Request) -> dict[str, object] | JSONResponse:
+        denied = _require_write(request, auth)
+        if denied:
+            return denied
+        try:
+            return backups.rollback_restore()
+        except BackupError as error:
+            status = 500 if error.code == "ROLLBACK_FAILED" else 409
+            return _error(status, error.code, str(error))
 
     @app.post("/api/backups/open-directory", tags=["backups"], response_model=None)
     def backup_open_directory(request: Request) -> dict[str, str] | JSONResponse:
@@ -975,12 +1164,16 @@ def _operation_public(operation: Mapping[str, object]) -> dict[str, object]:
     """Expose one operation contract while keeping snake_case legacy keys."""
 
     result = dict(operation)
+    result.pop("request_fingerprint", None)
     result.update(
         {
             "operationId": operation.get("id"),
             "errorCode": operation.get("error_code"),
             "createdAt": operation.get("created_at"),
             "updatedAt": operation.get("updated_at"),
+            "parentOperationId": operation.get("parent_operation_id"),
+            "targetPids": operation.get("target_pids"),
+            "confirmationExpiresAt": operation.get("confirmation_expires_at"),
         }
     )
     return result

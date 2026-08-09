@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -15,6 +19,7 @@ from palserver_console.monitoring import (
     SensitiveValue,
     ServerConnectionConfig,
     SourceError,
+    _safe_error_text,
     parse_connection_config,
 )
 
@@ -119,6 +124,63 @@ def test_connection_config_parses_ports_and_redacts_password() -> None:
     assert "must-not-leak" not in str(config.admin_password)
 
 
+def test_rest_error_redaction_consumes_complex_quoted_secret() -> None:
+    secret = 'abc"),RCONEnabled=True,(path)\\tail'
+    encoded = json.dumps(secret)
+    for payload in (
+        f"AdminPassword={encoded}",
+        json.dumps(f"AdminPassword={encoded}"),
+        json.dumps({"AdminPassword": secret}),
+        json.dumps({"error": {"AdminPassword": secret}}),
+    ):
+        result = _safe_error_text(payload)
+        assert "abc" not in result
+        assert "RCONEnabled=True" not in result
+        assert "path" not in result
+
+
+def test_rest_client_bypasses_environment_proxies_for_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            body = b'{"version":"local-rest"}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            monkeypatch.setenv(name, "http://127.0.0.1:1")
+        monkeypatch.setenv("NO_PROXY", "")
+        config = ServerConnectionConfig(
+            rest_url=f"http://127.0.0.1:{server.server_port}",
+            rest_enabled=True,
+            rcon_host="127.0.0.1",
+            rcon_port=25575,
+            rcon_enabled=False,
+            admin_password=SensitiveValue("must-not-leak"),
+        )
+        client = PalServerRestClient(config)
+        try:
+            assert client.info() == {"version": "local-rest"}
+            assert client._client._trust_env is False
+        finally:
+            client.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 @pytest.mark.parametrize(
     ("response", "expected"),
     [
@@ -203,6 +265,53 @@ def test_monitor_uses_read_only_rcon_fallback_and_preserves_stale_values() -> No
     assert rest.close_count == 2
 
 
+def test_monitor_background_reports_error_and_recovers_with_backoff() -> None:
+    rest = FakeRest()
+    rcon = FakeRcon()
+    config = ServerConnectionConfig(
+        rest_url="http://127.0.0.1:8212",
+        rest_enabled=True,
+        rcon_host="127.0.0.1",
+        rcon_port=25575,
+        rcon_enabled=True,
+        admin_password=SensitiveValue("must-not-leak"),
+    )
+    calls = 0
+
+    def flaky_factory(_: ServerConnectionConfig) -> FakeRest:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("injected monitor failure")
+        return rest
+
+    monitor = MonitorCoordinator(
+        config_loader=lambda: (Path("C:/test/PalServer.exe"), config),
+        rest_factory=flaky_factory,
+        rcon_factory=lambda _: rcon,
+        process_metrics=FakeProcessMetrics(),  # type: ignore[arg-type]
+        interval_seconds=0.01,
+        retry_base_seconds=0.01,
+        retry_max_seconds=0.05,
+    )
+    monitor.start()
+    try:
+        deadline = time.monotonic() + 2
+        status = monitor.status()
+        while status["lastSuccessAt"] is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+            status = monitor.status()
+        assert calls >= 2
+        assert status["alive"] is True
+        assert status["lastSuccessAt"] is not None
+        assert status["consecutiveFailures"] == 0
+        last_error = cast(dict[str, object], status["lastError"])
+        assert last_error["code"] == "MONITOR_LOOP_ERROR"
+        assert status["retryDelaySeconds"] == 0.0
+    finally:
+        monitor.stop()
+
+
 def test_m3_api_exposes_full_ip_sse_and_never_returns_admin_password(tmp_path: Path) -> None:
     monitor, rest, _ = _monitor()
     monitor.collect_once()
@@ -220,6 +329,9 @@ def test_m3_api_exposes_full_ip_sse_and_never_returns_admin_password(tmp_path: P
         settings_response = client.get("/api/live/settings")
         assert "must-not-leak" not in settings_response.text
         assert settings_response.json()["data"]["AdminPassword"] == "[REDACTED]"
+        background = client.get("/api/monitoring/status")
+        assert background.status_code == 200
+        assert set(background.json()) == {"monitor", "audit"}
 
         announcement = client.post(
             "/api/live/announce",

@@ -1,21 +1,90 @@
 from __future__ import annotations
 
 import gzip
+import json
 import os
 import subprocess
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from palserver_console.config import AppSettings
+from palserver_console.config import AppSettings, ProfileError, ServerProfileService
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import verify_stable_parse
-from palserver_console.world.cache import build_world_cache, query_cache
+from palserver_console.world.cache import build_world_cache, query_cache, read_cache_metadata
 from palserver_console.world.service import WorldDataError, WorldSnapshotService
+
+
+def _profile_fixture(tmp_path: Path) -> tuple[Database, Path, Path, Path]:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    executable = tmp_path / "PalServer" / "PalServer.exe"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"exe")
+    root = executable.parent / "Pal" / "Saved" / "SaveGames" / "0"
+    worlds = []
+    for world_id in ("world-a", "world-b"):
+        world = root / world_id
+        (world / "Players").mkdir(parents=True)
+        (world / "Level.sav").write_bytes(world_id.encode())
+        (world / "LevelMeta.sav").write_bytes(b"meta")
+        worlds.append(world)
+    database.set_setting("server.executable", str(executable))
+    return database, executable, worlds[0], worlds[1]
+
+
+def test_server_profile_is_explicit_and_stable_when_world_mtime_changes(tmp_path: Path) -> None:
+    database, executable, selected, other = _profile_fixture(tmp_path)
+    profiles = ServerProfileService(database)
+
+    assert [item.world_id for item in profiles.candidates(executable)] == [
+        "world-a",
+        "world-b",
+    ]
+    bound = profiles.bind(executable, "world-a")
+    assert bound.world_path == selected.resolve()
+
+    os.utime(other / "Level.sav", ns=(9_000_000_000, 9_000_000_000))
+    os.utime(selected / "Level.sav", ns=(1_000_000_000, 1_000_000_000))
+
+    assert profiles.profile().world_id == "world-a"
+    service = WorldSnapshotService(
+        database,
+        lambda: executable,
+        tmp_path / "data",
+        profile_provider=profiles.profile,
+    )
+    assert service._world_directory() == selected.resolve()
+
+    selected.rename(tmp_path / "PalServer" / "Pal" / "Saved" / "SaveGames" / "0" / "moved")
+    with pytest.raises(ProfileError) as error:
+        profiles.profile()
+    assert error.value.code == "WORLD_BINDING_INVALID"
+
+
+def test_world_service_refuses_ambiguous_legacy_world_target(tmp_path: Path) -> None:
+    database, executable, _, _ = _profile_fixture(tmp_path)
+    service = WorldSnapshotService(database, lambda: executable, tmp_path / "data")
+
+    with pytest.raises(WorldDataError) as error:
+        service._world_directory()
+
+    assert error.value.code == "WORLD_SELECTION_REQUIRED"
+
+
+def test_world_id_path_traversal_is_rejected(tmp_path: Path) -> None:
+    database, executable, _, _ = _profile_fixture(tmp_path)
+    profiles = ServerProfileService(database)
+
+    with pytest.raises(ProfileError) as error:
+        profiles.bind(executable, "..\\outside")
+
+    assert error.value.code == "INVALID_WORLD_ID"
 
 
 def _property(value: Any, type_name: str = "StructProperty") -> dict[str, Any]:
@@ -215,6 +284,72 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     }
 
 
+def test_cache_and_snapshot_keep_source_collection_and_parse_times(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    world = tmp_path / "world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    level, players = _synthetic_properties()
+    clock_values = iter([200, 201, 202, 203, 204, 205])
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        tmp_path / "data",
+        minimum_free_bytes=0,
+        clock=lambda: next(clock_values),
+    )
+    service.snapshots_root.mkdir(parents=True)
+    service.cache_root.mkdir(parents=True)
+
+    def fake_worker(
+        snapshot: Path,
+        cache_path: Path,
+        snapshot_id: str,
+        observed_at: int,
+        *,
+        collected_at: int,
+        parse_started_at: int,
+    ) -> dict[str, object]:
+        build_world_cache(
+            cache_path,
+            level,
+            players,
+            snapshot_id=snapshot_id,
+            source_observed_at=observed_at,
+            collected_at=collected_at,
+            parse_started_at=parse_started_at,
+        )
+        return {
+            "parsedAt": 204,
+            "durationMs": 5,
+            "peakMemoryBytes": 6,
+            "cacheSizeBytes": cache_path.stat().st_size,
+        }
+
+    monkeypatch.setattr(service, "_run_worker", fake_worker)
+    service._capture_and_parse(world, service._fingerprint(world))
+
+    current = database.current_snapshot_version()
+    assert current is not None
+    parse_result = json.loads(str(current["parse_result"]))
+    metadata = read_cache_metadata(Path(str(current["cache_path"])))
+    snapshot_metadata = json.loads(
+        (service.snapshots_root / str(current["id"]) / "snapshot.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert parse_result["collectedAt"] == 201
+    assert parse_result["parsedAt"] == 204
+    assert metadata["collected_at"] == "201"
+    assert metadata["parse_started_at"] == "202"
+    assert snapshot_metadata["collectedAt"] == 201
+    assert service.status()["observedAt"] == current["source_observed_at"]
+
+
 def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
     database = Database(settings.database_path)
@@ -281,6 +416,128 @@ def test_parser_crash_is_reported_without_exiting_process(
 
     assert raised.value.code == "PARSER_CRASHED"
     assert os.getpid() > 0
+
+
+def _retention_pair(
+    service: WorldSnapshotService,
+    snapshot_id: str,
+    collected_at: int,
+    payload_size: int = 1,
+) -> Path:
+    snapshot = service.snapshots_root / snapshot_id
+    snapshot.mkdir(parents=True, exist_ok=True)
+    (snapshot / "snapshot.json").write_text(
+        json.dumps({"snapshotId": snapshot_id, "collectedAt": collected_at}),
+        encoding="utf-8",
+    )
+    (snapshot / "Level.sav").write_bytes(b"x" * payload_size)
+    cache = service.cache_root / f"world-cache-{snapshot_id}.sqlite"
+    cache.write_bytes(b"y" * payload_size)
+    return cache
+
+
+def test_snapshot_retention_keeps_current_and_bounds_count_and_age(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        tmp_path / "data",
+        snapshot_retention_count=2,
+        snapshot_retention_bytes=1024,
+        snapshot_retention_age_seconds=100,
+        minimum_free_bytes=0,
+        clock=lambda: 1_000,
+    )
+    service.snapshots_root.mkdir(parents=True)
+    service.cache_root.mkdir(parents=True)
+    _retention_pair(service, "old", 700, payload_size=10)
+    _retention_pair(service, "newer", 950, payload_size=10)
+    current_cache = _retention_pair(service, "current", 700, payload_size=10)
+    database.record_snapshot_version(
+        "current", str(current_cache), 700, "success", make_current=True
+    )
+
+    report = service.cleanup_storage()
+
+    assert report["removedSnapshots"] == 1
+    assert not (service.snapshots_root / "old").exists()
+    assert not (service.cache_root / "world-cache-old.sqlite").exists()
+    assert (service.snapshots_root / "current").exists()
+    assert current_cache.exists()
+    assert (service.snapshots_root / "newer").exists()
+
+
+def test_snapshot_cleanup_removes_temp_and_unreferenced_items(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        tmp_path / "data",
+        minimum_free_bytes=0,
+        clock=lambda: 1_000,
+    )
+    service.snapshots_root.mkdir(parents=True)
+    service.cache_root.mkdir(parents=True)
+    (service.snapshots_root / ".crashed.tmp").mkdir()
+    (service.cache_root / ".world-cache-crashed.tmp.sqlite").write_bytes(b"tmp")
+    (service.snapshots_root / "orphan-snapshot").mkdir()
+    (service.cache_root / "world-cache-orphan-cache.sqlite").write_bytes(b"orphan")
+
+    service.cleanup_storage()
+
+    assert not (service.snapshots_root / ".crashed.tmp").exists()
+    assert not (service.cache_root / ".world-cache-crashed.tmp.sqlite").exists()
+    assert not (service.snapshots_root / "orphan-snapshot").exists()
+    assert not (service.cache_root / "world-cache-orphan-cache.sqlite").exists()
+
+
+def test_low_disk_preserves_last_successful_cache(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    data_dir = tmp_path / "data"
+    cache_root = data_dir / "cache"
+    cache_root.mkdir(parents=True)
+    current_cache = cache_root / "world-cache-current.sqlite"
+    current_cache.write_bytes(b"last-success")
+    database.record_snapshot_version("current", str(current_cache), 1, "success", make_current=True)
+    world = tmp_path / "world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        data_dir,
+        minimum_free_bytes=100,
+        disk_usage_provider=lambda _: SimpleNamespace(free=50),
+    )
+    expected = service._fingerprint(world)
+
+    with pytest.raises(WorldDataError) as raised:
+        service._capture_and_parse(world, expected)
+
+    assert raised.value.code == "DISK_SPACE_LOW"
+    assert current_cache.read_bytes() == b"last-success"
+    assert list(service.snapshots_root.glob("*") if service.snapshots_root.exists() else []) == []
+
+
+def test_ooz_discovery_result_is_cached_until_reparse(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    dll = tmp_path / "libooz.dll"
+    dll.write_bytes(b"dll")
+    monkeypatch.setenv("PALSERVER_OOZ_DLL", str(dll))
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    assert service._find_ooz_dll() == dll.resolve()
+    dll.unlink()
+    assert service._find_ooz_dll() == dll.resolve()
+    service.request_reparse()
+    assert service._find_ooz_dll() is None
 
 
 @pytest.mark.integration

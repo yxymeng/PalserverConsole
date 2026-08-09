@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 8
 
 MIGRATIONS: tuple[str, ...] = (
     """
@@ -108,7 +109,109 @@ MIGRATIONS: tuple[str, ...] = (
     DROP TABLE IF EXISTS auth_config;
     DELETE FROM sessions WHERE is_local = 0;
     """,
+    """
+    ALTER TABLE operations ADD COLUMN parent_operation_id TEXT;
+    ALTER TABLE operations ADD COLUMN target_pids TEXT;
+    ALTER TABLE operations ADD COLUMN confirmation_expires_at INTEGER;
+    CREATE INDEX operations_confirmation_idx
+        ON operations(state, confirmation_expires_at);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS server_profiles (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        executable_path TEXT NOT NULL,
+        install_path TEXT NOT NULL,
+        world_id TEXT NOT NULL,
+        world_path TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS restore_journal (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        journal_id TEXT NOT NULL UNIQUE,
+        world_id TEXT NOT NULL,
+        world_path TEXT NOT NULL,
+        source_backup_id TEXT NOT NULL,
+        source_path TEXT NOT NULL,
+        safety_copy_path TEXT NOT NULL,
+        staging_path TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        component TEXT,
+        completed_components_json TEXT NOT NULL DEFAULT '[]',
+        checksums_json TEXT NOT NULL DEFAULT '{}',
+        error_type TEXT,
+        error_message TEXT,
+        original_error TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+    );
+    """,
+    """
+    ALTER TABLE operations ADD COLUMN request_fingerprint TEXT;
+    """,
 )
+
+
+class OperationReservationError(RuntimeError):
+    def __init__(self, code: str, message: str, operation_id: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.operation_id = operation_id
+
+
+class OperationTransitionError(RuntimeError):
+    pass
+
+
+class RestoreJournalConflictError(RuntimeError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+_OPERATION_COLUMNS = """
+    id, kind, state, stage, error_code, detail, created_at, updated_at,
+    parent_operation_id, target_pids, confirmation_expires_at, request_fingerprint
+"""
+RESTORE_TERMINAL_PHASES = frozenset({"completed", "rolled_back"})
+RESTORE_BLOCKED_OPERATION_KINDS = frozenset(
+    {"start", "save", "restart", "apply_config_and_restart"}
+)
+_ALLOWED_OPERATION_TRANSITIONS: dict[str, frozenset[str]] = {
+    "queued": frozenset({"running", "failed"}),
+    "running": frozenset(
+        {"running", "succeeded", "failed", "cancelled", "awaiting_force_confirmation"}
+    ),
+    "awaiting_force_confirmation": frozenset({"succeeded", "failed"}),
+    "succeeded": frozenset(),
+    "failed": frozenset(),
+    "cancelled": frozenset(),
+}
+
+
+def _operation_from_row(row: sqlite3.Row | None) -> dict[str, object] | None:
+    if row is None:
+        return None
+    operation = dict(row)
+    raw_pids = operation.get("target_pids")
+    if isinstance(raw_pids, str):
+        try:
+            parsed = json.loads(raw_pids)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list) and all(isinstance(pid, int) for pid in parsed):
+            operation["target_pids"] = parsed
+        else:
+            operation["target_pids"] = None
+    return operation
+
+
+def _encode_pids(pids: list[int] | None) -> str | None:
+    if pids is None:
+        return None
+    return json.dumps([int(pid) for pid in pids], separators=(",", ":"))
 
 
 class Database:
@@ -139,8 +242,41 @@ class Database:
                     f"app.db schema version {current} is newer than supported {SCHEMA_VERSION}."
                 )
             for version in range(current + 1, SCHEMA_VERSION + 1):
-                connection.executescript(MIGRATIONS[version - 1])
+                if version == 5:
+                    self._migrate_operation_targets(connection)
+                elif version == 8:
+                    self._migrate_operation_request_fingerprint(connection)
+                else:
+                    connection.executescript(MIGRATIONS[version - 1])
                 connection.execute(f"PRAGMA user_version = {version}")
+
+    @staticmethod
+    def _migrate_operation_targets(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(operations)").fetchall()
+        }
+        if "parent_operation_id" not in columns:
+            connection.execute("ALTER TABLE operations ADD COLUMN parent_operation_id TEXT")
+        if "target_pids" not in columns:
+            connection.execute("ALTER TABLE operations ADD COLUMN target_pids TEXT")
+        if "confirmation_expires_at" not in columns:
+            connection.execute(
+                "ALTER TABLE operations ADD COLUMN confirmation_expires_at INTEGER"
+            )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS operations_confirmation_idx
+            ON operations(state, confirmation_expires_at)
+            """
+        )
+
+    @staticmethod
+    def _migrate_operation_request_fingerprint(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(operations)").fetchall()
+        }
+        if "request_fingerprint" not in columns:
+            connection.execute("ALTER TABLE operations ADD COLUMN request_fingerprint TEXT")
 
     def schema_version(self) -> int:
         with self.connect() as connection:
@@ -160,6 +296,41 @@ class Database:
                 """,
                 (key, value, int(time.time())),
             )
+
+    def get_server_profile(self) -> dict[str, object] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT executable_path, install_path, world_id, world_path,
+                    created_at, updated_at
+                    FROM server_profiles WHERE id = 1"""
+            ).fetchone()
+        return None if row is None else dict(row)
+
+    def save_server_profile(
+        self,
+        executable_path: str,
+        install_path: str,
+        world_id: str,
+        world_path: str,
+    ) -> None:
+        now = int(time.time())
+        with self.connect() as connection:
+            connection.execute(
+                """INSERT INTO server_profiles(
+                    id, executable_path, install_path, world_id, world_path, created_at, updated_at
+                ) VALUES(1, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    executable_path=excluded.executable_path,
+                    install_path=excluded.install_path,
+                    world_id=excluded.world_id,
+                    world_path=excluded.world_path,
+                    updated_at=excluded.updated_at""",
+                (executable_path, install_path, world_id, world_path, now, now),
+            )
+
+    def clear_server_profile(self) -> None:
+        with self.connect() as connection:
+            connection.execute("DELETE FROM server_profiles WHERE id = 1")
 
     def get_config_draft(self) -> dict[str, object] | None:
         with self.connect() as connection:
@@ -244,23 +415,297 @@ class Database:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def restore_journal(self) -> dict[str, object] | None:
+        with self.connect() as connection:
+            row = connection.execute(
+                """SELECT journal_id, world_id, world_path, source_backup_id,
+                source_path, safety_copy_path, staging_path, phase, component,
+                completed_components_json, checksums_json, error_type,
+                error_message, original_error, created_at, updated_at
+                FROM restore_journal WHERE id = 1"""
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def restore_recovery_active(self) -> bool:
+        journal = self.restore_journal()
+        return bool(
+            journal is not None and str(journal.get("phase")) not in RESTORE_TERMINAL_PHASES
+        )
+
+    def begin_restore_journal(
+        self,
+        journal_id: str,
+        world_id: str,
+        world_path: str,
+        source_backup_id: str,
+        source_path: str,
+        safety_copy_path: str,
+        staging_path: str,
+        phase: str,
+        checksums_json: str = "{}",
+    ) -> None:
+        now = int(time.time())
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active_operation = connection.execute(
+                """
+                SELECT id FROM operations
+                WHERE state IN ('queued', 'running')
+                   OR (
+                       state = 'awaiting_force_confirmation'
+                       AND (confirmation_expires_at IS NULL OR confirmation_expires_at > ?)
+                   )
+                ORDER BY created_at LIMIT 1
+                """,
+                (now,),
+            ).fetchone()
+            if active_operation is not None:
+                raise RestoreJournalConflictError(
+                    "OPERATION_IN_PROGRESS",
+                    "A server operation is active; restore was not started.",
+                )
+            existing = connection.execute(
+                "SELECT phase FROM restore_journal WHERE id = 1"
+            ).fetchone()
+            if existing is not None and str(existing["phase"]) not in RESTORE_TERMINAL_PHASES:
+                raise RestoreJournalConflictError(
+                    "RESTORE_RECOVERY_REQUIRED",
+                    "A restore journal requires resume or rollback before another restore.",
+                )
+            connection.execute(
+                """
+                INSERT INTO restore_journal(
+                    id, journal_id, world_id, world_path, source_backup_id,
+                    source_path, safety_copy_path, staging_path, phase, component,
+                    completed_components_json, checksums_json, error_type,
+                    error_message, original_error, created_at, updated_at
+                ) VALUES(1, ?, ?, ?, ?, ?, ?, ?, ?, NULL, '[]', ?, NULL, NULL, NULL, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    journal_id=excluded.journal_id,
+                    world_id=excluded.world_id,
+                    world_path=excluded.world_path,
+                    source_backup_id=excluded.source_backup_id,
+                    source_path=excluded.source_path,
+                    safety_copy_path=excluded.safety_copy_path,
+                    staging_path=excluded.staging_path,
+                    phase=excluded.phase,
+                    component=excluded.component,
+                    completed_components_json=excluded.completed_components_json,
+                    checksums_json=excluded.checksums_json,
+                    error_type=excluded.error_type,
+                    error_message=excluded.error_message,
+                    original_error=excluded.original_error,
+                    created_at=excluded.created_at,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    journal_id,
+                    world_id,
+                    world_path,
+                    source_backup_id,
+                    source_path,
+                    safety_copy_path,
+                    staging_path,
+                    phase,
+                    checksums_json,
+                    now,
+                    now,
+                ),
+            )
+
+    def update_restore_journal(
+        self,
+        *,
+        phase: str,
+        component: str | None,
+        completed_components_json: str,
+        checksums_json: str,
+        error_type: str | None = None,
+        error_message: str | None = None,
+        original_error: str | None = None,
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE restore_journal
+                SET phase = ?, component = ?, completed_components_json = ?,
+                    checksums_json = ?, error_type = ?, error_message = ?,
+                    original_error = ?, updated_at = ?
+                WHERE id = 1
+                """,
+                (
+                    phase,
+                    component,
+                    completed_components_json,
+                    checksums_json,
+                    error_type,
+                    error_message,
+                    original_error,
+                    int(time.time()),
+                ),
+            )
+
     def create_operation(
-        self, operation_id: str, kind: str, idempotency_key: str
+        self,
+        operation_id: str,
+        kind: str,
+        idempotency_key: str,
+        *,
+        parent_operation_id: str | None = None,
+        target_pids: list[int] | None = None,
+        confirmation_expires_at: int | None = None,
+        request_fingerprint: str | None = None,
     ) -> dict[str, object]:
         now = int(time.time())
         with self.connect() as connection:
             connection.execute(
                 """
                 INSERT INTO operations(
-                    id, kind, state, stage, error_code, idempotency_key, created_at, updated_at
-                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?)
+                    id, kind, state, stage, error_code, idempotency_key, created_at, updated_at,
+                    parent_operation_id, target_pids, confirmation_expires_at, request_fingerprint
+                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (operation_id, kind, idempotency_key, now, now),
+                (
+                    operation_id,
+                    kind,
+                    idempotency_key,
+                    now,
+                    now,
+                    parent_operation_id,
+                    _encode_pids(target_pids),
+                    confirmation_expires_at,
+                    request_fingerprint,
+                ),
             )
         operation = self.operation(operation_id)
         if operation is None:
             raise RuntimeError("Operation insert did not persist.")
         return operation
+
+    def reserve_operation(
+        self,
+        operation_id: str,
+        kind: str,
+        idempotency_key: str,
+        *,
+        parent_operation_id: str | None = None,
+        now: float | None = None,
+        request_fingerprint: str | None = None,
+    ) -> tuple[dict[str, object], bool]:
+        """Atomically replay an idempotent operation or reserve a new one."""
+
+        now_value = int(time.time() if now is None else now)
+        with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                f"SELECT {_OPERATION_COLUMNS} FROM operations WHERE idempotency_key = ?",
+                (idempotency_key,),
+            ).fetchone()
+            existing_operation = _operation_from_row(existing)
+            if existing_operation is not None:
+                if (
+                    existing_operation.get("kind") != kind
+                    or existing_operation.get("parent_operation_id") != parent_operation_id
+                    or existing_operation.get("request_fingerprint") != request_fingerprint
+                ):
+                    raise OperationReservationError(
+                        "IDEMPOTENCY_KEY_CONFLICT",
+                        "Idempotency-Key was already used for a different request.",
+                        str(existing_operation["id"]),
+                    )
+                return existing_operation, False
+
+            if kind in RESTORE_BLOCKED_OPERATION_KINDS:
+                journal = connection.execute(
+                    "SELECT phase FROM restore_journal WHERE id = 1"
+                ).fetchone()
+                if journal is not None and str(journal["phase"]) not in RESTORE_TERMINAL_PHASES:
+                    raise OperationReservationError(
+                        "RESTORE_RECOVERY_REQUIRED",
+                        "An unfinished restore requires resume or rollback before this operation.",
+                    )
+
+            bound_pids: list[int] | None = None
+            if parent_operation_id is not None:
+                parent_row = connection.execute(
+                    f"SELECT {_OPERATION_COLUMNS} FROM operations WHERE id = ?",
+                    (parent_operation_id,),
+                ).fetchone()
+                parent = _operation_from_row(parent_row)
+                if parent is None or parent["state"] != "awaiting_force_confirmation":
+                    raise OperationReservationError(
+                        "FORCE_CONFIRMATION_NOT_AVAILABLE",
+                        "当前没有待确认的强制停止。",
+                        parent_operation_id,
+                    )
+                expires_at = parent.get("confirmation_expires_at")
+                if not isinstance(expires_at, int) or expires_at <= now_value:
+                    raise OperationReservationError(
+                        "FORCE_CONFIRMATION_EXPIRED",
+                        "强制停止确认已过期，未执行任何停止操作。",
+                        parent_operation_id,
+                    )
+                raw_pids = parent.get("target_pids")
+                if not isinstance(raw_pids, list) or not raw_pids:
+                    raise OperationReservationError(
+                        "FORCE_CONFIRMATION_TARGET_MISSING",
+                        "待确认操作没有可用的原始 PID 集合。",
+                        parent_operation_id,
+                    )
+                bound_pids = [int(pid) for pid in raw_pids]
+
+            active_sql = f"""
+                SELECT {_OPERATION_COLUMNS}
+                FROM operations
+                WHERE (
+                    state IN ('queued', 'running')
+                    OR (
+                        state = 'awaiting_force_confirmation'
+                        AND (confirmation_expires_at IS NULL OR confirmation_expires_at > ?)
+                    )
+                )
+            """
+            active_values: list[object] = [now_value]
+            if parent_operation_id is not None:
+                active_sql += " AND id != ?"
+                active_values.append(parent_operation_id)
+            active_sql += " ORDER BY created_at LIMIT 1"
+            active = _operation_from_row(connection.execute(active_sql, active_values).fetchone())
+            if active is not None:
+                raise OperationReservationError(
+                    "OPERATION_IN_PROGRESS",
+                    "已有服务器操作正在进行。",
+                    str(active["id"]),
+                )
+
+            now_created = int(time.time() if now is None else now)
+            connection.execute(
+                """
+                INSERT INTO operations(
+                    id, kind, state, stage, error_code, idempotency_key, created_at, updated_at,
+                    parent_operation_id, target_pids, confirmation_expires_at, request_fingerprint
+                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?, ?, ?, NULL, ?)
+                """,
+                (
+                    operation_id,
+                    kind,
+                    idempotency_key,
+                    now_created,
+                    now_created,
+                    parent_operation_id,
+                    _encode_pids(bound_pids),
+                    request_fingerprint,
+                ),
+            )
+            created = _operation_from_row(
+                connection.execute(
+                    f"SELECT {_OPERATION_COLUMNS} FROM operations WHERE id = ?",
+                    (operation_id,),
+                ).fetchone()
+            )
+            if created is None:
+                raise RuntimeError("Operation reservation did not persist.")
+            return created, True
 
     def update_operation(
         self,
@@ -270,7 +715,29 @@ class Database:
         error_code: str | None = None,
         detail: str | None = None,
     ) -> None:
+        self.transition_operation(operation_id, state, stage, error_code, detail)
+
+    def transition_operation(
+        self,
+        operation_id: str,
+        state: str,
+        stage: str,
+        error_code: str | None = None,
+        detail: str | None = None,
+    ) -> dict[str, object]:
         with self.connect() as connection:
+            current_row = connection.execute(
+                "SELECT state FROM operations WHERE id = ?", (operation_id,)
+            ).fetchone()
+            if current_row is None:
+                raise OperationTransitionError(f"Operation {operation_id} does not exist.")
+            current_state = str(current_row["state"])
+            if current_state != state and state not in _ALLOWED_OPERATION_TRANSITIONS.get(
+                current_state, frozenset()
+            ):
+                raise OperationTransitionError(
+                    f"Invalid operation transition: {current_state} -> {state}."
+                )
             connection.execute(
                 """
                 UPDATE operations
@@ -279,55 +746,93 @@ class Database:
                 """,
                 (state, stage, error_code, detail, int(time.time()), operation_id),
             )
+            row = connection.execute(
+                f"SELECT {_OPERATION_COLUMNS} FROM operations WHERE id = ?",
+                (operation_id,),
+            ).fetchone()
+        operation = _operation_from_row(row)
+        if operation is None:
+            raise RuntimeError("Operation transition did not persist.")
+        return operation
+
+    def bind_operation_target(
+        self, operation_id: str, target_pids: list[int], confirmation_expires_at: int | None = None
+    ) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE operations
+                SET target_pids = ?, confirmation_expires_at = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    _encode_pids(target_pids),
+                    confirmation_expires_at,
+                    int(time.time()),
+                    operation_id,
+                ),
+            )
 
     def operation(self, operation_id: str) -> dict[str, object] | None:
         with self.connect() as connection:
             row = connection.execute(
-                """
-                SELECT id, kind, state, stage, error_code, detail, created_at, updated_at
-                FROM operations WHERE id = ?
-                """,
+                f"SELECT {_OPERATION_COLUMNS} FROM operations WHERE id = ?",
                 (operation_id,),
             ).fetchone()
-        return None if row is None else dict(row)
+        return _operation_from_row(row)
 
     def operation_by_idempotency(self, idempotency_key: str) -> dict[str, object] | None:
         with self.connect() as connection:
             row = connection.execute(
-                """
-                SELECT id, kind, state, stage, error_code, detail, created_at, updated_at
-                FROM operations WHERE idempotency_key = ?
-                """,
+                f"SELECT {_OPERATION_COLUMNS} FROM operations WHERE idempotency_key = ?",
                 (idempotency_key,),
             ).fetchone()
-        return None if row is None else dict(row)
+        return _operation_from_row(row)
 
-    def active_operation(self) -> dict[str, object] | None:
+    def active_operation(self, now: float | None = None) -> dict[str, object] | None:
+        now_value = int(time.time() if now is None else now)
         with self.connect() as connection:
             row = connection.execute(
-                """
-                SELECT id, kind, state, stage, error_code, detail, created_at, updated_at
+                f"""
+                SELECT {_OPERATION_COLUMNS}
                 FROM operations
                 WHERE state IN ('queued', 'running')
+                   OR (
+                       state = 'awaiting_force_confirmation'
+                       AND (confirmation_expires_at IS NULL OR confirmation_expires_at > ?)
+                   )
                 ORDER BY created_at LIMIT 1
-                """
+                """,
+                (now_value,),
             ).fetchone()
-        return None if row is None else dict(row)
+        return _operation_from_row(row)
 
-    def fail_incomplete_operations(self) -> int:
+    def recover_incomplete_operations(self) -> list[dict[str, object]]:
+        now = int(time.time())
         with self.connect() as connection:
-            cursor = connection.execute(
+            rows = connection.execute(
+                f"""
+                SELECT {_OPERATION_COLUMNS}
+                FROM operations
+                WHERE state IN ('queued', 'running', 'awaiting_force_confirmation')
+                ORDER BY created_at
+                """
+            ).fetchall()
+            connection.execute(
                 """
                 UPDATE operations
                 SET state = 'failed', stage = 'interrupted',
                     error_code = 'CONSOLE_RESTARTED',
                     detail = 'Console exited before the operation completed.',
                     updated_at = ?
-                WHERE state IN ('queued', 'running')
+                WHERE state IN ('queued', 'running', 'awaiting_force_confirmation')
                 """,
-                (int(time.time()),),
+                (now,),
             )
-        return cursor.rowcount
+        return [operation for row in rows if (operation := _operation_from_row(row)) is not None]
+
+    def fail_incomplete_operations(self) -> int:
+        return len(self.recover_incomplete_operations())
 
     def record_audit_event(
         self,

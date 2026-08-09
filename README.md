@@ -44,6 +44,8 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 - 已配置的 `AdminPassword` 不会从后端回显；未输入新密码时保留原值，修改时只提交用户当前输入的新值。局域网登录使用游戏管理员密码，因此只应在可信内网使用。
 - 保存世界、停止、重启、备份恢复、备份删除和配置应用都需要明确操作。
+- 生命周期操作、配置应用和备份写操作由同一控制边界串行执行；存在未完成的恢复事务时，启动、保存、重启和“重启并应用”会被阻止，必须先安全地 resume 或 rollback。
+- 带 `Idempotency-Key` 的生命周期请求只有在操作类型、倒计时、消息和父操作完全一致时才会重放；同一 key 被用于不同请求时会返回 `IDEMPOTENCY_KEY_CONFLICT`，不会静默执行错误操作。
 - 备份操作只接受官方 `backup\world` 下的直接子目录；活动世界没有删除 API。
 - 配置先保存为草稿。检测到 `CONFIG_CONFLICT` 时不会自动覆盖外部修改。
 - 真实服务器的恢复、配置应用和强制停止只应在用户批准的维护窗口执行。
@@ -59,6 +61,8 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 | `REST_CONNECTION_REFUSED` | 检查 PalServer 是否运行、REST 是否启用，以及端口是否与 `PalWorldSettings.ini` 一致。 |
 | `SNAPSHOT_PENDING` | 保存文件变化后等待稳定窗口；成功缓存前世界页面会显示过期状态。 |
 | `CONFIG_CONFLICT` | 在配置页查看差异，确认目标文件确实应被覆盖后再应用。 |
+| `RESTORE_RECOVERY_REQUIRED` | 存在未完成的备份恢复；保持 PalServer 停止，先在备份恢复页面执行 resume 或 rollback。 |
+| `IDEMPOTENCY_KEY_CONFLICT` | 请求 key 已用于不同操作；刷新页面后重新提交，客户端会生成新的 key。 |
 | `ROLLBACK_FAILED` | 停止相关操作，保留英文错误详情，按维护清单使用安全副本人工回滚。 |
 
 ## 当前状态与未来方向

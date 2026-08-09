@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
+from typing import cast
 
 from fastapi.testclient import TestClient
 
-from palserver_console.audit import AuditService
-from palserver_console.config import AppSettings
+from palserver_console.audit import AuditService, detail_json
+from palserver_console.config import AppSettings, configure_logging
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
 
@@ -55,6 +58,85 @@ def test_log_cursor_handles_repeat_and_truncation_without_fake_chat(tmp_path: Pa
     rows, total = database.list_audit_events(page_size=50)
     assert total == 2
     assert {row["event_type"] for row in rows} == {"chat.message", "command.executed"}
+
+
+def test_audit_background_reports_error_and_recovers_with_backoff(tmp_path: Path) -> None:
+    service, _, executable = _service(tmp_path)
+    calls = 0
+
+    def flaky_maintenance() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("injected audit failure")
+
+    service = AuditService(
+        service.database,
+        lambda: executable,
+        poll_seconds=0.01,
+        retry_base_seconds=0.01,
+        retry_max_seconds=0.05,
+        maintenance_callback=flaky_maintenance,
+    )
+    service.start()
+    try:
+        deadline = time.monotonic() + 2
+        status = service.status()
+        while status["lastSuccessAt"] is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+            status = service.status()
+        assert calls >= 2
+        assert status["alive"] is True
+        assert status["lastSuccessAt"] is not None
+        assert status["consecutiveFailures"] == 0
+        last_error = cast(dict[str, object], status["lastError"])
+        assert last_error["code"] == "AUDIT_LOOP_ERROR"
+        assert status["retryDelaySeconds"] == 0.0
+    finally:
+        service.stop()
+
+
+def test_rolling_log_is_bounded_and_redacts_credentials(tmp_path: Path) -> None:
+    logger = configure_logging(tmp_path / "data", max_bytes=180, backup_count=1)
+    secret = "never-print-this-password"
+    for _ in range(8):
+        logger.info("auth login rejected password=%s", secret)
+    for handler in logger.handlers:
+        handler.flush()
+
+    log_directory = tmp_path / "data" / "logs"
+    log_files = sorted(log_directory.glob("palserver-console.log*"))
+    contents = "".join(path.read_text(encoding="utf-8") for path in log_files)
+    assert (log_directory / "palserver-console.log.1").is_file()
+    assert not (log_directory / "palserver-console.log.2").exists()
+    assert secret not in contents
+    assert "password=[REDACTED]" in contents
+
+
+def test_audit_and_log_redaction_consumes_complex_quoted_secret(tmp_path: Path) -> None:
+    secret = 'abc"),RCONEnabled=True,(path)\\tail'
+    encoded = json.dumps(secret, ensure_ascii=False)
+    for payload in (
+        f"AdminPassword={encoded}",
+        json.dumps(f"AdminPassword={encoded}"),
+        json.dumps({"AdminPassword": secret}),
+        json.dumps({"error": {"AdminPassword": secret}}),
+    ):
+        detail = detail_json({"error": payload})
+        assert "abc" not in detail
+        assert "RCONEnabled=True" not in detail
+        assert "path" not in detail
+
+    logger = configure_logging(tmp_path / "data")
+    logger.info("request failed AdminPassword=%s", encoded)
+    for handler in logger.handlers:
+        handler.flush()
+    contents = (tmp_path / "data" / "logs" / "palserver-console.log").read_text(
+        encoding="utf-8"
+    )
+    assert "abc" not in contents
+    assert "RCONEnabled=True" not in contents
+    assert "path" not in contents
 
 
 def test_audit_api_filters_exports_and_retention(tmp_path: Path) -> None:
