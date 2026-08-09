@@ -1,4 +1,7 @@
-﻿param()
+﻿param(
+    [string]$InstanceId = "",
+    [int]$Port = 0
+)
 
 $ErrorActionPreference = "Stop"
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -12,8 +15,22 @@ $frontendBuildInputStamp = Join-Path $frontendRoot "dist\.palserver-console-buil
 
 try {
     Set-Location -LiteralPath $projectRoot
-    if ([string]::IsNullOrWhiteSpace($env:PALSERVER_CONSOLE_PORT)) {
-        $env:PALSERVER_CONSOLE_PORT = "8223"
+    if ([string]::IsNullOrWhiteSpace($InstanceId)) {
+        if ($Port -ne 0) {
+            throw "-Port requires -InstanceId. Use the default launcher without parameters for the default instance."
+        }
+        if ([string]::IsNullOrWhiteSpace($env:PALSERVER_CONSOLE_PORT)) {
+            $env:PALSERVER_CONSOLE_PORT = "8223"
+        }
+    } else {
+        if ($InstanceId -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$') {
+            throw "-InstanceId must contain 1-64 letters, digits, '-' or '_', and must not start with punctuation."
+        }
+        if ($Port -lt 1 -or $Port -gt 65535) {
+            throw "A named instance requires -Port between 1 and 65535."
+        }
+        $env:PALSERVER_CONSOLE_INSTANCE = $InstanceId
+        $env:PALSERVER_CONSOLE_PORT = $Port.ToString()
     }
     Write-Host "[PalServerConsole] 正在检查 Python..."
 

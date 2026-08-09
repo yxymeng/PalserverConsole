@@ -15,6 +15,7 @@ export type ShellStatus = {
   configured: boolean;
   pids: number[];
   executablePath: string | null;
+  instanceId: string;
 };
 
 export type WorldCandidate = { worldId: string; worldPath: string; modifiedAt: number };
@@ -42,6 +43,7 @@ export type Operation = {
   errorCode: string | null;
   detail: string | null;
 };
+export type NotificationStatus = { enabled: boolean; configured: boolean };
 
 export type LiveValue<T> = {
   data: T;

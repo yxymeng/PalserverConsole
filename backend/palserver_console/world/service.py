@@ -581,10 +581,13 @@ class WorldSnapshotService:
         collected_at: int | None = None,
         parse_started_at: int | None = None,
     ) -> dict[str, Any]:
-        command = [
-            sys.executable,
-            "-m",
-            "palserver_console.world.worker",
+        command = [sys.executable]
+        if getattr(sys, "frozen", False):
+            command.append("--world-worker")
+        else:
+            command.extend(["-m", "palserver_console.world.worker"])
+        command.extend(
+            [
             "--snapshot",
             str(snapshot),
             "--cache",
@@ -593,7 +596,8 @@ class WorldSnapshotService:
             snapshot_id,
             "--source-observed-at",
             str(observed_at),
-        ]
+            ]
+        )
         if collected_at is not None:
             command.extend(["--collected-at", str(collected_at)])
         if parse_started_at is not None:

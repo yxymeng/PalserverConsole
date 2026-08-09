@@ -27,6 +27,7 @@ EXPECTED_API_CONTRACT = {
     "GET /api/events",
     "GET /api/health",
     "GET /api/live/{kind}",
+    "GET /api/maintenance/notifications",
     "GET /api/monitoring/status",
     "GET /api/operations/health",
     "GET /api/server/discovery",
@@ -50,6 +51,7 @@ EXPECTED_API_CONTRACT = {
     "POST /api/live/players/{player_id}/ban",
     "POST /api/live/players/{player_id}/kick",
     "POST /api/live/players/{player_id}/unban",
+    "POST /api/maintenance/steamcmd-update",
     "POST /api/server/operations/{kind}",
     "POST /api/server/operations/{operation_id}/cancel",
     "POST /api/server/operations/{operation_id}/force-stop",
@@ -58,6 +60,7 @@ EXPECTED_API_CONTRACT = {
     "PUT /api/backups/retention",
     "PUT /api/audit/settings",
     "PUT /api/config/draft",
+    "PUT /api/maintenance/notifications",
     "PUT /api/server/settings",
     "PUT /api/settings/network",
 }

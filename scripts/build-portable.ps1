@@ -285,6 +285,8 @@ try {
         $env:PALSERVER_CONSOLE_DATA = $selfCheckData
         $selfCheckOutput = & $portableLauncher --portable-self-check
         Assert-ExitCode "Portable root executable self-check"
+        $workerSelfCheckOutput = & (Join-Path $portableProgram "PalServerConsole.exe") --world-worker --help
+        Assert-ExitCode "Portable worker executable self-check"
     }
     finally {
         if ($null -eq $previousSelfCheckData) {
@@ -301,6 +303,23 @@ try {
         $selfCheck.frontend -ne "ok"
     ) {
         throw "Portable executable self-check returned an unexpected result."
+    }
+    if (($workerSelfCheckOutput | Out-String) -notmatch "Parse a read-only Palworld snapshot.") {
+        throw "Portable worker executable self-check returned unexpected help text."
+    }
+    $portableDataMarker = Join-Path $portableData ".keep"
+    $unexpectedPortableData = @(
+        Get-ChildItem -LiteralPath $portableData -Force -Recurse |
+            Where-Object {
+                -not [string]::Equals(
+                    $_.FullName,
+                    $portableDataMarker,
+                    [System.StringComparison]::OrdinalIgnoreCase
+                )
+            }
+    )
+    if ($unexpectedPortableData.Count -gt 0) {
+        throw "Portable self-check wrote runtime data into the release package."
     }
 
     Write-Checksums $packageStage

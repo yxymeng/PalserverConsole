@@ -8,6 +8,12 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .instances import (
+    InstanceTargetError,
+    InstanceTargetRegistry,
+    server_ports_from_arguments,
+    validate_instance_id,
+)
 from .persistence import Database
 from .steam import assert_no_reparse_points, validate_executable
 
@@ -134,8 +140,16 @@ class ProfileError(RuntimeError):
 
 
 class ServerProfileService:
-    def __init__(self, database: Database) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        instance_id: str = "default",
+        target_registry: InstanceTargetRegistry | None = None,
+    ) -> None:
         self.database = database
+        self.instance_id = validate_instance_id(instance_id)
+        self.target_registry = target_registry
 
     def candidates(self, executable_path: Path | str) -> list[WorldCandidate]:
         executable = self._validated_executable(executable_path)
@@ -171,7 +185,12 @@ class ServerProfileService:
             )
         return result
 
-    def bind(self, executable_path: Path | str, world_id: str) -> ServerProfile:
+    def bind(
+        self,
+        executable_path: Path | str,
+        world_id: str,
+        launch_arguments: str = "",
+    ) -> ServerProfile:
         self._validate_world_id(world_id)
         executable = self._validated_executable(executable_path)
         candidates = self.candidates(executable)
@@ -184,6 +203,7 @@ class ServerProfileService:
             world_id=selected.world_id,
             world_path=selected.world_path,
         )
+        self._claim_target(profile, launch_arguments)
         self.database.save_server_profile(
             str(profile.executable_path),
             str(profile.install_path),
@@ -249,12 +269,23 @@ class ServerProfileService:
             assert_no_reparse_points(world / "Level.sav")
         except ValueError as error:
             raise ProfileError("PATH_REPARSE_POINT", str(error)) from error
-        return ServerProfile(
+        profile = ServerProfile(
             executable_path=stored_executable,
             install_path=stored_executable.parent,
             world_id=world_id,
             world_path=world,
         )
+        self._ensure_target_owned(profile, self.database.get_setting("server.arguments") or "")
+        return profile
+
+    def clear(self) -> None:
+        self.database.clear_server_profile()
+        if self.target_registry is None:
+            return
+        try:
+            self.target_registry.release(self.instance_id)
+        except InstanceTargetError as error:
+            raise ProfileError(error.code, str(error)) from error
 
     def try_profile(self) -> ServerProfile | None:
         try:
@@ -340,19 +371,62 @@ class ServerProfileService:
             )
         return root
 
+    def _claim_target(self, profile: ServerProfile, launch_arguments: str) -> None:
+        if self.target_registry is None:
+            return
+        try:
+            self.target_registry.claim(
+                self.instance_id,
+                profile.executable_path,
+                profile.world_path,
+                server_ports_from_arguments(launch_arguments),
+            )
+        except InstanceTargetError as error:
+            raise ProfileError(error.code, str(error)) from error
+
+    def _ensure_target_owned(self, profile: ServerProfile, launch_arguments: str) -> None:
+        if self.target_registry is None:
+            return
+        try:
+            self.target_registry.ensure_owned(
+                self.instance_id,
+                profile.executable_path,
+                profile.world_path,
+                server_ports_from_arguments(launch_arguments),
+            )
+        except InstanceTargetError as error:
+            raise ProfileError(error.code, str(error)) from error
+
 @dataclass(frozen=True)
 class AppSettings:
     data_dir: Path
     static_dir: Path
     port: int = 8223
+    instance_id: str = "default"
+    instance_root: Path | None = None
     allowed_hosts: tuple[str, ...] = ("127.0.0.1", "localhost", "::1")
     session_ttl_seconds: int = 12 * 60 * 60
     login_window_seconds: int = 5 * 60
     login_max_failures: int = 5
 
+    def __post_init__(self) -> None:
+        validate_instance_id(self.instance_id)
+
     @property
     def database_path(self) -> Path:
         return self.data_dir / "app.db"
+
+    @property
+    def operation_lock_path(self) -> Path:
+        return self.data_dir / "operation.lock"
+
+    @property
+    def instance_registry_root(self) -> Path:
+        if self.instance_root is not None:
+            return self.instance_root
+        if self.instance_id != "default" and self.data_dir.parent.name == "instances":
+            return self.data_dir.parent.parent
+        return self.data_dir
 
 
 def default_settings() -> AppSettings:
@@ -366,13 +440,25 @@ def default_settings() -> AppSettings:
         default_data_dir = project_root / "data"
         default_static_dir = project_root / "frontend" / "dist"
 
-    data_dir = Path(os.environ.get("PALSERVER_CONSOLE_DATA", default_data_dir))
+    data_root = Path(os.environ.get("PALSERVER_CONSOLE_DATA", default_data_dir))
     static_dir = Path(os.environ.get("PALSERVER_CONSOLE_STATIC", default_static_dir))
-    raw_port = os.environ.get("PALSERVER_CONSOLE_PORT", "8223")
+    instance_id = validate_instance_id(os.environ.get("PALSERVER_CONSOLE_INSTANCE", "default"))
+    raw_port = os.environ.get("PALSERVER_CONSOLE_PORT")
+    if instance_id != "default" and raw_port is None:
+        raise ValueError(
+            "PALSERVER_CONSOLE_PORT is required when PALSERVER_CONSOLE_INSTANCE is set."
+        )
     try:
-        port = int(raw_port)
+        port = int(raw_port or "8223")
     except ValueError as error:
         raise ValueError("PALSERVER_CONSOLE_PORT must be an integer.") from error
     if not 1 <= port <= 65535:
         raise ValueError("PALSERVER_CONSOLE_PORT must be between 1 and 65535.")
-    return AppSettings(data_dir=data_dir, static_dir=static_dir, port=port)
+    data_dir = data_root if instance_id == "default" else data_root / "instances" / instance_id
+    return AppSettings(
+        data_dir=data_dir,
+        static_dir=static_dir,
+        port=port,
+        instance_id=instance_id,
+        instance_root=data_root,
+    )

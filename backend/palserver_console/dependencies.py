@@ -10,7 +10,10 @@ from .auth import AuthStore
 from .backups import BackupService
 from .config import AppSettings, ProfileError, ServerProfileService, configure_logging
 from .config_editor import ConfigService
+from .control import create_control_lock
+from .instances import InstanceTargetRegistry
 from .lifecycle import LifecycleManager
+from .maintenance import NotificationService, SteamCmdUpdateService
 from .monitoring import (
     MonitorCoordinator,
     MonitoringConfigError,
@@ -36,6 +39,8 @@ class AppDependencies:
     backups: BackupService
     config: ConfigService
     operational_health: OperationalHealthService
+    notifications: NotificationService
+    updates: SteamCmdUpdateService
 
 
 class DependencyFactory(Protocol):
@@ -61,7 +66,11 @@ class DefaultDependencyFactory:
         logger = configure_logging(settings.data_dir)
         database = Database(settings.database_path)
         auth = AuthStore(database, settings)
-        profiles = ServerProfileService(database)
+        profiles = ServerProfileService(
+            database,
+            instance_id=settings.instance_id,
+            target_registry=InstanceTargetRegistry(settings.instance_registry_root),
+        )
 
         def executable_for_audit() -> Path | None:
             raw = database.get_setting("server.executable")
@@ -86,12 +95,14 @@ class DefaultDependencyFactory:
         def audit_console_line(line: str) -> None:
             audit.ingest_line(line, "console-output")
 
+        control_lock = create_control_lock(settings.operation_lock_path)
         lifecycle = lifecycle_manager or LifecycleManager(
             database,
             process=None,
             audit_callback=audit_operation,
             console_output_sink=audit_console_line,
             profile_provider=profiles.profile,
+            control_lock=control_lock,
         )
         live_monitor = monitor or MonitorCoordinator(
             monitor_config, players_observer=audit.observe_players
@@ -124,6 +135,19 @@ class DefaultDependencyFactory:
             control_lock=lifecycle.control_lock,
         )
         lifecycle.set_config_apply(config.apply)
+        notifications = NotificationService(
+            database,
+            settings.instance_id,
+            audit_callback=audit_operation,
+        )
+        updates = SteamCmdUpdateService(
+            database,
+            lifecycle,
+            live_monitor,
+            notifications,
+            instance_id=settings.instance_id,
+            audit_callback=audit_operation,
+        )
         operational_health = OperationalHealthService(
             settings.data_dir,
             live_monitor,
@@ -145,6 +169,8 @@ class DefaultDependencyFactory:
             backups=backups,
             config=config,
             operational_health=operational_health,
+            notifications=notifications,
+            updates=updates,
         )
 
 

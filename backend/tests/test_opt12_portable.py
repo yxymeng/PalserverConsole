@@ -12,6 +12,7 @@ import pytest
 
 import palserver_console.__main__ as console_main
 from palserver_console.config import AppSettings, default_settings
+from palserver_console.world import worker as world_worker
 
 
 def _write_database(path: Path, schema_version: int) -> None:
@@ -118,6 +119,28 @@ def test_portable_self_check_runs_the_health_route_in_temporary_data(
         "frontend": "ok",
     }
     assert not (tmp_path / "user-data").exists()
+
+
+def test_portable_worker_dispatches_without_initializing_the_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    received: list[list[str] | None] = []
+
+    def fake_worker(arguments: list[str] | None = None) -> int:
+        received.append(arguments)
+        return 17
+
+    def unexpected_settings() -> AppSettings:
+        pytest.fail("The portable worker must not initialize console settings.")
+
+    monkeypatch.setattr(world_worker, "main", fake_worker)
+    monkeypatch.setattr(console_main, "default_settings", unexpected_settings)
+
+    with pytest.raises(SystemExit) as raised:
+        console_main.main(["--world-worker", "--snapshot", "snapshot", "--cache", "cache"])
+
+    assert raised.value.code == 17
+    assert received == [["--snapshot", "snapshot", "--cache", "cache"]]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -292,6 +315,7 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     native_launcher = native_launcher_path.read_text(encoding="utf-8")
     assert 'Path.Combine(packageRoot, "Program", "PalServerConsole.exe")' in native_launcher
     assert 'Path.Combine(packageRoot, "data")' in native_launcher
+    assert 'Environment.GetEnvironmentVariable("PALSERVER_CONSOLE_DATA")' in native_launcher
     assert 'startInfo.EnvironmentVariables["PALSERVER_CONSOLE_DATA"]' in native_launcher
     assert "string.IsNullOrWhiteSpace" in native_launcher
     assert "UseShellExecute = false" in native_launcher
@@ -313,7 +337,14 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "portable-launcher.cs" in build_script
     assert 'Join-Path $packageStage "PalServerConsole.exe"' in build_script
     assert 'Portable root executable self-check' in build_script
+    assert 'Portable worker executable self-check' in build_script
+    assert '--world-worker --help' in build_script
     assert 'Join-Path $temporaryRoot "self-check-data"' in build_script
+    assert build_script.index('Portable worker executable self-check') < build_script.index(
+        "$selfCheck ="
+    )
+    assert 'Get-ChildItem -LiteralPath $portableData -Force -Recurse' in build_script
+    assert "Portable self-check wrote runtime data into the release package." in build_script
     assert "INCOMPATIBLE_DOWNGRADE" in upgrade_script
     assert "upgrade-backups" in upgrade_script
     assert "Get-FileHash" in upgrade_script

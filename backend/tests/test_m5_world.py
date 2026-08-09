@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -415,6 +416,45 @@ def test_parser_crash_is_reported_without_exiting_process(
 
     assert raised.value.code == "PARSER_CRASHED"
     assert os.getpid() > 0
+
+
+def test_frozen_worker_uses_portable_dispatcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    command: list[str] = []
+
+    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        command.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
+    assert command[:2] == [sys.executable, "--world-worker"]
+    assert "-m" not in command
+
+
+def test_unfrozen_worker_uses_python_module_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    command: list[str] = []
+
+    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        command.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
+    assert command[:3] == [sys.executable, "-m", "palserver_console.world.worker"]
 
 
 def _retention_pair(

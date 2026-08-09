@@ -92,7 +92,9 @@ def router(deps: AppDependencies) -> APIRouter:
         selected_profile = None
         if payload.worldId is not None:
             try:
-                selected_profile = deps.profiles.bind(executable, payload.worldId)
+                selected_profile = deps.profiles.bind(
+                    executable, payload.worldId, payload.launchArguments
+                )
             except ProfileError as error:
                 return error_response(422, error.code, str(error))
         else:
@@ -101,7 +103,12 @@ def router(deps: AppDependencies) -> APIRouter:
             except ProfileError:
                 existing = None
             if existing is not None and existing.executable_path == executable:
-                selected_profile = existing
+                try:
+                    selected_profile = deps.profiles.bind(
+                        executable, existing.world_id, payload.launchArguments
+                    )
+                except ProfileError as error:
+                    return error_response(422, error.code, str(error))
             elif candidates:
                 return error_response(
                     409,
@@ -109,7 +116,10 @@ def router(deps: AppDependencies) -> APIRouter:
                     "Select a World ID before saving server settings.",
                 )
             else:
-                deps.database.clear_server_profile()
+                try:
+                    deps.profiles.clear()
+                except ProfileError as error:
+                    return error_response(422, error.code, str(error))
         deps.database.set_setting("server.executable", str(executable))
         deps.database.set_setting("server.arguments", payload.launchArguments)
         deps.audit.record(
@@ -204,7 +214,11 @@ def router(deps: AppDependencies) -> APIRouter:
         if denied:
             return denied
         try:
-            deps.lifecycle.cancel(operation_id)
+            operation = deps.database.operation(operation_id)
+            if operation and operation.get("kind") == "steamcmd_update":
+                deps.updates.cancel(operation_id)
+            else:
+                deps.lifecycle.cancel(operation_id)
         except LifecycleError as error:
             return error_response(409, error.code, str(error))
         return MessageResponse(message="取消请求已提交。")

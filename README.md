@@ -13,6 +13,9 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 - 管理官方 `backup\world` 备份，设置保留数量、删除备份和在停服后恢复。
 - 查看运营审计记录，并在配置页编辑 `PalWorldSettings.ini` 草稿。
 - 在检测到外部修改或服务器运行时，阻止高风险覆盖操作。
+- 在本机明确确认后执行 SteamCMD 校验更新：检查在线玩家、通知、保存、停服、更新、校验、启动和健康检查；失败时只尝试重新启动，不会自动强制结束进程。
+- 可选配置通用 HTTPS Webhook，只发送维护计划、开始、完成、取消和失败事件；Webhook 密钥不会回显到页面、日志或审计导出。
+- 通过命名实例管理多个 PalServer/世界：每个实例有独立控制台、游戏和查询端口，以及数据目录、操作锁与配置/缓存/备份命名空间；重复绑定同一个 `PalServer.exe`、世界或游戏/查询端口会被拒绝。
 
 ## 界面预览
 
@@ -30,6 +33,14 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 4. 浏览器访问 [http://127.0.0.1:8223/](http://127.0.0.1:8223/)。
 
 启动器会自动创建 `.venv`、安装 Python 依赖、按 `package-lock.json` 安装前端依赖并构建静态页面。生产运行只需要一个 Python/Uvicorn 进程，不需要让 Vite 常驻。
+
+要启动第二个隔离实例，请为它指定唯一名称和控制台端口。例如在项目根目录运行：
+
+```powershell
+.\start-console.bat -InstanceId north -Port 18224
+```
+
+该实例的数据位于 `data\instances\north\`，与默认实例及其他命名实例隔离。便携版可对根目录 `PalServerConsole.exe` 使用同样的 `-InstanceId north -Port 18224` 参数；可为这条命令创建 Windows 快捷方式后双击启动。再在“服务器管理”的启动参数中为每套 PalServer 指定不同的 `-port` 与 `-queryport`（例如 `-port=8211 -queryport=27015`、`-port=8212 -queryport=27016`）；不要让两个实例绑定相同的 `PalServer.exe`、世界目录、游戏端口或查询端口。
 
 启动失败时不要关闭窗口，请保留窗口中的英文错误信息。它通常能直接说明是 Python、Node.js、端口还是文件路径问题。
 
@@ -51,6 +62,9 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 - 备份操作只接受官方 `backup\world` 下的直接子目录；活动世界没有删除 API。
 - 配置先保存为草稿。检测到 `CONFIG_CONFLICT` 时不会自动覆盖外部修改。
 - 真实服务器的恢复、配置应用和强制停止只应在用户批准的维护窗口执行。
+- SteamCMD 更新没有默认定时器，也不会在停服超时后自动 force-stop。它要求本机输入 `UPDATE`，并在更新前后两次确认在线玩家为零；SteamCMD 出错后的恢复仅尝试重新启动现有安装，不能替代游戏文件回滚或维护窗口备份。
+- 命名实例使用各自的 `data\instances\<实例名>` 数据目录和跨进程操作锁；同一根数据目录会登记并拒绝交叉的 `PalServer.exe`/世界写目标，以及重复的 PalServer 游戏/查询端口。
+- Webhook 只支持无查询参数、无内嵌凭据的 HTTPS 地址。密钥仅作为本机提交内容保存到后端，读取接口不会返回它。
 
 详细操作请阅读 [`docs/operations.md`](docs/operations.md)、[`docs/maintenance-window-checklist.md`](docs/maintenance-window-checklist.md) 和 [`docs/windows-portable.md`](docs/windows-portable.md)。
 
@@ -78,7 +92,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 3. **P2 可选实时 bridge**：只有 REST 和存档数据不足时，才提供独立、只读、可禁用的 UE4SS bridge。
 4. **P3 配置与网络安全**：先做 `WorldOption.sav` 只读解释和迁移预览，再考虑 HTTPS、反向代理和角色权限。
 
-任意 RCON、存档编辑、地图坐标、SteamCMD 更新、多实例和多世界都属于高风险后续方向，暂不承诺时间表。它们必须先补齐权限、备份、回滚和维护窗口设计，不代表首版已经提供。
+任意 RCON、存档编辑、地图坐标、受控远程访问和 UE4SS bridge 仍属于高风险后续方向，暂不承诺时间表。SteamCMD 更新与多实例/多世界现已提供受限的本机工作流，但尚未在真实 PalServer、真实 SteamCMD 更新或物理隔离的多实例主机上执行写入验证。
 
 ## 开发验证
 

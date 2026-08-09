@@ -4,6 +4,7 @@ import type { AuthStatus, ShellStatus, ServerSettings, DiscoveryCandidate, Opera
 import { isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { LiveMonitoring } from "../monitoring/LiveMonitoring";
+import { MaintenancePanel } from "../maintenance/MaintenancePanel";
 import { serverStateLabel } from "./labels";
 
 export function ServerManagement({ auth, initialStatus }: { auth: AuthStatus; initialStatus: ShellStatus | null }) {
@@ -114,6 +115,7 @@ export function ServerManagement({ auth, initialStatus }: { auth: AuthStatus; in
       <section className="server-status-row">
         <div><span>PalServer</span><strong>{serverStateLabel(status?.serverState)}</strong></div>
         <div><span>目标进程</span><strong>{status?.pids.length ? status.pids.join(", ") : "无"}</strong></div>
+        <div><span>控制台实例</span><strong>{status?.instanceId || "default"}</strong></div>
         <button className="icon-button bordered" title="刷新状态" onClick={() => void refresh()}><RefreshCw size={19} /></button>
       </section>
       <section className="action-toolbar" aria-label="服务器操作">
@@ -129,6 +131,7 @@ export function ServerManagement({ auth, initialStatus }: { auth: AuthStatus; in
       </section>}
       {error && <p className="form-error" role="alert">{error}</p>}
       {message && <p className="form-success" role="status">{message}</p>}
+      <MaintenancePanel auth={auth} status={status} onOperation={setOperation} />
       <section className="settings-section embedded-settings">
         <div className="section-heading"><div><h2>PalServer 安装</h2><p>{settings.executablePath || "尚未选择 PalServer.exe"}</p></div>{auth.local && <button className="quiet-button" disabled={busy} onClick={() => void discover()}><FolderSearch size={18} />扫描 Steam</button>}</div>
         {candidates.length > 0 && <div className="candidate-list">{candidates.map((candidate) => <button key={candidate.executablePath} onClick={() => setSettings({ ...settings, executablePath: candidate.executablePath, worldId: null, worldCandidates: candidate.worldCandidates })}><Server size={18} /><span><strong>{candidate.installPath}</strong><small>{candidate.manifestValid ? "manifest 已验证" : "manifest 未验证"}</small></span></button>)}</div>}

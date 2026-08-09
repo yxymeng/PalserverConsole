@@ -177,7 +177,7 @@ _OPERATION_COLUMNS = """
 """
 RESTORE_TERMINAL_PHASES = frozenset({"completed", "rolled_back"})
 RESTORE_BLOCKED_OPERATION_KINDS = frozenset(
-    {"start", "save", "restart", "apply_config_and_restart"}
+    {"start", "save", "restart", "apply_config_and_restart", "steamcmd_update"}
 )
 _ALLOWED_OPERATION_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"running", "failed"}),

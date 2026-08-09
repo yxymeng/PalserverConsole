@@ -365,6 +365,9 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
   box-shadow: var(--shadow);
 }
 
+.maintenance-toggle { display: inline-flex; align-items: center; gap: 8px; }
+.maintenance-toggle input { width: 18px; height: 18px; margin: 0; padding: 0; accent-color: var(--primary); }
+
 .port-form { max-width: 360px; }
 .settings-form .primary-button { margin-top: 10px; }
 .menu-backdrop { display: none; }
@@ -372,7 +375,7 @@ input:focus, select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px 
 .server-page { gap: 18px; }
 .server-status-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   gap: 1px;
   overflow: hidden;
   border: 1px solid var(--border);

@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -22,12 +23,32 @@ from .main import create_app
 from .persistence import Database
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
+    arguments = sys.argv[1:] if argv is None else argv
+    if arguments[:1] == ["--world-worker"]:
+        from .world.worker import main as worker_main
+
+        raise SystemExit(worker_main(arguments[1:]))
+
     parser = argparse.ArgumentParser(description="PalServerConsole local server")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the browser.")
+    parser.add_argument(
+        "--instance",
+        "-InstanceId",
+        dest="instance",
+        metavar="ID",
+        help="Run an isolated named console instance.",
+    )
+    parser.add_argument(
+        "--port", "-Port", dest="port", type=int, help="Console port for this process."
+    )
     parser.add_argument("--portable-self-check", action="store_true", help=argparse.SUPPRESS)
-    args = parser.parse_args()
+    args = parser.parse_args(arguments)
 
+    if args.instance is not None:
+        os.environ["PALSERVER_CONSOLE_INSTANCE"] = args.instance
+    if args.port is not None:
+        os.environ["PALSERVER_CONSOLE_PORT"] = str(args.port)
     settings = default_settings()
     if args.portable_self_check:
         _portable_self_check(settings)

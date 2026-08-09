@@ -80,6 +80,7 @@ def router(deps: AppDependencies, api_version: str) -> APIRouter:
                 "configured": shell["configured"],
                 "pids": shell["pids"],
                 "executablePath": shell["executablePath"],
+                "instanceId": deps.settings.instance_id,
             },
             "live": deps.monitor.snapshot(),
             "world": deps.world.status(),
@@ -100,6 +101,7 @@ def router(deps: AppDependencies, api_version: str) -> APIRouter:
             pids=list(status["pids"]),
             executablePath=status["executablePath"],
             errorCode=status["errorCode"],
+            instanceId=deps.settings.instance_id,
         )
 
     return api

@@ -16,6 +16,7 @@ from .api.routers import (
     backups_router,
     config_router,
     live_router,
+    maintenance_router,
     server_router,
     system_router,
     world_router,
@@ -130,6 +131,8 @@ def create_app(
     app.state.backups = deps.backups
     app.state.config_editor = deps.config
     app.state.operational_health = deps.operational_health
+    app.state.notifications = deps.notifications
+    app.state.updates = deps.updates
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:
@@ -169,6 +172,7 @@ def create_app(
     app.include_router(system_router(deps, app.version))
     app.include_router(auth_router(deps))
     app.include_router(server_router(deps))
+    app.include_router(maintenance_router(deps))
     app.include_router(live_router(deps))
     app.include_router(audit_router(deps))
     app.include_router(world_router(deps))

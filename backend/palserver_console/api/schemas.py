@@ -52,6 +52,7 @@ class ShellStatusResponse(BaseModel):
     configured: bool
     pids: list[int]
     executablePath: str | None
+    instanceId: str = "default"
 
 
 class WorldCandidateResponse(BaseModel):
@@ -109,6 +110,26 @@ class CleanupConfirmationRequest(BaseModel):
 
 class ConfigApplyRequest(BaseModel):
     force: bool = False
+
+
+class NotificationSettingsRequest(BaseModel):
+    enabled: bool = False
+    webhookUrl: str | None = Field(default=None, max_length=2048)
+    secret: str | None = Field(default=None, max_length=4096)
+
+
+class NotificationStatusResponse(BaseModel):
+    enabled: bool
+    configured: bool
+
+
+class SteamCmdUpdateRequest(BaseModel):
+    steamCmdPath: str = Field(min_length=1, max_length=2048)
+    confirmation: Literal["UPDATE"]
+    countdownSeconds: int = Field(default=30, ge=5, le=600)
+    message: str = Field(
+        default="服务器将进行维护更新，请及时返回安全地点。", min_length=1, max_length=500
+    )
 
 
 ApiOperationKind = Literal["start", "save", "stop", "restart"]
