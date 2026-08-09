@@ -279,8 +279,21 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "upgrade-portable.ps1") -Destination $packageStage
     Set-Content -LiteralPath (Join-Path $portableData ".keep") -Value "User data is created here and is never replaced by upgrade-portable.ps1." -Encoding ASCII
 
-    $selfCheckOutput = & $portableLauncher --portable-self-check
-    Assert-ExitCode "Portable root executable self-check"
+    $selfCheckData = Join-Path $temporaryRoot "self-check-data"
+    $previousSelfCheckData = $env:PALSERVER_CONSOLE_DATA
+    try {
+        $env:PALSERVER_CONSOLE_DATA = $selfCheckData
+        $selfCheckOutput = & $portableLauncher --portable-self-check
+        Assert-ExitCode "Portable root executable self-check"
+    }
+    finally {
+        if ($null -eq $previousSelfCheckData) {
+            Remove-Item Env:\PALSERVER_CONSOLE_DATA -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:PALSERVER_CONSOLE_DATA = $previousSelfCheckData
+        }
+    }
     $selfCheck = ($selfCheckOutput | Out-String | ConvertFrom-Json)
     if (
         $selfCheck.portableSelfCheck -ne "ok" -or

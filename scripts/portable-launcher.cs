@@ -35,7 +35,14 @@ namespace PalServerConsole.PortableLauncher
                     UseShellExecute = false,
                     CreateNoWindow = false,
                 };
-                startInfo.EnvironmentVariables["PALSERVER_CONSOLE_DATA"] = Path.Combine(packageRoot, "data");
+                if (
+                    string.IsNullOrWhiteSpace(
+                        startInfo.EnvironmentVariables["PALSERVER_CONSOLE_DATA"]
+                    )
+                )
+                {
+                    startInfo.EnvironmentVariables["PALSERVER_CONSOLE_DATA"] = Path.Combine(packageRoot, "data");
+                }
 
                 using (Process child = Process.Start(startInfo))
                 {

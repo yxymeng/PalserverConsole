@@ -292,6 +292,8 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     native_launcher = native_launcher_path.read_text(encoding="utf-8")
     assert 'Path.Combine(packageRoot, "Program", "PalServerConsole.exe")' in native_launcher
     assert 'Path.Combine(packageRoot, "data")' in native_launcher
+    assert 'startInfo.EnvironmentVariables["PALSERVER_CONSOLE_DATA"]' in native_launcher
+    assert "string.IsNullOrWhiteSpace" in native_launcher
     assert "UseShellExecute = false" in native_launcher
     assert "QuoteArgument" in native_launcher
     assert "requirements-build.lock" in build_script
@@ -311,6 +313,7 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "portable-launcher.cs" in build_script
     assert 'Join-Path $packageStage "PalServerConsole.exe"' in build_script
     assert 'Portable root executable self-check' in build_script
+    assert 'Join-Path $temporaryRoot "self-check-data"' in build_script
     assert "INCOMPATIBLE_DOWNGRADE" in upgrade_script
     assert "upgrade-backups" in upgrade_script
     assert "Get-FileHash" in upgrade_script
