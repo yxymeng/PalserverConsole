@@ -150,6 +150,7 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
   await page.waitForTimeout(220);
   await expect(page.getByRole("heading", { name: "PalServer 安装" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "实时监控" })).toBeVisible();
+  await expect(page.getByText(/实时事件(已连接|正在重连|正在连接)/)).toBeVisible();
   await expect(page.getByText("203.0.113.9")).toBeVisible();
   await expect(page.getByRole("button", { name: "启动" })).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);

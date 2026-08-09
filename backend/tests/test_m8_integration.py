@@ -6,6 +6,7 @@ from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
+from palserver_console import __version__
 from palserver_console.config import AppSettings
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
@@ -26,7 +27,11 @@ def test_bootstrap_exposes_cross_module_freshness(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     payload = cast(dict[str, object], response.json())
-    assert set(payload) == {"shell", "live", "world", "version"}
+    assert set(payload) == {"shell", "live", "world", "version", "versions"}
+    assert payload["version"] == __version__
+    versions = cast(dict[str, object], payload["versions"])
+    assert versions["application"] == __version__
+    assert versions["api"] == __version__
     for name in ("shell", "world"):
         value = cast(dict[str, object], payload[name])
         assert isinstance(value["observedAt"], int)

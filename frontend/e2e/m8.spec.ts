@@ -36,13 +36,13 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
       } });
     }
     return route.fulfill({ json: {
-      id: "m8-operation", operationId: "m8-operation", kind: "start", state: "queued",
-      stage: "queued", error_code: null, errorCode: null, detail: null,
+      operationId: "m8-operation", kind: "start", state: "queued",
+      stage: "queued", errorCode: null, detail: null,
     } });
   });
   await page.route("**/api/server/operations/m8-operation", (route) => route.fulfill({ json: {
-    id: "m8-operation", operationId: "m8-operation", kind: "start", state: "succeeded",
-    stage: "process_running", error_code: null, errorCode: null, detail: null,
+    operationId: "m8-operation", kind: "start", state: "succeeded",
+    stage: "process_running", errorCode: null, detail: null,
   } }));
 
   await page.goto("/");

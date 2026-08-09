@@ -22,7 +22,9 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 ## 双击启动
 
-1. 安装 Python 3.11、3.12 或 3.13，并勾选 **Add Python to PATH**。
+以下步骤用于当前源码版本，不是后续 Windows 便携版的最终用户安装方式。
+
+1. 安装 **64 位 CPython 3.13**，并勾选 **Add Python to PATH**。其他 Python 版本不属于本项目的构建和验证范围。
 2. 安装 Node.js LTS。首次构建前端时需要，之后只有前端源码或锁文件发生变化时才需要重新构建。
 3. 双击项目目录中的 `start-console.bat`。
 4. 浏览器访问 [http://127.0.0.1:8223/](http://127.0.0.1:8223/)。
@@ -72,7 +74,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 后续路线以 `plan.md` 为准，并按风险和用户收益排序：
 
 1. **P0 生产收口**：完成真实只读运行验证、干净环境发布复现和日志/事件数据源边界确认。
-2. **P1 便携交付**：提供无需用户安装 Python/Node.js 的 Windows 便携版，并保证升级不覆盖 `data/`。
+2. **P1 便携交付**：构建机固定使用 64 位 CPython 3.13；交付内置 Python runtime 的 Windows 便携版，最终用户无需安装 Python/Node.js，并保证升级不覆盖 `data/`。
 3. **P2 可选实时 bridge**：只有 REST 和存档数据不足时，才提供独立、只读、可禁用的 UE4SS bridge。
 4. **P3 配置与网络安全**：先做 `WorldOption.sav` 只读解释和迁移预览，再考虑 HTTPS、反向代理和角色权限。
 

@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "palserver-console"
-version = "0.0.1"
+dynamic = ["version"]
 description = "Windows-local PalServer console"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi==0.115.12",
     "httpx==0.28.1",
@@ -27,6 +27,9 @@ dev = [
 [tool.setuptools]
 package-dir = {"" = "backend"}
 
+[tool.setuptools.dynamic]
+version = {attr = "palserver_console.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["backend"]
 
@@ -35,6 +38,7 @@ testpaths = ["backend/tests"]
 addopts = "-ra"
 markers = [
     "integration: requires a locally generated sanitized save fixture",
+    "private_fixture: requires explicitly configured read-only files on a private runner",
 ]
 
 [tool.ruff]

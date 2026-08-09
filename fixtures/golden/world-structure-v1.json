@@ -1,0 +1,66 @@
+{
+  "fixtureVersion": 1,
+  "privacy": "synthetic-no-player-data",
+  "description": "Synthetic Palworld world structure keys for deterministic public CI coverage.",
+  "properties": {
+    "worldSaveData": {
+      "CharacterSaveParameterMap": [],
+      "ItemContainerSaveData": [],
+      "CharacterContainerSaveData": [],
+      "GroupSaveDataMap": [],
+      "BaseCampSaveData": [],
+      "WorkSaveData": []
+    }
+  },
+  "expectedCoverage": {
+    "players": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "CharacterSaveParameterMap": 1
+      }
+    },
+    "inventories": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "ItemContainerSaveData": 1
+      }
+    },
+    "pals": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "CharacterSaveParameterMap": 1
+      }
+    },
+    "containers": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "CharacterContainerSaveData": 1
+      }
+    },
+    "guilds": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "GroupSaveDataMap": 1
+      }
+    },
+    "bases": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "BaseCampSaveData": 1
+      }
+    },
+    "base_inventories": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "BaseCampSaveData": 1,
+        "ItemContainerSaveData": 1
+      }
+    },
+    "work_pals": {
+      "status": "source_structure_found",
+      "sourceKeyCounts": {
+        "WorkSaveData": 1
+      }
+    }
+  }
+}

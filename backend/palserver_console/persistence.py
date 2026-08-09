@@ -218,12 +218,16 @@ class Database:
     def __init__(self, path: Path) -> None:
         self.path = path
 
-    @contextmanager
-    def connect(self) -> Iterator[sqlite3.Connection]:
+    def _open_connection(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
+        return connection
+
+    @contextmanager
+    def connect(self) -> Iterator[sqlite3.Connection]:
+        connection = self._open_connection()
         try:
             yield connection
             connection.commit()
@@ -235,20 +239,65 @@ class Database:
 
     def migrate(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.connect() as connection:
+        had_existing_database = self.path.is_file()
+        connection = self._open_connection()
+        backup_path: Path | None = None
+        try:
             current = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if current > SCHEMA_VERSION:
                 raise RuntimeError(
                     f"app.db schema version {current} is newer than supported {SCHEMA_VERSION}."
                 )
-            for version in range(current + 1, SCHEMA_VERSION + 1):
-                if version == 5:
-                    self._migrate_operation_targets(connection)
-                elif version == 8:
-                    self._migrate_operation_request_fingerprint(connection)
-                else:
-                    connection.executescript(MIGRATIONS[version - 1])
-                connection.execute(f"PRAGMA user_version = {version}")
+            if current == SCHEMA_VERSION:
+                return
+            if had_existing_database:
+                backup_path = self._create_migration_backup(connection, current)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                for version in range(current + 1, SCHEMA_VERSION + 1):
+                    if version == 5:
+                        self._migrate_operation_targets(connection)
+                    elif version == 8:
+                        self._migrate_operation_request_fingerprint(connection)
+                    else:
+                        self._execute_migration_script(connection, MIGRATIONS[version - 1])
+                    connection.execute(f"PRAGMA user_version = {version}")
+                connection.commit()
+            except Exception as error:
+                if connection.in_transaction:
+                    connection.rollback()
+                if backup_path is not None:
+                    error.add_note(f"Pre-migration backup: {backup_path}")
+                raise
+        finally:
+            connection.close()
+
+    def _create_migration_backup(self, connection: sqlite3.Connection, version: int) -> Path:
+        backup_directory = self.path.parent / "migration-backups"
+        backup_directory.mkdir(exist_ok=True)
+        backup_name = f"{self.path.name}.pre-migration-v{version}.{time.time_ns()}.sqlite3"
+        backup_path = backup_directory / backup_name
+        backup_connection = sqlite3.connect(backup_path)
+        try:
+            connection.backup(backup_connection)
+        finally:
+            backup_connection.close()
+        return backup_path
+
+    @staticmethod
+    def _execute_migration_script(connection: sqlite3.Connection, script: str) -> None:
+        """Execute one migration without sqlite3.executescript()'s implicit commit."""
+
+        statement = ""
+        for line in script.splitlines(keepends=True):
+            statement += line
+            if sqlite3.complete_statement(statement):
+                sql = statement.strip()
+                if sql:
+                    connection.execute(sql)
+                statement = ""
+        if statement.strip():
+            raise ValueError("Migration SQL must end with a complete statement.")
 
     @staticmethod
     def _migrate_operation_targets(connection: sqlite3.Connection) -> None:
