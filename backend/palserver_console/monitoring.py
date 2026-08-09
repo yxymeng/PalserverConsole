@@ -17,6 +17,8 @@ from typing import Any, Protocol
 import httpx
 import psutil
 
+from .config import redact_sensitive_text
+
 logger = logging.getLogger(__name__)
 
 
@@ -250,10 +252,7 @@ class PalServerRestClient:
 
 
 def _safe_error_text(text: str) -> str:
-    scrubbed = re.sub(
-        r"(?i)(AdminPassword|password|token|secret)\s*[:=]\s*[^,;\s]+", r"\1=[REDACTED]", text
-    )
-    return scrubbed[:300]
+    return redact_sensitive_text(text, max_length=300)
 
 
 class RconReadonly(Protocol):

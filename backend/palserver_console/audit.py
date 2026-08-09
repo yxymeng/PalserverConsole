@@ -13,6 +13,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 
+from .config import redact_sensitive_text
 from .persistence import Database
 
 logger = logging.getLogger(__name__)
@@ -20,11 +21,6 @@ logger = logging.getLogger(__name__)
 PARSER_VERSION = "audit-log-v1"
 DEFAULT_RETENTION_DAYS = 30
 MAX_DETAIL_LENGTH = 1000
-_SENSITIVE_INLINE = re.compile(
-    r"(?i)(AdminPassword|password|token|secret|cookie|authorization)\s*[:=]\s*[^,;\s]+"
-)
-
-
 def _safe_detail(value: object) -> object:
     if isinstance(value, Mapping):
         result: dict[str, object] = {}
@@ -41,8 +37,7 @@ def _safe_detail(value: object) -> object:
     if isinstance(value, list):
         return [_safe_detail(item) for item in value]
     if isinstance(value, str):
-        scrubbed = _SENSITIVE_INLINE.sub(r"\1=[REDACTED]", value)
-        return scrubbed[:MAX_DETAIL_LENGTH]
+        return redact_sensitive_text(value, max_length=MAX_DETAIL_LENGTH)
     return value
 
 

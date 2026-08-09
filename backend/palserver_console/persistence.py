@@ -7,7 +7,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 MIGRATIONS: tuple[str, ...] = (
     """
@@ -148,6 +148,9 @@ MIGRATIONS: tuple[str, ...] = (
         updated_at INTEGER NOT NULL
     );
     """,
+    """
+    ALTER TABLE operations ADD COLUMN request_fingerprint TEXT;
+    """,
 )
 
 
@@ -163,13 +166,19 @@ class OperationTransitionError(RuntimeError):
 
 
 class RestoreJournalConflictError(RuntimeError):
-    pass
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 _OPERATION_COLUMNS = """
     id, kind, state, stage, error_code, detail, created_at, updated_at,
-    parent_operation_id, target_pids, confirmation_expires_at
+    parent_operation_id, target_pids, confirmation_expires_at, request_fingerprint
 """
+RESTORE_TERMINAL_PHASES = frozenset({"completed", "rolled_back"})
+RESTORE_BLOCKED_OPERATION_KINDS = frozenset(
+    {"start", "save", "restart", "apply_config_and_restart"}
+)
 _ALLOWED_OPERATION_TRANSITIONS: dict[str, frozenset[str]] = {
     "queued": frozenset({"running", "failed"}),
     "running": frozenset(
@@ -235,6 +244,8 @@ class Database:
             for version in range(current + 1, SCHEMA_VERSION + 1):
                 if version == 5:
                     self._migrate_operation_targets(connection)
+                elif version == 8:
+                    self._migrate_operation_request_fingerprint(connection)
                 else:
                     connection.executescript(MIGRATIONS[version - 1])
                 connection.execute(f"PRAGMA user_version = {version}")
@@ -258,6 +269,14 @@ class Database:
             ON operations(state, confirmation_expires_at)
             """
         )
+
+    @staticmethod
+    def _migrate_operation_request_fingerprint(connection: sqlite3.Connection) -> None:
+        columns = {
+            str(row[1]) for row in connection.execute("PRAGMA table_info(operations)").fetchall()
+        }
+        if "request_fingerprint" not in columns:
+            connection.execute("ALTER TABLE operations ADD COLUMN request_fingerprint TEXT")
 
     def schema_version(self) -> int:
         with self.connect() as connection:
@@ -407,6 +426,12 @@ class Database:
             ).fetchone()
         return dict(row) if row is not None else None
 
+    def restore_recovery_active(self) -> bool:
+        journal = self.restore_journal()
+        return bool(
+            journal is not None and str(journal.get("phase")) not in RESTORE_TERMINAL_PHASES
+        )
+
     def begin_restore_journal(
         self,
         journal_id: str,
@@ -421,15 +446,31 @@ class Database:
     ) -> None:
         now = int(time.time())
         with self.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            active_operation = connection.execute(
+                """
+                SELECT id FROM operations
+                WHERE state IN ('queued', 'running')
+                   OR (
+                       state = 'awaiting_force_confirmation'
+                       AND (confirmation_expires_at IS NULL OR confirmation_expires_at > ?)
+                   )
+                ORDER BY created_at LIMIT 1
+                """,
+                (now,),
+            ).fetchone()
+            if active_operation is not None:
+                raise RestoreJournalConflictError(
+                    "OPERATION_IN_PROGRESS",
+                    "A server operation is active; restore was not started.",
+                )
             existing = connection.execute(
                 "SELECT phase FROM restore_journal WHERE id = 1"
             ).fetchone()
-            if existing is not None and str(existing["phase"]) not in {
-                "completed",
-                "rolled_back",
-            }:
+            if existing is not None and str(existing["phase"]) not in RESTORE_TERMINAL_PHASES:
                 raise RestoreJournalConflictError(
-                    "A restore journal requires resume or rollback before another restore."
+                    "RESTORE_RECOVERY_REQUIRED",
+                    "A restore journal requires resume or rollback before another restore.",
                 )
             connection.execute(
                 """
@@ -513,6 +554,7 @@ class Database:
         parent_operation_id: str | None = None,
         target_pids: list[int] | None = None,
         confirmation_expires_at: int | None = None,
+        request_fingerprint: str | None = None,
     ) -> dict[str, object]:
         now = int(time.time())
         with self.connect() as connection:
@@ -520,8 +562,8 @@ class Database:
                 """
                 INSERT INTO operations(
                     id, kind, state, stage, error_code, idempotency_key, created_at, updated_at,
-                    parent_operation_id, target_pids, confirmation_expires_at
-                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?, ?, ?, ?)
+                    parent_operation_id, target_pids, confirmation_expires_at, request_fingerprint
+                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     operation_id,
@@ -532,6 +574,7 @@ class Database:
                     parent_operation_id,
                     _encode_pids(target_pids),
                     confirmation_expires_at,
+                    request_fingerprint,
                 ),
             )
         operation = self.operation(operation_id)
@@ -547,6 +590,7 @@ class Database:
         *,
         parent_operation_id: str | None = None,
         now: float | None = None,
+        request_fingerprint: str | None = None,
     ) -> tuple[dict[str, object], bool]:
         """Atomically replay an idempotent operation or reserve a new one."""
 
@@ -559,7 +603,27 @@ class Database:
             ).fetchone()
             existing_operation = _operation_from_row(existing)
             if existing_operation is not None:
+                if (
+                    existing_operation.get("kind") != kind
+                    or existing_operation.get("parent_operation_id") != parent_operation_id
+                    or existing_operation.get("request_fingerprint") != request_fingerprint
+                ):
+                    raise OperationReservationError(
+                        "IDEMPOTENCY_KEY_CONFLICT",
+                        "Idempotency-Key was already used for a different request.",
+                        str(existing_operation["id"]),
+                    )
                 return existing_operation, False
+
+            if kind in RESTORE_BLOCKED_OPERATION_KINDS:
+                journal = connection.execute(
+                    "SELECT phase FROM restore_journal WHERE id = 1"
+                ).fetchone()
+                if journal is not None and str(journal["phase"]) not in RESTORE_TERMINAL_PHASES:
+                    raise OperationReservationError(
+                        "RESTORE_RECOVERY_REQUIRED",
+                        "An unfinished restore requires resume or rollback before this operation.",
+                    )
 
             bound_pids: list[int] | None = None
             if parent_operation_id is not None:
@@ -619,8 +683,8 @@ class Database:
                 """
                 INSERT INTO operations(
                     id, kind, state, stage, error_code, idempotency_key, created_at, updated_at,
-                    parent_operation_id, target_pids, confirmation_expires_at
-                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?, ?, ?, NULL)
+                    parent_operation_id, target_pids, confirmation_expires_at, request_fingerprint
+                ) VALUES(?, ?, 'queued', 'queued', NULL, ?, ?, ?, ?, ?, NULL, ?)
                 """,
                 (
                     operation_id,
@@ -630,6 +694,7 @@ class Database:
                     now_created,
                     parent_operation_id,
                     _encode_pids(bound_pids),
+                    request_fingerprint,
                 ),
             )
             created = _operation_from_row(

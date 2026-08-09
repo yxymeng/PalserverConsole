@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import TypedDict, cast
 
 from .config import ProfileError, ServerProfile
+from .control import ControlLock, create_control_lock
 from .persistence import Database, RestoreJournalConflictError
+from .steam import assert_no_reparse_points
 
 BACKUP_NAME = re.compile(r"^\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}$")
 REQUIRED_FILES = ("Level.sav", "LevelMeta.sav")
@@ -49,6 +51,7 @@ class BackupService:
         profile_provider: Callable[[], ServerProfile] | None = None,
         database: Database | None = None,
         clock: Callable[[], float] = time.time,
+        control_lock: ControlLock | None = None,
     ) -> None:
         self.executable_provider = executable_provider
         self.running_provider = running_provider
@@ -59,6 +62,7 @@ class BackupService:
         self.profile_provider = profile_provider
         self.database = database
         self.clock = clock
+        self.control_lock = control_lock or create_control_lock()
         self._replace: Callable[[Path, Path], None] = os.replace
         self._volatile_journal: dict[str, object] | None = None
 
@@ -100,10 +104,22 @@ class BackupService:
     @staticmethod
     def _backup_root_for_world(world: Path) -> Path:
         raw_root = world / "backup" / "world"
-        root = raw_root.resolve(strict=False)
-        if raw_root.is_symlink() or _is_junction(raw_root):
-            raise BackupError("BACKUP_PATH_INVALID", "官方备份根目录不能是链接。")
-        root.mkdir(parents=True, exist_ok=True)
+        try:
+            assert_no_reparse_points(world)
+            resolved_world = world.resolve(strict=True)
+            assert_no_reparse_points(raw_root)
+            raw_root.mkdir(parents=True, exist_ok=True)
+            assert_no_reparse_points(raw_root)
+            root = raw_root.resolve(strict=True)
+            relative = root.relative_to(resolved_world)
+        except ValueError as error:
+            raise BackupError("BACKUP_PATH_INVALID", str(error)) from error
+        except (OSError, RuntimeError) as error:
+            raise BackupError(
+                "BACKUP_PATH_INVALID", f"{type(error).__name__}: {error}"
+            ) from error
+        if relative.parts != ("backup", "world"):
+            raise BackupError("BACKUP_PATH_INVALID", "官方备份根目录已越出绑定世界。")
         return root
 
     @staticmethod
@@ -114,13 +130,19 @@ class BackupService:
     @staticmethod
     def _safe_child(root: Path, name: str) -> Path:
         BackupService._assert_backup_id(name)
-        resolved_root = root.resolve(strict=False)
-        candidate = (root / name).resolve(strict=False)
+        raw_candidate = root / name
         try:
+            assert_no_reparse_points(root)
+            assert_no_reparse_points(raw_candidate)
+            resolved_root = root.resolve(strict=True)
+            candidate = raw_candidate.resolve(strict=False)
             relative = candidate.relative_to(resolved_root)
         except ValueError as error:
             raise BackupError("BACKUP_PATH_INVALID", "备份路径越界。") from error
-        raw_candidate = root / name
+        except (OSError, RuntimeError) as error:
+            raise BackupError(
+                "BACKUP_PATH_INVALID", f"{type(error).__name__}: {error}"
+            ) from error
         if (
             len(relative.parts) != 1
             or candidate == resolved_root
@@ -181,11 +203,17 @@ class BackupService:
         }
 
     def set_retention(self, value: int | None) -> dict[str, object]:
+        with self.control_lock:
+            return self._set_retention_exclusive(value)
+
+    def _set_retention_exclusive(self, value: int | None) -> dict[str, object]:
         if value is not None and (value < 0 or value > 100000):
             raise BackupError("INVALID_RETENTION", "保留数量必须为无限或 0 到 100000。")
         if self.running_provider():
             raise BackupError("SERVER_RUNNING", "服务器运行时不能修改会清理备份的保留策略。")
         self._ensure_no_recovery()
+        # Validate the complete backup path before persisting a policy that may delete files.
+        self.backup_root()
         self.retention_setter(value)
         deleted = self.cleanup()
         self._audit("backup.retention", "success", {"retention": value, "deleted": deleted})
@@ -210,6 +238,10 @@ class BackupService:
         return deleted
 
     def delete(self, backup_id: str) -> None:
+        with self.control_lock:
+            self._delete_exclusive(backup_id)
+
+    def _delete_exclusive(self, backup_id: str) -> None:
         if self.running_provider():
             raise BackupError("SERVER_RUNNING", "服务器运行时不能删除备份。")
         self._ensure_no_recovery()
@@ -221,6 +253,10 @@ class BackupService:
         self._audit("backup.delete", "success", {"backupId": backup_id, "reason": "manual"})
 
     def restore(self, backup_id: str) -> None:
+        with self.control_lock:
+            self._restore_exclusive(backup_id)
+
+    def _restore_exclusive(self, backup_id: str) -> None:
         if self.running_provider():
             raise BackupError("SERVER_RUNNING", "恢复前必须先停止 PalServer。")
         self._ensure_no_recovery()
@@ -268,6 +304,10 @@ class BackupService:
         }
 
     def resume_restore(self) -> dict[str, object]:
+        with self.control_lock:
+            return self._resume_restore_exclusive()
+
+    def _resume_restore_exclusive(self) -> dict[str, object]:
         if self.running_provider():
             raise BackupError("SERVER_RUNNING", "恢复前必须先停止 PalServer。")
         journal = self._require_active_journal()
@@ -288,6 +328,10 @@ class BackupService:
         return self._public_journal(completed)
 
     def rollback_restore(self) -> dict[str, object]:
+        with self.control_lock:
+            return self._rollback_restore_exclusive()
+
+    def _rollback_restore_exclusive(self) -> dict[str, object]:
         if self.running_provider():
             raise BackupError("SERVER_RUNNING", "回滚前必须先停止 PalServer。")
         journal = self._require_active_journal()
@@ -362,7 +406,7 @@ class BackupService:
                     self._dump_json(checksums),
                 )
             except RestoreJournalConflictError as error:
-                raise BackupError("RESTORE_RECOVERY_REQUIRED", str(error)) from error
+                raise BackupError(error.code, str(error)) from error
             journal = self.database.restore_journal()
             if journal is None:
                 raise BackupError("RESTORE_JOURNAL_MISSING", "无法创建恢复 journal。")

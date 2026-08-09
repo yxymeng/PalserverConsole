@@ -14,16 +14,57 @@ WORLD_ROOT_PARTS = ("Pal", "Saved", "SaveGames", "0")
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_BACKUP_COUNT = 5
 
-_SENSITIVE_LOG_VALUE = re.compile(
-    r"(?i)\b(AdminPassword|RCONPassword|password|token|secret|cookie|authorization)\b"
-    r"(\s*[:=]\s*)(?:\"[^\"]*\"|'[^']*'|[^,\s;}\]]+)"
+_SENSITIVE_KEY = re.compile(
+    r"(?i)(?<![A-Za-z0-9_])(?P<key_quote>[\"']?)"
+    r"(AdminPassword|RCONPassword|password|token|secret|cookie|authorization)"
+    r"(?P=key_quote)(?![A-Za-z0-9_])(\s*[:=]\s*)"
 )
 
 
-def redact_log_text(value: str) -> str:
-    """Redact credential-like key/value pairs before they reach the persistent log."""
+def redact_sensitive_text(value: str, *, max_length: int | None = None) -> str:
+    """Redact credentials, including quoted, escaped, and malformed values."""
 
-    return _SENSITIVE_LOG_VALUE.sub(r"\1\2[REDACTED]", value)[:4096]
+    parts: list[str] = []
+    cursor = 0
+    while match := _SENSITIVE_KEY.search(value, cursor):
+        parts.append(value[cursor : match.end()])
+        start = match.end()
+        end = _sensitive_value_end(value, start)
+        parts.append("[REDACTED]")
+        cursor = max(end, start)
+    parts.append(value[cursor:])
+    scrubbed = "".join(parts)
+    return scrubbed if max_length is None else scrubbed[:max_length]
+
+
+def _sensitive_value_end(value: str, start: int) -> int:
+    if start >= len(value):
+        return start
+    if value.startswith(('\\"', "\\'"), start):
+        # The surrounding message has itself been escaped. Its closing delimiter is
+        # ambiguous with escaped quotes inside the credential, so fail closed.
+        return len(value)
+    quote = value[start]
+    if quote in {'"', "'"}:
+        index = start + 1
+        while index < len(value):
+            if value[index] == "\\":
+                index += 2
+                continue
+            if value[index] == quote:
+                return index + 1
+            index += 1
+        return len(value)
+    index = start
+    while index < len(value) and value[index] not in ",;}]\r\n":
+        index += 1
+    return index
+
+
+def redact_log_text(value: str) -> str:
+    """Redact credentials before they reach the bounded persistent log."""
+
+    return redact_sensitive_text(value, max_length=4096)
 
 
 class _RedactingFormatter(logging.Formatter):

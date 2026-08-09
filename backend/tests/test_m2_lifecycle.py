@@ -4,6 +4,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, cast
@@ -188,6 +189,39 @@ def test_rest_http_error_does_not_expose_response_body() -> None:
     assert str(error.value) == "PalServer REST returned HTTP 500 for /v1/api/save."
 
 
+def test_lifecycle_rest_bypasses_environment_proxies_for_loopback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.send_response(200)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, format: str, *args: object) -> None:
+            return None
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"):
+            monkeypatch.setenv(name, "http://127.0.0.1:1")
+        monkeypatch.setenv("NO_PROXY", "")
+        controller = PalServerRestController(
+            f"http://127.0.0.1:{server.server_port}", SensitiveValue("must-not-leak")
+        )
+        try:
+            controller.save()
+            assert controller._client._trust_env is False
+        finally:
+            controller._client.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_rest_shutdown_uses_palserver_accepted_waittime() -> None:
     captured: dict[str, object] = {}
 
@@ -366,6 +400,90 @@ def test_idempotency_returns_same_operation(tmp_path: Path) -> None:
     assert first["id"] == second["id"]
     _wait_for_terminal(database, cast(str, first["id"]))
     assert len(process.started) == 1
+
+
+def test_idempotency_rejects_reused_key_for_different_request(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    process = FakeProcessController(running=False)
+    manager = LifecycleManager(
+        database, process=process, rest_factory=lambda _: FakeRestController()
+    )
+    first = manager.begin("start", "semantic-request", countdown_seconds=0, message="first")
+    _wait_for_terminal(database, cast(str, first["id"]))
+
+    for kind, message in (("stop", "first"), ("start", "changed")):
+        with pytest.raises(LifecycleError) as error:
+            manager.begin(
+                cast(Literal["start", "stop"], kind),
+                "semantic-request",
+                countdown_seconds=0,
+                message=message,
+            )
+        assert error.value.code == "IDEMPOTENCY_KEY_CONFLICT"
+
+
+def test_active_restore_journal_blocks_start_reservation(tmp_path: Path) -> None:
+    database, _ = _configured_database(tmp_path)
+    database.begin_restore_journal(
+        "restore-active",
+        "world-a",
+        str(tmp_path / "world-a"),
+        "2026.08.01-01.02.03",
+        str(tmp_path / "source"),
+        str(tmp_path / "safety"),
+        str(tmp_path / "staging"),
+        "replacing",
+    )
+    manager = LifecycleManager(
+        database,
+        process=FakeProcessController(running=False),
+        rest_factory=lambda _: FakeRestController(),
+    )
+
+    with pytest.raises(LifecycleError) as error:
+        manager.begin("start", "blocked-by-restore")
+
+    assert error.value.code == "RESTORE_RECOVERY_REQUIRED"
+    assert database.operation_by_idempotency("blocked-by-restore") is None
+
+
+def test_config_apply_waits_for_lifecycle_effects(tmp_path: Path) -> None:
+    database, executable = _configured_database(tmp_path)
+    entered_start = threading.Event()
+    release_start = threading.Event()
+
+    class BlockingStartProcess(FakeProcessController):
+        def start(self, path: Path, arguments: tuple[str, ...]) -> FakeHandle:
+            self.running = True
+            entered_start.set()
+            assert release_start.wait(timeout=2)
+            return super().start(path, arguments)
+
+    process = BlockingStartProcess(running=False)
+    manager = LifecycleManager(
+        database, process=process, rest_factory=lambda _: FakeRestController()
+    )
+    editor = ConfigService(
+        database,
+        tmp_path / "data",
+        lambda: executable,
+        lambda: process.running,
+        control_lock=manager.control_lock,
+    )
+    editor.save_draft({"AutoSaveSpan": "900"})
+
+    operation = manager.begin("start", "start-before-config-apply")
+    assert entered_start.wait(timeout=1)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending_apply = executor.submit(editor.apply)
+        time.sleep(0.05)
+        assert not pending_apply.done()
+        release_start.set()
+        _wait_for_terminal(database, cast(str, operation["id"]))
+        with pytest.raises(ConfigError) as error:
+            pending_apply.result(timeout=1)
+
+    assert error.value.code == "SERVER_RUNNING"
 
 
 def test_operation_state_transitions_are_audited(tmp_path: Path) -> None:

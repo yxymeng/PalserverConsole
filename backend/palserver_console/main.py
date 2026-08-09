@@ -214,6 +214,7 @@ def create_app(
         ),
         profiles.profile,
         database=database,
+        control_lock=lifecycle.control_lock,
     )
     config_editor = ConfigService(
         database,
@@ -221,6 +222,7 @@ def create_app(
         executable_for_audit,
         lambda: lifecycle.status()["state"] == "running",
         profiles.profile,
+        control_lock=lifecycle.control_lock,
     )
     lifecycle.set_config_apply(config_editor.apply)
 
@@ -1162,6 +1164,7 @@ def _operation_public(operation: Mapping[str, object]) -> dict[str, object]:
     """Expose one operation contract while keeping snake_case legacy keys."""
 
     result = dict(operation)
+    result.pop("request_fingerprint", None)
     result.update(
         {
             "operationId": operation.get("id"),

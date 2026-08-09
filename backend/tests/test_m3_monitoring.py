@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +19,7 @@ from palserver_console.monitoring import (
     SensitiveValue,
     ServerConnectionConfig,
     SourceError,
+    _safe_error_text,
     parse_connection_config,
 )
 
@@ -120,6 +122,21 @@ def test_connection_config_parses_ports_and_redacts_password() -> None:
     assert config.rcon_port == 25585
     assert "must-not-leak" not in repr(config)
     assert "must-not-leak" not in str(config.admin_password)
+
+
+def test_rest_error_redaction_consumes_complex_quoted_secret() -> None:
+    secret = 'abc"),RCONEnabled=True,(path)\\tail'
+    encoded = json.dumps(secret)
+    for payload in (
+        f"AdminPassword={encoded}",
+        json.dumps(f"AdminPassword={encoded}"),
+        json.dumps({"AdminPassword": secret}),
+        json.dumps({"error": {"AdminPassword": secret}}),
+    ):
+        result = _safe_error_text(payload)
+        assert "abc" not in result
+        assert "RCONEnabled=True" not in result
+        assert "path" not in result
 
 
 def test_rest_client_bypasses_environment_proxies_for_loopback(

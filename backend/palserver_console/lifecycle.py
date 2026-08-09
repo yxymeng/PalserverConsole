@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import ctypes
+import hashlib
+import json
 import os
 import shlex
 import subprocess
@@ -18,8 +20,14 @@ import httpx
 import psutil
 
 from .config import ProfileError, ServerProfile
+from .control import ControlLock, create_control_lock
 from .monitoring import MonitoringConfigError, SensitiveValue, read_connection_config
-from .persistence import Database, OperationReservationError, OperationTransitionError
+from .persistence import (
+    RESTORE_BLOCKED_OPERATION_KINDS,
+    Database,
+    OperationReservationError,
+    OperationTransitionError,
+)
 from .steam import validate_executable
 
 OperationKind = Literal[
@@ -143,6 +151,7 @@ class PalServerRestController:
             base_url=base_url.rstrip("/"),
             headers={"Authorization": f"Basic {token}"},
             timeout=timeout,
+            trust_env=False,
         )
 
     def announce(self, message: str) -> None:
@@ -210,6 +219,7 @@ class LifecycleManager:
         audit_callback: Callable[[str, str, dict[str, object]], None] | None = None,
         console_output_sink: Callable[[str], None] | None = None,
         profile_provider: Callable[[], ServerProfile] | None = None,
+        control_lock: ControlLock | None = None,
     ) -> None:
         self.database = database
         self.process = process or WindowsProcessController(output_sink=console_output_sink)
@@ -220,6 +230,7 @@ class LifecycleManager:
         self.audit_callback = audit_callback
         self.profile_provider = profile_provider
         self.now = now
+        self.control_lock = control_lock or create_control_lock()
         self._lock = threading.Lock()
         self._cancellations: dict[str, threading.Event] = {}
 
@@ -301,6 +312,12 @@ class LifecycleManager:
                     idempotency_key,
                     parent_operation_id=parent_operation_id,
                     now=self.now(),
+                    request_fingerprint=_operation_request_fingerprint(
+                        kind,
+                        countdown_seconds,
+                        message,
+                        parent_operation_id,
+                    ),
                 )
             except OperationReservationError as error:
                 if error.code == "FORCE_CONFIRMATION_EXPIRED" and error.operation_id:
@@ -357,32 +374,10 @@ class LifecycleManager:
         cancel: threading.Event,
     ) -> None:
         try:
-            config = self.load_configuration()
-            if kind == "start":
-                self._start(operation_id, config)
-            elif kind == "save":
-                self._save(operation_id, config)
-            elif kind == "force_stop":
-                self._force_stop(operation_id, config)
-                self._complete_force_parent(operation_id, succeeded=True)
-            elif kind == "apply_config_and_restart":
-                self._apply_config_and_restart(
-                    operation_id, config, countdown_seconds, message, cancel
+            with self.control_lock:
+                self._run_exclusive(
+                    operation_id, kind, countdown_seconds, message, cancel
                 )
-            else:
-                self._stop_or_restart(
-                    operation_id, config, kind == "restart", countdown_seconds, message, cancel
-                )
-            final = self.database.operation(operation_id)
-            result = "success"
-            if final and final["state"] == "cancelled":
-                result = "cancelled"
-            elif final and final["state"] == "awaiting_force_confirmation":
-                result = "awaiting_confirmation"
-            self._audit(
-                operation_id,
-                result,
-            )
         except LifecycleError as error:
             self._transition(operation_id, "failed", "failed", error.code, str(error))
             self._complete_force_parent(
@@ -411,6 +406,43 @@ class LifecycleManager:
             )
         finally:
             self._cancellations.pop(operation_id, None)
+
+    def _run_exclusive(
+        self,
+        operation_id: str,
+        kind: OperationKind,
+        countdown_seconds: int,
+        message: str,
+        cancel: threading.Event,
+    ) -> None:
+        if kind in RESTORE_BLOCKED_OPERATION_KINDS and self.database.restore_recovery_active():
+            raise LifecycleError(
+                "RESTORE_RECOVERY_REQUIRED",
+                "未完成的备份恢复必须先 resume 或 rollback，未执行服务器操作。",
+            )
+        config = self.load_configuration()
+        if kind == "start":
+            self._start(operation_id, config)
+        elif kind == "save":
+            self._save(operation_id, config)
+        elif kind == "force_stop":
+            self._force_stop(operation_id, config)
+            self._complete_force_parent(operation_id, succeeded=True)
+        elif kind == "apply_config_and_restart":
+            self._apply_config_and_restart(
+                operation_id, config, countdown_seconds, message, cancel
+            )
+        else:
+            self._stop_or_restart(
+                operation_id, config, kind == "restart", countdown_seconds, message, cancel
+            )
+        final = self.database.operation(operation_id)
+        result = "success"
+        if final and final["state"] == "cancelled":
+            result = "cancelled"
+        elif final and final["state"] == "awaiting_force_confirmation":
+            result = "awaiting_confirmation"
+        self._audit(operation_id, result)
 
     def _audit(
         self, operation_id: str, result: str, extra: dict[str, object] | None = None
@@ -625,6 +657,26 @@ class LifecycleManager:
 
 def _normalized_path(path: Path) -> str:
     return os.path.normcase(os.path.realpath(path))
+
+
+def _operation_request_fingerprint(
+    kind: OperationKind,
+    countdown_seconds: int,
+    message: str,
+    parent_operation_id: str | None,
+) -> str:
+    payload = json.dumps(
+        {
+            "kind": kind,
+            "countdownSeconds": countdown_seconds,
+            "message": message,
+            "parentOperationId": parent_operation_id,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _read_rest_configuration(install_path: Path) -> tuple[str, SensitiveValue]:

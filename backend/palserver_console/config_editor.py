@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import cast
 
 from .config import ProfileError, ServerProfile
+from .control import ControlLock, create_control_lock
 from .persistence import Database
-from .steam import validate_executable
+from .steam import assert_no_reparse_points, validate_executable
 
 SCHEMA_SOURCE = (
     "Palworld official configuration guide (checked 2026-08-06) + Bluefissure/pal-conf main"
@@ -537,12 +538,14 @@ class ConfigService:
         executable_getter: Callable[[], Path | None],
         running: Callable[[], bool],
         profile_provider: Callable[[], ServerProfile] | None = None,
+        control_lock: ControlLock | None = None,
     ) -> None:
         self.database = database
         self.data_dir = data_dir
         self.executable_getter = executable_getter
         self.running = running
         self.profile_provider = profile_provider
+        self.control_lock = control_lock or create_control_lock()
 
     def path(self) -> Path:
         if self.profile_provider is not None:
@@ -550,7 +553,16 @@ class ConfigService:
                 install = self.profile_provider().install_path
             except ProfileError as error:
                 raise ConfigError(error.code, str(error)) from error
-            return install / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+            path = (
+                install
+                / "Pal"
+                / "Saved"
+                / "Config"
+                / "WindowsServer"
+                / "PalWorldSettings.ini"
+            )
+            self._assert_path_safe(path)
+            return path
         executable = self.executable_getter()
         if executable is None:
             raise ConfigError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
@@ -562,6 +574,7 @@ class ConfigService:
             / "WindowsServer"
             / "PalWorldSettings.ini"
         )
+        self._assert_path_safe(path)
         return path
 
     def folder_path(self) -> Path:
@@ -577,7 +590,9 @@ class ConfigService:
             validated = validate_executable(executable)
         except (OSError, ValueError) as error:
             raise ConfigError("INVALID_SERVER_PATH", str(error)) from error
-        return validated.parent / "Pal" / "Saved" / "Config" / "WindowsServer"
+        folder = validated.parent / "Pal" / "Saved" / "Config" / "WindowsServer"
+        self._assert_path_safe(folder)
+        return folder
 
     def _read(
         self, path: Path | None = None
@@ -653,6 +668,10 @@ class ConfigService:
         }
 
     def apply(self, *, force: bool = False) -> dict[str, object]:
+        with self.control_lock:
+            return self._apply_exclusive(force=force)
+
+    def _apply_exclusive(self, *, force: bool) -> dict[str, object]:
         if self.running():
             raise ConfigError(
                 "SERVER_RUNNING", "PalServer 运行中不能写入真实 INI，请先停止服务器。"
@@ -676,10 +695,15 @@ class ConfigService:
             raise ConfigError("CONFIG_DRAFT_NOT_FOUND", f"无法读取配置草稿: {error}") from error
         self._validate_pending_document(draft_raw, original, order)
         backup = target.with_name(f"{target.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
+        self._assert_path_safe(target)
+        self._assert_path_safe(backup)
         shutil.copy2(target, backup)
         temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         try:
+            self._assert_path_safe(temp)
             temp.write_text(draft_raw, encoding="utf-8", newline="")
+            self._assert_path_safe(target)
+            self._assert_path_safe(temp)
             os.replace(temp, target)
         except OSError as error:
             if temp.exists():
@@ -690,6 +714,13 @@ class ConfigService:
         self.database.clear_config_draft()
         self.database.set_setting("config.last_backup", str(backup))
         return {"message": "PalWorldSettings.ini 已原子替换。", "backupPath": str(backup)}
+
+    @staticmethod
+    def _assert_path_safe(path: Path) -> None:
+        try:
+            assert_no_reparse_points(path)
+        except ValueError as error:
+            raise ConfigError("PATH_REPARSE_POINT", str(error)) from error
 
     @staticmethod
     def _validate_updates(fields: dict[str, str], original: dict[str, str]) -> dict[str, str]:

@@ -78,6 +78,9 @@ def test_database_migration_is_idempotent_and_creates_m1_tables(tmp_path: Path) 
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
         }
         version = cast(int, connection.execute("PRAGMA user_version").fetchone()[0])
+        operation_columns = {
+            cast(str, row[1]) for row in connection.execute("PRAGMA table_info(operations)")
+        }
 
     assert version == SCHEMA_VERSION
     assert {
@@ -89,6 +92,7 @@ def test_database_migration_is_idempotent_and_creates_m1_tables(tmp_path: Path) 
         "snapshot_versions",
         "backup_index",
     } <= tables
+    assert "request_fingerprint" in operation_columns
 
 
 def test_expired_sessions_and_login_attempts_are_cleaned(tmp_path: Path) -> None:

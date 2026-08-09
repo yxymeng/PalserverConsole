@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import cast
 
 from fastapi.testclient import TestClient
 
-from palserver_console.audit import AuditService
+from palserver_console.audit import AuditService, detail_json
 from palserver_console.config import AppSettings, configure_logging
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
@@ -110,6 +111,32 @@ def test_rolling_log_is_bounded_and_redacts_credentials(tmp_path: Path) -> None:
     assert not (log_directory / "palserver-console.log.2").exists()
     assert secret not in contents
     assert "password=[REDACTED]" in contents
+
+
+def test_audit_and_log_redaction_consumes_complex_quoted_secret(tmp_path: Path) -> None:
+    secret = 'abc"),RCONEnabled=True,(path)\\tail'
+    encoded = json.dumps(secret, ensure_ascii=False)
+    for payload in (
+        f"AdminPassword={encoded}",
+        json.dumps(f"AdminPassword={encoded}"),
+        json.dumps({"AdminPassword": secret}),
+        json.dumps({"error": {"AdminPassword": secret}}),
+    ):
+        detail = detail_json({"error": payload})
+        assert "abc" not in detail
+        assert "RCONEnabled=True" not in detail
+        assert "path" not in detail
+
+    logger = configure_logging(tmp_path / "data")
+    logger.info("request failed AdminPassword=%s", encoded)
+    for handler in logger.handlers:
+        handler.flush()
+    contents = (tmp_path / "data" / "logs" / "palserver-console.log").read_text(
+        encoding="utf-8"
+    )
+    assert "abc" not in contents
+    assert "RCONEnabled=True" not in contents
+    assert "path" not in contents
 
 
 def test_audit_api_filters_exports_and_retention(tmp_path: Path) -> None:

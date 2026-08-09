@@ -370,6 +370,25 @@ def test_admin_password_is_preserved_when_omitted_and_can_be_changed_safely(
     assert running_error.value.code == "SERVER_RUNNING"
 
 
+def test_config_read_and_write_reject_intermediate_reparse_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    service, _, config = make_service(tmp_path)
+    service.save_draft({"AutoSaveSpan": "900"})
+    original_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == config.parent or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+    for action in (service.current, service.apply):
+        with pytest.raises(ConfigError) as error:
+            action()
+
+        assert error.value.code == "PATH_REPARSE_POINT"
+    assert config.read_text(encoding="utf-8").find("AutoSaveSpan=600.000000") >= 0
+
+
 def test_open_config_folder_starts_windows_explorer(tmp_path: Path) -> None:
     executable = tmp_path / "steamapps" / "common" / "PalServer" / "PalServer.exe"
     executable.parent.mkdir(parents=True)

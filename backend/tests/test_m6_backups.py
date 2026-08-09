@@ -189,6 +189,47 @@ def test_backup_writes_fail_closed_when_bound_world_moves(tmp_path: Path) -> Non
         assert error.value.code == "WORLD_BINDING_INVALID"
 
 
+@pytest.mark.parametrize("action", ["list", "delete", "retention", "restore"])
+def test_backup_operations_reject_intermediate_reparse_point(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str
+) -> None:
+    backups, world, state = service(tmp_path)
+    backup = make_backup(world, "2026.08.01-01.02.03")
+    redirected_parent = world / "backup"
+    original_is_symlink = Path.is_symlink
+
+    def fake_is_symlink(path: Path) -> bool:
+        return path == redirected_parent or original_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", fake_is_symlink)
+    with pytest.raises(BackupError) as error:
+        if action == "list":
+            backups.list()
+        elif action == "delete":
+            backups.delete("2026.08.01-01.02.03")
+        elif action == "retention":
+            backups.set_retention(0)
+        else:
+            backups.restore("2026.08.01-01.02.03")
+
+    assert error.value.code == "BACKUP_PATH_INVALID"
+    assert backup.is_dir()
+    assert state["retention"] is None
+
+
+def test_restore_rejects_active_lifecycle_operation(tmp_path: Path) -> None:
+    backups, world, database, _ = persistent_service(tmp_path)
+    backup = make_backup(world, "2026.08.01-01.02.03")
+    database.create_operation("queued-start", "start", "queued-start")
+
+    with pytest.raises(BackupError) as error:
+        backups.restore("2026.08.01-01.02.03")
+
+    assert error.value.code == "OPERATION_IN_PROGRESS"
+    assert database.restore_journal() is None
+    assert backup.is_dir()
+
+
 def test_restore_journal_resumes_after_replacement_crash(tmp_path: Path) -> None:
     backups, world, database, executable = persistent_service(tmp_path)
     make_backup(world, "2026.08.01-01.02.03")
