@@ -188,6 +188,22 @@ function Assert-ProgramChecksums {
     }
 }
 
+function Assert-LauncherChecksum {
+    param(
+        [Parameter(Mandatory = $true)][string]$LauncherPath,
+        [Parameter(Mandatory = $true)][object]$LauncherEntry,
+        [Parameter(Mandatory = $true)][string]$Context
+    )
+
+    if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
+        throw "CHECKSUM_MISMATCH: missing PalServerConsole.exe $Context."
+    }
+    $actualHash = (Get-FileHash -LiteralPath $LauncherPath -Algorithm SHA256).Hash
+    if (-not [string]::Equals($actualHash, [string]$LauncherEntry.Hash, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "CHECKSUM_MISMATCH: PalServerConsole.exe $Context."
+    }
+}
+
 function Get-DatabaseSchemaVersion {
     param([Parameter(Mandatory = $true)][string]$DatabasePath)
 
@@ -250,19 +266,37 @@ if ([string]::Equals($installRootPath, $packageRootPath, [System.StringCompariso
 
 $installedProgram = Join-Path $installRootPath "Program"
 $candidateProgram = Join-Path $packageRootPath "Program"
+$installedLauncher = Join-Path $installRootPath "PalServerConsole.exe"
+$candidateLauncher = Join-Path $packageRootPath "PalServerConsole.exe"
 if (-not (Test-Path -LiteralPath $installedProgram -PathType Container)) {
     throw "UPGRADE_INPUT_INVALID: installed Program directory is missing: $installedProgram"
 }
 if (-not (Test-Path -LiteralPath $candidateProgram -PathType Container)) {
     throw "UPGRADE_INPUT_INVALID: candidate Program directory is missing: $candidateProgram"
 }
+if (-not (Test-Path -LiteralPath $candidateLauncher -PathType Leaf)) {
+    throw "UPGRADE_INPUT_INVALID: candidate root launcher is missing: $candidateLauncher"
+}
 
 $metadata = Read-BuildMetadata $packageRootPath
 $entries = Assert-PackageChecksums $packageRootPath
 $programEntries = @($entries | Where-Object { $_.RelativePath -like "Program/*" })
+$launcherEntries = @(
+    $entries | Where-Object {
+        [string]::Equals(
+            [string]$_.RelativePath,
+            "PalServerConsole.exe",
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    }
+)
 if ($programEntries.Count -eq 0) {
     throw "CHECKSUM_MANIFEST_INVALID: Program files are missing from checksums.sha256."
 }
+if ($launcherEntries.Count -ne 1) {
+    throw "CHECKSUM_MANIFEST_INVALID: root PalServerConsole.exe must appear exactly once."
+}
+$launcherEntry = $launcherEntries[0]
 
 $running = @(Get-Process -Name "PalServerConsole" -ErrorAction SilentlyContinue)
 if ($running.Count -gt 0) {
@@ -291,12 +325,15 @@ if (Test-Path -LiteralPath $databasePath -PathType Leaf) {
 }
 
 $stagingProgram = Join-Path $installRootPath ".Program-upgrade-staging-$timestamp"
+$stagingLauncher = Join-Path $installRootPath ".PalServerConsole-upgrade-staging-$timestamp.exe"
 New-Item -ItemType Directory -Path $stagingProgram | Out-Null
 try {
     foreach ($item in Get-ChildItem -LiteralPath $candidateProgram -Force) {
         Copy-Item -LiteralPath $item.FullName -Destination $stagingProgram -Recurse -Force
     }
     Assert-ProgramChecksums $stagingProgram $programEntries
+    Copy-Item -LiteralPath $candidateLauncher -Destination $stagingLauncher
+    Assert-LauncherChecksum $stagingLauncher $launcherEntry "after staging"
 }
 catch {
     throw "UPGRADE_STAGING_FAILED: $($_.Exception.Message)"
@@ -305,18 +342,35 @@ catch {
 $programBackups = Join-Path $installRootPath "program-backups"
 New-Item -ItemType Directory -Path $programBackups -Force | Out-Null
 $previousProgram = Join-Path $programBackups "Program-$timestamp"
+$previousLauncher = Join-Path $programBackups "PalServerConsole-$timestamp.exe"
 $oldProgramMoved = $false
 $newProgramMoved = $false
+$oldLauncherMoved = $false
+$newLauncherMoved = $false
 try {
     Move-Item -LiteralPath $installedProgram -Destination $previousProgram
     $oldProgramMoved = $true
     Move-Item -LiteralPath $stagingProgram -Destination $installedProgram
     $newProgramMoved = $true
+    if (Test-Path -LiteralPath $installedLauncher -PathType Leaf) {
+        Move-Item -LiteralPath $installedLauncher -Destination $previousLauncher
+        $oldLauncherMoved = $true
+    }
+    Move-Item -LiteralPath $stagingLauncher -Destination $installedLauncher
+    $newLauncherMoved = $true
     Assert-ProgramChecksums $installedProgram $programEntries
+    Assert-LauncherChecksum $installedLauncher $launcherEntry "after installation"
 }
 catch {
     $upgradeError = $_.Exception.Message
     try {
+        if ($newLauncherMoved -and (Test-Path -LiteralPath $installedLauncher -PathType Leaf)) {
+            $failedLauncher = Join-Path $programBackups "PalServerConsole-failed-$timestamp.exe"
+            Move-Item -LiteralPath $installedLauncher -Destination $failedLauncher
+        }
+        if ($oldLauncherMoved -and (Test-Path -LiteralPath $previousLauncher -PathType Leaf)) {
+            Move-Item -LiteralPath $previousLauncher -Destination $installedLauncher
+        }
         if ($newProgramMoved -and (Test-Path -LiteralPath $installedProgram -PathType Container)) {
             $failedProgram = Join-Path $programBackups "Program-failed-$timestamp"
             Move-Item -LiteralPath $installedProgram -Destination $failedProgram
@@ -328,7 +382,10 @@ catch {
     catch {
         throw "PROGRAM_ROLLBACK_FAILED: $($_.Exception.Message) Original upgrade error: $upgradeError"
     }
-    throw "UPGRADE_FAILED: $upgradeError. Program rollback completed; data was not modified."
+    throw "UPGRADE_FAILED: $upgradeError. Program rollback completed; root launcher and data were restored."
 }
 
-Write-Host "升级完成：已替换 Program，data 未被替换。旧程序保留在 $previousProgram。"
+Write-Host "升级完成：已替换根目录启动器和 Program，data 未被替换。旧程序保留在 $previousProgram。"
+if (Test-Path -LiteralPath $previousLauncher -PathType Leaf) {
+    Write-Host "旧启动器保留在 $previousLauncher。"
+}

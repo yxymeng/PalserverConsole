@@ -127,6 +127,7 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     install_root = tmp_path / "installed"
     (install_root / "Program").mkdir(parents=True)
     (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
+    (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
     database_path = install_root / "data" / "app.db"
     _write_database(database_path, schema_version=8)
 
@@ -134,13 +135,19 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     candidate_program = package_root / "Program"
     candidate_program.mkdir(parents=True)
     (candidate_program / "release.txt").write_text("new", encoding="utf-8")
+    candidate_launcher = package_root / "PalServerConsole.exe"
+    candidate_launcher.write_bytes(b"new-launcher")
     metadata_path = package_root / "metadata" / "build-info.json"
     _write_build_metadata(metadata_path, maximum_schema_version=8)
-    _write_checksum_manifest(package_root, [candidate_program / "release.txt", metadata_path])
+    _write_checksum_manifest(
+        package_root,
+        [candidate_launcher, candidate_program / "release.txt", metadata_path],
+    )
 
     upgraded = _run_upgrade(script, install_root, package_root)
 
     assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
     assert _schema_version(database_path) == 8
     with sqlite3.connect(database_path) as connection:
@@ -150,21 +157,28 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     backups = sorted((install_root / "data" / "upgrade-backups").glob("*/app.db"))
     assert len(backups) == 1
     assert _schema_version(backups[0]) == 8
+    launcher_backups = sorted((install_root / "program-backups").glob("PalServerConsole-*.exe"))
+    assert len(launcher_backups) == 1
+    assert launcher_backups[0].read_bytes() == b"old-launcher"
 
     downgrade_root = tmp_path / "incompatible-downgrade"
     downgrade_program = downgrade_root / "Program"
     downgrade_program.mkdir(parents=True)
     (downgrade_program / "release.txt").write_text("older", encoding="utf-8")
+    downgrade_launcher = downgrade_root / "PalServerConsole.exe"
+    downgrade_launcher.write_bytes(b"older-launcher")
     downgrade_metadata = downgrade_root / "metadata" / "build-info.json"
     _write_build_metadata(downgrade_metadata, maximum_schema_version=7)
     _write_checksum_manifest(
-        downgrade_root, [downgrade_program / "release.txt", downgrade_metadata]
+        downgrade_root,
+        [downgrade_launcher, downgrade_program / "release.txt", downgrade_metadata],
     )
 
     blocked = _run_upgrade(script, install_root, downgrade_root)
 
     assert blocked.returncode != 0
     assert "INCOMPATIBLE_DOWNGRADE" in f"{blocked.stdout}\n{blocked.stderr}"
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
 
 
@@ -178,16 +192,19 @@ def test_portable_upgrade_rejects_unlisted_program_files(
     install_root = tmp_path / "installed"
     (install_root / "Program").mkdir(parents=True)
     (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
+    (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
 
     package_root = tmp_path / "candidate"
     candidate_program = package_root / "Program"
     candidate_program.mkdir(parents=True)
     release_file = candidate_program / "release.txt"
     release_file.write_text("new", encoding="utf-8")
+    candidate_launcher = package_root / "PalServerConsole.exe"
+    candidate_launcher.write_bytes(b"new-launcher")
     (candidate_program / unlisted_name).write_bytes(b"not-covered-by-the-manifest")
     metadata_path = package_root / "metadata" / "build-info.json"
     _write_build_metadata(metadata_path, maximum_schema_version=8)
-    _write_checksum_manifest(package_root, [release_file, metadata_path])
+    _write_checksum_manifest(package_root, [candidate_launcher, release_file, metadata_path])
 
     blocked = _run_upgrade(script, install_root, package_root)
 
@@ -195,6 +212,7 @@ def test_portable_upgrade_rejects_unlisted_program_files(
     assert blocked.returncode != 0
     assert "CHECKSUM_MANIFEST_INVALID" in output
     assert "unlisted" in output.casefold()
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"old-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "old"
 
 
@@ -260,15 +278,22 @@ def test_license_collector_includes_bundled_frontend_runtime_dependencies(
 def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclosure() -> None:
     project_root = Path(__file__).resolve().parents[2]
     source_launcher = (project_root / "start-console.bat").read_text(encoding="ascii")
+    native_launcher_path = project_root / "scripts" / "portable-launcher.cs"
     build_script = (project_root / "scripts" / "build-portable.ps1").read_text(encoding="utf-8-sig")
     upgrade_script = (project_root / "scripts" / "upgrade-portable.ps1").read_text(
         encoding="utf-8-sig"
     )
     portable_readme = (project_root / "docs" / "windows-portable.md").read_text(encoding="utf-8")
 
-    assert '"%~dp0Program\\PalServerConsole.exe"' in source_launcher
+    assert '"%~dp0PalServerConsole.exe"' in source_launcher
     assert "PALSERVER_CONSOLE_DATA" in source_launcher
     assert "%*" in source_launcher
+    assert native_launcher_path.is_file()
+    native_launcher = native_launcher_path.read_text(encoding="utf-8")
+    assert 'Path.Combine(packageRoot, "Program", "PalServerConsole.exe")' in native_launcher
+    assert 'Path.Combine(packageRoot, "data")' in native_launcher
+    assert "UseShellExecute = false" in native_launcher
+    assert "QuoteArgument" in native_launcher
     assert "requirements-build.lock" in build_script
     assert "PyInstaller" in build_script
     assert "--onedir" in build_script
@@ -283,10 +308,16 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Remove-Item -LiteralPath $temporaryRoot -Recurse -Force" in build_script
     assert "--package-lock" in build_script
     assert "--node-modules" in build_script
+    assert "portable-launcher.cs" in build_script
+    assert 'Join-Path $packageStage "PalServerConsole.exe"' in build_script
+    assert 'Portable root executable self-check' in build_script
     assert "INCOMPATIBLE_DOWNGRADE" in upgrade_script
     assert "upgrade-backups" in upgrade_script
     assert "Get-FileHash" in upgrade_script
     assert "unlisted file" in upgrade_script
     assert "Program rollback completed" in upgrade_script
+    assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
+    assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
     assert "未签名" in portable_readme
+    assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme

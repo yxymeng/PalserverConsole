@@ -78,9 +78,10 @@ $buildLock = Join-Path $projectRoot "requirements-build.lock"
 $frontendRoot = Join-Path $projectRoot "frontend"
 $frontendDist = Join-Path $frontendRoot "dist"
 $portableEntry = Join-Path $PSScriptRoot "portable-entry.py"
+$portableLauncherSource = Join-Path $PSScriptRoot "portable-launcher.cs"
 $licenseCollector = Join-Path $PSScriptRoot "collect-third-party-licenses.py"
 
-foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $licenseCollector)) {
+foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $licenseCollector)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required build input is missing: $required"
     }
@@ -207,6 +208,33 @@ try {
     New-Item -ItemType Directory -Path $portableProgram, $portableData, $portableMetadata | Out-Null
     Copy-DirectoryContents $builtProgram $portableProgram
 
+    $portableLauncher = Join-Path $packageStage "PalServerConsole.exe"
+    Write-Host "[PalServerConsole] 正在生成根目录 EXE 启动器..."
+    $compilerParameters = New-Object System.CodeDom.Compiler.CompilerParameters
+    $compilerParameters.CompilerOptions = "/target:exe /platform:x64 /optimize+"
+    $compilerParameters.GenerateExecutable = $true
+    $compilerParameters.GenerateInMemory = $false
+    $compilerParameters.OutputAssembly = $portableLauncher
+    $compilerParameters.ReferencedAssemblies.Add("System.dll") | Out-Null
+    $compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
+    try {
+        $compileResult = $compiler.CompileAssemblyFromFile(
+            $compilerParameters,
+            $portableLauncherSource
+        )
+    }
+    finally {
+        $compiler.Dispose()
+    }
+    $compileErrors = @($compileResult.Errors | Where-Object { -not $_.IsWarning })
+    if ($compileErrors.Count -gt 0) {
+        $details = ($compileErrors | ForEach-Object { $_.ToString() }) -join [Environment]::NewLine
+        throw "Portable root launcher compilation failed:`n$details"
+    }
+    if (-not (Test-Path -LiteralPath $portableLauncher -PathType Leaf)) {
+        throw "Portable root launcher was not created: $portableLauncher"
+    }
+
     # Build metadata writes {"status": "unsigned"}; no Authenticode signing claim is made.
     $signing = '{"status": "unsigned"}' | ConvertFrom-Json
     $buildMetadata = [ordered]@{
@@ -251,8 +279,8 @@ try {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "upgrade-portable.ps1") -Destination $packageStage
     Set-Content -LiteralPath (Join-Path $portableData ".keep") -Value "User data is created here and is never replaced by upgrade-portable.ps1." -Encoding ASCII
 
-    $selfCheckOutput = & (Join-Path $portableProgram "PalServerConsole.exe") --portable-self-check
-    Assert-ExitCode "Portable executable self-check"
+    $selfCheckOutput = & $portableLauncher --portable-self-check
+    Assert-ExitCode "Portable root executable self-check"
     $selfCheck = ($selfCheckOutput | Out-String | ConvertFrom-Json)
     if (
         $selfCheck.portableSelfCheck -ne "ok" -or

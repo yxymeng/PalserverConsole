@@ -1,7 +1,9 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-if exist "%~dp0Program\PalServerConsole.exe" (
+if exist "%~dp0PalServerConsole.exe" (
+  "%~dp0PalServerConsole.exe" %*
+) else if exist "%~dp0Program\PalServerConsole.exe" (
   set "PALSERVER_CONSOLE_DATA=%~dp0data"
   "%~dp0Program\PalServerConsole.exe" %*
 ) else (
