@@ -5,6 +5,7 @@ import json
 import os
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.request
@@ -13,9 +14,10 @@ from dataclasses import replace
 from pathlib import Path
 
 import uvicorn
+from fastapi.testclient import TestClient
 
 from .auth import AuthStore
-from .config import default_settings
+from .config import AppSettings, default_settings
 from .main import create_app
 from .persistence import Database
 
@@ -23,9 +25,13 @@ from .persistence import Database
 def main() -> None:
     parser = argparse.ArgumentParser(description="PalServerConsole local server")
     parser.add_argument("--no-browser", action="store_true", help="Do not open the browser.")
+    parser.add_argument("--portable-self-check", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
 
     settings = default_settings()
+    if args.portable_self_check:
+        _portable_self_check(settings)
+        return
     if not (settings.static_dir / "index.html").is_file():
         raise RuntimeError(
             "Frontend build is missing. Run npm.cmd run build in the frontend directory."
@@ -55,6 +61,47 @@ def main() -> None:
     if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
     uvicorn.run(create_app(settings), host=host, port=settings.port, workers=1, log_level="info")
+
+
+def _portable_self_check(settings: AppSettings) -> None:
+    """Exercise a frozen build without creating or migrating user data."""
+
+    if not (settings.static_dir / "index.html").is_file():
+        raise RuntimeError("Portable frontend build is missing from the application bundle.")
+    with tempfile.TemporaryDirectory(prefix="palserver-console-portable-check-") as temporary_root:
+        smoke_settings = replace(settings, data_dir=Path(temporary_root) / "data")
+        app = create_app(smoke_settings)
+        try:
+            with TestClient(
+                app,
+                base_url="http://127.0.0.1:8223",
+                client=("127.0.0.1", 50000),
+            ) as client:
+                response = client.get("/api/health")
+                frontend_response = client.get("/")
+        finally:
+            for handler in tuple(app.state.logger.handlers):
+                if getattr(handler, "_palserver_console_handler", False):
+                    app.state.logger.removeHandler(handler)
+                    handler.close()
+    if response.status_code != 200 or response.json().get("status") != "ok":
+        raise RuntimeError("Portable health self-check failed.")
+    frontend_ok = (
+        frontend_response.status_code == 200
+        and "<!doctype html" in frontend_response.text.lower()
+    )
+    if not frontend_ok:
+        raise RuntimeError("Portable frontend self-check failed.")
+    print(
+        json.dumps(
+            {
+                "service": "palserver-console",
+                "portableSelfCheck": "ok",
+                "health": "ok",
+                "frontend": "ok",
+            }
+        )
+    )
 
 
 def _open_when_ready(url: str, max_attempts: int = 80, delay_seconds: float = 0.25) -> None:

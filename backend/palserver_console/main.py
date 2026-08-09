@@ -129,6 +129,7 @@ def create_app(
     app.state.world_data = deps.world
     app.state.backups = deps.backups
     app.state.config_editor = deps.config
+    app.state.operational_health = deps.operational_health
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:

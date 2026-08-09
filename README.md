@@ -22,7 +22,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 ## 双击启动
 
-以下步骤用于当前源码版本，不是后续 Windows 便携版的最终用户安装方式。
+以下步骤用于当前源码版本。构建出的 Windows 便携版请阅读 [`docs/windows-portable.md`](docs/windows-portable.md)：它自带运行时，普通使用者无需安装 Python 或 Node.js。
 
 1. 安装 **64 位 CPython 3.13**，并勾选 **Add Python to PATH**。其他 Python 版本不属于本项目的构建和验证范围。
 2. 安装 Node.js LTS。首次构建前端时需要，之后只有前端源码或锁文件发生变化时才需要重新构建。
@@ -52,7 +52,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 - 配置先保存为草稿。检测到 `CONFIG_CONFLICT` 时不会自动覆盖外部修改。
 - 真实服务器的恢复、配置应用和强制停止只应在用户批准的维护窗口执行。
 
-详细操作请阅读 [`docs/operations.md`](docs/operations.md) 和 [`docs/maintenance-window-checklist.md`](docs/maintenance-window-checklist.md)。
+详细操作请阅读 [`docs/operations.md`](docs/operations.md)、[`docs/maintenance-window-checklist.md`](docs/maintenance-window-checklist.md) 和 [`docs/windows-portable.md`](docs/windows-portable.md)。
 
 ## 常见问题
 
@@ -69,7 +69,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 ## 当前状态与未来方向
 
-首版已经覆盖本地控制台的核心闭环，但仍有明确限制：真实服务器的恢复、配置应用和破坏性操作需要维护窗口；真实 RCON 降级还需要实际服务器只读验证；当前没有自动更新器或独立安装包。
+首版已经覆盖本地控制台的核心闭环，但仍有明确限制：真实服务器的恢复、配置应用和破坏性操作需要维护窗口；真实 RCON 降级还需要实际服务器只读验证。项目现在提供受锁文件约束的 Windows 便携版构建与安全升级脚本；实际公开发布前仍需完成干净 Windows 验收和签名决策，未签名包不得宣称已签名。
 
 后续路线以 `plan.md` 为准，并按风险和用户收益排序：
 
@@ -99,6 +99,16 @@ npm.cmd run test
 npm.cmd run build
 npm.cmd run test:e2e
 ```
+
+构建 Windows 便携版（仅构建机需要 64 位 CPython 3.13 和 Node.js 24 LTS）：
+
+```powershell
+.\scripts\build-portable.ps1
+```
+
+正式构建默认要求 Git 工作区干净，否则以 `SOURCE_TREE_DIRTY` 停止，避免交付物声称来自无法重现的提交。仅进行本地验收、确实需要打包未提交代码时可显式使用 `-AllowDirtySource`；这类包会在 `build-info.json` 标记 `sourceTreeState: dirty`，不得作为正式发布包。
+
+脚本会生成 `artifacts\PalServerConsole-<版本>-windows-x64.zip`、`checksums.sha256`、构建元数据，以及 Python 与前端 npm 运行时依赖的第三方许可证；不会对真实 PalServer、存档或现有 `data/` 进行写入。当前产物默认未签名。
 
 ## 数据与公开发布
 

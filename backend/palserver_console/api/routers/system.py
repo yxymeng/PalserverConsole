@@ -56,6 +56,13 @@ def router(deps: AppDependencies, api_version: str) -> APIRouter:
             return denied
         return {"monitor": deps.monitor.status(), "audit": deps.audit.status()}
 
+    @api.get("/api/operations/health", tags=["system"], response_model=None)
+    def operational_health(request: Request) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        return deps.operational_health.snapshot()
+
     @api.get("/api/bootstrap", tags=["system"], response_model=None)
     def bootstrap(request: Request) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)

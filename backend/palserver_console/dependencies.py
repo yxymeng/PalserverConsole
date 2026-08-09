@@ -17,6 +17,7 @@ from .monitoring import (
     ServerConnectionConfig,
     read_connection_config,
 )
+from .observability import OperationalHealthService
 from .persistence import Database
 from .world.service import WorldSnapshotService
 
@@ -34,6 +35,7 @@ class AppDependencies:
     world: WorldSnapshotService
     backups: BackupService
     config: ConfigService
+    operational_health: OperationalHealthService
 
 
 class DependencyFactory(Protocol):
@@ -122,6 +124,13 @@ class DefaultDependencyFactory:
             control_lock=lifecycle.control_lock,
         )
         lifecycle.set_config_apply(config.apply)
+        operational_health = OperationalHealthService(
+            settings.data_dir,
+            live_monitor,
+            audit,
+            world_data,
+            backups,
+        )
 
         return AppDependencies(
             settings=settings,
@@ -135,6 +144,7 @@ class DefaultDependencyFactory:
             world=world_data,
             backups=backups,
             config=config,
+            operational_health=operational_health,
         )
 
 

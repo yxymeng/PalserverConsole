@@ -4,6 +4,7 @@ import type { AuthStatus, ShellStatus } from "../../api/contracts";
 import { requestJson } from "../../api/client";
 import { serverStateLabel } from "../server/labels";
 import { text } from "../../app/text";
+import { OperationalHealthPanel } from "./OperationalHealthPanel";
 
 export function Overview({ shell, auth, onAuthChanged }: { shell: ShellStatus | null; auth: AuthStatus; onAuthChanged: () => void }) {
   const [port, setPort] = useState(String(auth.port));
@@ -55,6 +56,7 @@ export function Overview({ shell, auth, onAuthChanged }: { shell: ShellStatus | 
           <button className="primary-button" type="submit"><Settings size={18} />保存端口</button>
         </form> : <div className="notice-band"><AlertTriangle size={20} /><span>监听端口只能在服务器本机的总览页面修改。</span></div>}
       </section>
+      <OperationalHealthPanel auth={auth} />
     </div>
   );
 }

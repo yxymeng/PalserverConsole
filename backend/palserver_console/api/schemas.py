@@ -103,6 +103,10 @@ class BackupRetentionRequest(BaseModel):
     retention: int | None = Field(default=None, ge=0, le=100000)
 
 
+class CleanupConfirmationRequest(BaseModel):
+    previewToken: str = Field(min_length=16, max_length=256)
+
+
 class ConfigApplyRequest(BaseModel):
     force: bool = False
 

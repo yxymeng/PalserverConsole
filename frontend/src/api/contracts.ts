@@ -111,6 +111,69 @@ export type BackupResponse = {
   stale?: boolean;
   errorCode?: string | null;
 };
+export type OperationalHealthState = "ok" | "warning" | "blocked" | "unavailable" | "no_data" | "healthy" | "stale" | "failed" | "stopped" | "invalid";
+export type OperationalDirectory = {
+  name: string;
+  label: string;
+  path: string | null;
+  state: OperationalHealthState;
+  sizeBytes: number;
+  fileCount: number;
+  freeBytes: number | null;
+  totalBytes: number | null;
+  errorCode: string | null;
+};
+export type OperationalHealth = {
+  observedAt: number;
+  capacity: {
+    state: "ok" | "warning" | "blocked" | "unavailable";
+    freeBytes: number | null;
+    totalBytes: number | null;
+    minimumFreeBytes: number;
+    copyBytes: number | null;
+    requiredFreeBytes: number | null;
+    warningFreeBytes: number | null;
+    sourceErrorCode: string | null;
+    errorCode: string | null;
+  };
+  directories: OperationalDirectory[];
+  world: {
+    state: OperationalHealthState;
+    lastSuccessAt: number | null;
+    snapshotId: string | null;
+    parsing: boolean;
+    errorCode: string | null;
+    cacheSizeBytes: number | null;
+  };
+  backups: {
+    state: OperationalHealthState;
+    lastSuccessAt: number | null;
+    itemCount: number;
+    validCount: number;
+    invalidCount: number;
+    totalBytes: number;
+    errorCode: string | null;
+  };
+  background: Array<{
+    name: string;
+    state: OperationalHealthState;
+    alive: boolean;
+    startedAt: number | null;
+    lastSuccessAt: number | null;
+    lastRunAt: number | null;
+    errorCode: string | null;
+  }>;
+  alerts: Array<{ severity: "warning" | "critical"; code: string; message: string }>;
+};
+export type StorageCleanupPreview = {
+  state: "ready" | "busy";
+  previewToken: string | null;
+  expiresAt: number | null;
+  candidateCount: number;
+  totalBytes: number;
+  errors: number;
+  candidates: Array<{ kind: string; name: string; sizeBytes: number }>;
+};
 export type ConfigDocument = {
   path: string;
   sourceHash: string;

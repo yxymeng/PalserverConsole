@@ -16,6 +16,8 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 frontend/artifacts/
+artifacts/
+build/
 
 # Local runtime state and secrets
 runtime/

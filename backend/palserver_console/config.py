@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import os
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -355,11 +356,18 @@ class AppSettings:
 
 
 def default_settings() -> AppSettings:
-    project_root = Path(__file__).resolve().parents[2]
-    data_dir = Path(os.environ.get("PALSERVER_CONSOLE_DATA", project_root / "data"))
-    static_dir = Path(
-        os.environ.get("PALSERVER_CONSOLE_STATIC", project_root / "frontend" / "dist")
-    )
+    if getattr(sys, "frozen", False):
+        program_dir = Path(sys.executable).resolve().parent
+        bundled_root = Path(getattr(sys, "_MEIPASS", program_dir)).resolve()
+        default_data_dir = program_dir.parent / "data"
+        default_static_dir = bundled_root / "frontend" / "dist"
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        default_data_dir = project_root / "data"
+        default_static_dir = project_root / "frontend" / "dist"
+
+    data_dir = Path(os.environ.get("PALSERVER_CONSOLE_DATA", default_data_dir))
+    static_dir = Path(os.environ.get("PALSERVER_CONSOLE_STATIC", default_static_dir))
     raw_port = os.environ.get("PALSERVER_CONSOLE_PORT", "8223")
     try:
         port = int(raw_port)

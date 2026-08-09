@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -15,13 +17,15 @@ from typing import Any
 
 from ..config import ProfileError, ServerProfile
 from ..persistence import Database
-from .cache import player_detail, query_cache, validate_cache_file
+from ..steam import is_reparse_point
+from .cache import inspect_storage, player_detail, query_cache, validate_cache_file
 
 DEFAULT_SNAPSHOT_RETENTION_COUNT = 8
 DEFAULT_SNAPSHOT_RETENTION_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_SNAPSHOT_RETENTION_AGE_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_MINIMUM_FREE_BYTES = 512 * 1024 * 1024
 DEFAULT_OOZ_DISCOVERY_CACHE_TTL_SECONDS = 300.0
+CLEANUP_CONFIRMATION_TTL_SECONDS = 5 * 60
 
 
 class WorldDataError(RuntimeError):
@@ -83,7 +87,12 @@ class WorldSnapshotService:
         self._last_cache_size_bytes: int | None = None
         self._last_counts: dict[str, int] = {}
         self._last_cleanup_at: float | None = None
+        self._cleanup_confirmation: tuple[str, float, str] | None = None
         self._ooz_discovery_cache: tuple[str, float, Path | None] | None = None
+        self._started_at: int | None = None
+        self._last_watch_run_at: int | None = None
+        self._last_watch_success_at: int | None = None
+        self._last_watch_error: dict[str, object] | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -92,15 +101,88 @@ class WorldSnapshotService:
         self.snapshots_root.mkdir(parents=True, exist_ok=True)
         self.cache_root.mkdir(parents=True, exist_ok=True)
         self._maybe_cleanup_storage(force=True)
-        self._stop.clear()
-        self._thread = threading.Thread(target=self._watch_loop, name="world-snapshot", daemon=True)
-        self._thread.start()
+        with self._lock:
+            self._stop.clear()
+            self._started_at = int(self.clock())
+            self._last_watch_run_at = None
+            self._last_watch_success_at = None
+            self._last_watch_error = None
+            self._thread = threading.Thread(
+                target=self._watch_loop,
+                name="world-snapshot",
+                daemon=True,
+            )
+            thread = self._thread
+        thread.start()
 
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
         if self._thread:
             self._thread.join(timeout=5)
+
+    def background_status(self) -> dict[str, object]:
+        with self._lock:
+            thread = self._thread
+            return {
+                "name": "world-snapshot",
+                "alive": bool(thread and thread.is_alive()),
+                "startedAt": self._started_at,
+                "lastRunAt": self._last_watch_run_at,
+                "lastSuccessAt": self._last_watch_success_at,
+                "lastError": dict(self._last_watch_error) if self._last_watch_error else None,
+                "retryDelaySeconds": 0.0,
+            }
+
+    def capacity_status(self) -> dict[str, object]:
+        """Describe the exact free-space reserve required for the next snapshot copy."""
+
+        source_bytes: int | None = None
+        source_error_code: str | None = None
+        try:
+            world = self._world_directory()
+            source_bytes = self._fingerprint_size(self._fingerprint(world))
+        except WorldDataError as error:
+            source_error_code = error.code
+
+        try:
+            usage = self.disk_usage_provider(self.data_dir)
+            free_bytes = max(0, int(usage.free))
+            total_bytes = max(0, int(usage.total))
+        except (AttributeError, OSError, TypeError, ValueError):
+            return {
+                "state": "unavailable",
+                "freeBytes": None,
+                "totalBytes": None,
+                "minimumFreeBytes": self.minimum_free_bytes,
+                "copyBytes": source_bytes,
+                "requiredFreeBytes": None,
+                "warningFreeBytes": None,
+                "sourceErrorCode": source_error_code,
+                "errorCode": "DISK_USAGE_UNAVAILABLE",
+            }
+
+        copy_bytes = source_bytes or 0
+        required_free_bytes = self.minimum_free_bytes + copy_bytes
+        warning_free_bytes = required_free_bytes + max(copy_bytes, self.minimum_free_bytes)
+        state = (
+            "blocked"
+            if free_bytes < required_free_bytes
+            else "warning"
+            if free_bytes < warning_free_bytes
+            else "ok"
+        )
+        return {
+            "state": state,
+            "freeBytes": free_bytes,
+            "totalBytes": total_bytes,
+            "minimumFreeBytes": self.minimum_free_bytes,
+            "copyBytes": source_bytes,
+            "requiredFreeBytes": required_free_bytes,
+            "warningFreeBytes": warning_free_bytes,
+            "sourceErrorCode": source_error_code,
+            "errorCode": None,
+        }
 
     def request_reparse(self) -> None:
         with self._lock:
@@ -119,7 +201,63 @@ class WorldSnapshotService:
                     "removedBytes": 0,
                     "errors": 0,
                 }
-            return self._cleanup_storage_locked()
+            report = self._cleanup_storage_locked()
+            self._cleanup_confirmation = None
+            return report
+
+    def cleanup_preview(self) -> dict[str, object]:
+        """Return the generated-data removal plan without changing any files."""
+
+        with self._lock:
+            if self._parsing:
+                return {
+                    "state": "busy",
+                    "previewToken": None,
+                    "expiresAt": None,
+                    "candidateCount": 0,
+                    "totalBytes": 0,
+                    "errors": 0,
+                    "candidates": [],
+                }
+            candidates, errors = self._cleanup_candidates_locked()
+            fingerprint = self._cleanup_fingerprint(candidates)
+            token = secrets.token_urlsafe(24)
+            expires_at = int(self.clock() + CLEANUP_CONFIRMATION_TTL_SECONDS)
+            self._cleanup_confirmation = (token, float(expires_at), fingerprint)
+            total_bytes = sum(self._entry_size(path) for _, path, _ in candidates)
+            public_candidates = [
+                {"kind": kind, "name": path.name, "sizeBytes": self._entry_size(path)}
+                for kind, path, _ in candidates
+            ]
+            return {
+                "state": "ready",
+                "previewToken": token,
+                "expiresAt": expires_at,
+                "candidateCount": len(public_candidates),
+                "totalBytes": total_bytes,
+                "errors": errors,
+                "candidates": public_candidates,
+            }
+
+    def confirm_cleanup(self, preview_token: str) -> dict[str, int]:
+        """Delete only the plan that was explicitly previewed and has not changed."""
+
+        with self._lock:
+            if self._parsing:
+                raise WorldDataError("CLEANUP_BUSY", "存档解析进行中，暂不能清理运行数据。")
+            confirmation = self._cleanup_confirmation
+            if confirmation is None or not secrets.compare_digest(preview_token, confirmation[0]):
+                raise WorldDataError("CLEANUP_CONFIRMATION_REQUIRED", "请先预览清理项后再确认。")
+            if self.clock() > confirmation[1]:
+                self._cleanup_confirmation = None
+                raise WorldDataError("CLEANUP_PREVIEW_EXPIRED", "清理预览已过期，请重新预览。")
+            candidates, _ = self._cleanup_candidates_locked()
+            if not secrets.compare_digest(self._cleanup_fingerprint(candidates), confirmation[2]):
+                self._cleanup_confirmation = None
+                raise WorldDataError("CLEANUP_PREVIEW_STALE", "清理项已变化，请重新预览。")
+            report = self._cleanup_storage_locked()
+            self._cleanup_confirmation = None
+            return report
 
     def status(self) -> dict[str, object]:
         current = self.database.current_snapshot_version()
@@ -249,14 +387,17 @@ class WorldSnapshotService:
                         should_parse = True
                 if should_parse:
                     self._capture_and_parse(world, fingerprint)
+                self._record_watch_success()
             except WorldDataError as error:
                 self._set_error(error.code, str(error))
+                self._record_watch_failure(error.code)
                 if error.code == "DISK_SPACE_LOW":
                     with self._lock:
                         self._pending = self._last_seen
                         self._pending_since = time.monotonic()
             except Exception as error:
                 self._set_error("SNAPSHOT_WATCH_FAILED", f"{type(error).__name__}: {error}")
+                self._record_watch_failure("SNAPSHOT_WATCH_FAILED", error)
             self._wake.wait(self.poll_seconds)
             self._wake.clear()
 
@@ -606,6 +747,171 @@ class WorldSnapshotService:
         with self._lock:
             self._last_cleanup_at = now
 
+    def _cleanup_candidates_locked(self) -> tuple[list[tuple[str, Path, Path]], int]:
+        """Build the retention plan used by both preview and cleanup execution."""
+
+        errors = 0
+        candidates: dict[tuple[str, str], tuple[str, Path, Path]] = {}
+
+        def add(kind: str, path: Path, root: Path) -> None:
+            nonlocal errors
+            try:
+                self._assert_internal_path(path, root)
+            except WorldDataError:
+                errors += 1
+                return
+            candidates[(str(root.resolve(strict=False)), path.name)] = (kind, path, root)
+
+        self.snapshots_root.mkdir(parents=True, exist_ok=True)
+        self.cache_root.mkdir(parents=True, exist_ok=True)
+        try:
+            snapshot_entries = list(self.snapshots_root.iterdir())
+            cache_entries = list(self.cache_root.iterdir())
+        except OSError:
+            return [], errors + 1
+
+        temp_entries = [
+            path
+            for path in [*snapshot_entries, *cache_entries]
+            if self._is_temp_entry(path)
+        ]
+        for path in temp_entries:
+            add(
+                "temporary",
+                path,
+                self.snapshots_root if path.parent == self.snapshots_root else self.cache_root,
+            )
+
+        try:
+            snapshot_map = {
+                path.name: path
+                for path in self.snapshots_root.iterdir()
+                if path.is_dir() and not path.is_symlink() and not path.name.startswith(".")
+            }
+            cache_map = {
+                path.name[len("world-cache-") : -len(".sqlite")]: path
+                for path in self.cache_root.iterdir()
+                if (
+                    path.is_file()
+                    and not path.is_symlink()
+                    and path.name.startswith("world-cache-")
+                    and path.name.endswith(".sqlite")
+                )
+            }
+        except OSError:
+            return list(candidates.values()), errors + 1
+
+        current = self.database.current_snapshot_version()
+        current_id = str(current["id"]) if current is not None else None
+        protected_cache_name = self._current_cache_name(current)
+        for snapshot_id in sorted(set(snapshot_map) - set(cache_map)):
+            if snapshot_id != current_id:
+                add("orphan-snapshot", snapshot_map[snapshot_id], self.snapshots_root)
+        for snapshot_id in sorted(set(cache_map) - set(snapshot_map)):
+            path = cache_map[snapshot_id]
+            if snapshot_id != current_id and path.name != protected_cache_name:
+                add("orphan-cache", path, self.cache_root)
+
+        complete_ids = set(snapshot_map) & set(cache_map)
+        items: dict[str, dict[str, Any]] = {}
+        for snapshot_id in complete_ids:
+            items[snapshot_id] = {
+                "id": snapshot_id,
+                "snapshot": snapshot_map[snapshot_id],
+                "cache": cache_map[snapshot_id],
+                "collectedAt": self._snapshot_collected_at(snapshot_map[snapshot_id]),
+                "bytes": self._entry_size(snapshot_map[snapshot_id])
+                + self._entry_size(cache_map[snapshot_id]),
+            }
+
+        non_current = [item for item in items.values() if str(item["id"]) != current_id]
+        keep_count = self.snapshot_retention_count - (1 if current_id in items else 0)
+        newest = sorted(
+            non_current,
+            key=lambda item: (float(item["collectedAt"]), str(item["id"])),
+            reverse=True,
+        )[: max(0, keep_count)]
+        keep_ids = {str(item["id"]) for item in newest}
+        remove_ids = {
+            str(item["id"])
+            for item in non_current
+            if str(item["id"]) not in keep_ids
+        }
+        now = self.clock()
+        for item in non_current:
+            if now - float(item["collectedAt"]) > self.snapshot_retention_age_seconds:
+                remove_ids.add(str(item["id"]))
+
+        remaining = [item for item in items.values() if str(item["id"]) not in remove_ids]
+        total_bytes = sum(int(item["bytes"]) for item in remaining)
+        if total_bytes > self.snapshot_retention_bytes:
+            for item in sorted(
+                remaining,
+                key=lambda value: (float(value["collectedAt"]), str(value["id"])),
+            ):
+                snapshot_id = str(item["id"])
+                if snapshot_id == current_id:
+                    continue
+                remove_ids.add(snapshot_id)
+                total_bytes -= int(item["bytes"])
+                if total_bytes <= self.snapshot_retention_bytes:
+                    break
+
+        for snapshot_id in sorted(remove_ids):
+            add("retention-snapshot", snapshot_map[snapshot_id], self.snapshots_root)
+            add("retention-cache", cache_map[snapshot_id], self.cache_root)
+        return list(candidates.values()), errors
+
+    @staticmethod
+    def _cleanup_fingerprint(candidates: list[tuple[str, Path, Path]]) -> str:
+        rows: list[tuple[object, ...]] = []
+        for kind, path, root in candidates:
+            root_label = str(root.resolve(strict=False))
+            pending: list[tuple[Path, str]] = [(path, ".")]
+            while pending:
+                current, relative = pending.pop()
+                try:
+                    stat = current.lstat()
+                    if is_reparse_point(current):
+                        entry_type = "reparse-point"
+                    elif current.is_dir():
+                        entry_type = "directory"
+                    elif current.is_file():
+                        entry_type = "file"
+                    else:
+                        entry_type = "other"
+                    rows.append(
+                        (
+                            kind,
+                            root_label,
+                            path.name,
+                            relative,
+                            entry_type,
+                            int(stat.st_size),
+                            int(stat.st_mtime_ns),
+                        )
+                    )
+                    if entry_type != "directory":
+                        continue
+                    try:
+                        children = sorted(
+                            (Path(entry.path) for entry in os.scandir(current)),
+                            key=lambda child: child.name.casefold(),
+                            reverse=True,
+                        )
+                    except OSError:
+                        rows.append((kind, root_label, path.name, relative, "scan-error", -1, -1))
+                        continue
+                    for child in children:
+                        child_relative = (
+                            child.name if relative == "." else f"{relative}/{child.name}"
+                        )
+                        pending.append((child, child_relative))
+                except OSError:
+                    rows.append((kind, root_label, path.name, relative, "stat-error", -1, -1))
+        encoded = json.dumps(sorted(rows), separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
     def _cleanup_storage_locked(self) -> dict[str, int]:
         report = {
             "removedSnapshots": 0,
@@ -776,18 +1082,7 @@ class WorldSnapshotService:
 
     @classmethod
     def _entry_size(cls, path: Path) -> int:
-        try:
-            if path.is_file() and not path.is_symlink():
-                return int(path.stat().st_size)
-            if path.is_dir() and not path.is_symlink():
-                return sum(
-                    int(child.stat().st_size)
-                    for child in path.rglob("*")
-                    if child.is_file() and not child.is_symlink()
-                )
-        except OSError:
-            return 0
-        return 0
+        return int(inspect_storage(path)["sizeBytes"])
 
     @classmethod
     def _remove_internal_entry(cls, path: Path, root: Path) -> int:
@@ -800,6 +1095,23 @@ class WorldSnapshotService:
         elif path.exists() or path.is_symlink():
             raise WorldDataError("INTERNAL_PATH_INVALID", "运行数据路径不安全。")
         return size
+
+    def _record_watch_success(self) -> None:
+        now = int(self.clock())
+        with self._lock:
+            self._last_watch_run_at = now
+            self._last_watch_success_at = now
+            self._last_watch_error = None
+
+    def _record_watch_failure(self, code: str, error: BaseException | None = None) -> None:
+        now = int(self.clock())
+        with self._lock:
+            self._last_watch_run_at = now
+            self._last_watch_error = {
+                "code": code,
+                "type": type(error).__name__ if error is not None else "WorldDataError",
+                "observedAt": now,
+            }
 
     def _set_error(self, code: str, message: str) -> None:
         with self._lock:

@@ -1,5 +1,14 @@
 # Third-party notices
 
+## Windows portable package
+
+`scripts/build-portable.ps1` generates `THIRD_PARTY_LICENSES.md` from the exact
+Python runtime/build locks and the npm production dependency graph, then
+includes it in each portable package. That generated file covers the bundled
+CPython runtime, Python distributions, and frontend runtime packages such as
+React and lucide-react. This file retains Palworld-specific attribution and the
+explicit non-bundling status of `libooz.dll`.
+
 ## palworld-save-tools 0.24.0
 
 - Source: https://github.com/cheahjs/palworld-save-tools

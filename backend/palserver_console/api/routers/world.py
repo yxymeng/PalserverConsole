@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from ...dependencies import AppDependencies
 from ...world.service import WorldDataError
-from ..schemas import MessageResponse
+from ..schemas import CleanupConfirmationRequest, MessageResponse
 from ..security import error_response, peer_ip, require_authenticated_request, require_write
 
 
@@ -18,6 +18,32 @@ def router(deps: AppDependencies) -> APIRouter:
         if denied:
             return denied
         return deps.world.status()
+
+    @api.get("/api/world/storage/cleanup-preview", tags=["world"], response_model=None)
+    def world_cleanup_preview(request: Request) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        return deps.world.cleanup_preview()
+
+    @api.post("/api/world/storage/cleanup", tags=["world"], response_model=None)
+    def world_cleanup(
+        request: Request, payload: CleanupConfirmationRequest
+    ) -> dict[str, int] | JSONResponse:
+        denied = require_write(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            result = deps.world.confirm_cleanup(payload.previewToken)
+        except WorldDataError as error:
+            return error_response(409, error.code, str(error))
+        deps.audit.record(
+            "world.storage.cleanup",
+            result="success",
+            detail=result,
+            peer_ip=peer_ip(request),
+        )
+        return result
 
     @api.get("/api/world/players/{player_id}", tags=["world"], response_model=None)
     def world_player(player_id: str, request: Request) -> dict[str, object] | JSONResponse:
