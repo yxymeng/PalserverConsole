@@ -55,17 +55,15 @@ def test_source_launcher_requires_64_bit_cpython_313() -> None:
     assert "struct.calcsize('P') == 8" in launcher
 
 
-def test_build_and_acceptance_docs_use_single_python_313_baseline() -> None:
+def test_published_build_docs_use_single_python_313_baseline() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    plan = (ROOT / "plan.md").read_text(encoding="utf-8")
-    roadmap = (ROOT / "CODEX_OPTIMIZATION_ROADMAP.md").read_text(encoding="utf-8")
+    gitignore = (ROOT / ".gitignore").read_text(encoding="utf-8")
     lock_header = (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()[0]
 
     assert "64 位 CPython 3.13" in readme
     assert "最终用户无需安装 Python/Node.js" in readme
-    assert "仅使用 64 位 CPython 3.13" in plan
-    assert "审核不得要求 Python 3.11/3.12 兼容证据" in roadmap
-    assert "不要求 Python 3.11/3.12 构建或运行证据" in roadmap
+    assert "/plan.md" in gitignore
+    assert "/CODEX_OPTIMIZATION_ROADMAP.md" in gitignore
     assert lock_header == (
         "# Runtime dependencies resolved for 64-bit Windows CPython 3.13. "
         "Regenerate intentionally when pyproject.toml changes."
