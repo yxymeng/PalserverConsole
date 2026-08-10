@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+
+from ...dependencies import AppDependencies
+from ...world.service import WorldDataError
+from ..schemas import CleanupConfirmationRequest, MessageResponse
+from ..security import error_response, peer_ip, require_authenticated_request, require_write
+
+
+def router(deps: AppDependencies) -> APIRouter:
+    api = APIRouter()
+
+    @api.get("/api/world/snapshots/current", tags=["world"], response_model=None)
+    def world_snapshot(request: Request) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        return deps.world.status()
+
+    @api.get("/api/world/storage/cleanup-preview", tags=["world"], response_model=None)
+    def world_cleanup_preview(request: Request) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        return deps.world.cleanup_preview()
+
+    @api.post("/api/world/storage/cleanup", tags=["world"], response_model=None)
+    def world_cleanup(
+        request: Request, payload: CleanupConfirmationRequest
+    ) -> dict[str, int] | JSONResponse:
+        denied = require_write(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            result = deps.world.confirm_cleanup(payload.previewToken)
+        except WorldDataError as error:
+            return error_response(409, error.code, str(error))
+        deps.audit.record(
+            "world.storage.cleanup",
+            result="success",
+            detail=result,
+            peer_ip=peer_ip(request),
+        )
+        return result
+
+    @api.get("/api/world/players/{player_id}", tags=["world"], response_model=None)
+    def world_player(player_id: str, request: Request) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            return deps.world.get_player(player_id)
+        except WorldDataError as error:
+            status = 404 if error.code == "PLAYER_NOT_FOUND" else 503
+            return error_response(status, error.code, str(error))
+
+    @api.get("/api/world/{resource}", tags=["world"], response_model=None)
+    def world_resource(
+        resource: str,
+        request: Request,
+        page: int = 1,
+        pageSize: int = 50,
+        search: str | None = None,
+        ownerId: str | None = None,
+        baseId: str | None = None,
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        if resource not in {"players", "pals", "guilds", "bases", "inventories", "work-pals"}:
+            return error_response(404, "WORLD_RESOURCE_NOT_FOUND", "世界数据类型不存在。")
+        if page < 1 or pageSize < 1 or pageSize > 200:
+            return error_response(422, "INVALID_WORLD_PAGE", "世界数据分页参数不正确。")
+        if search is not None and len(search) > 100:
+            return error_response(422, "INVALID_WORLD_SEARCH", "搜索文字不能超过 100 个字符。")
+        try:
+            return deps.world.list_resource(
+                resource,
+                page=page,
+                page_size=pageSize,
+                search=search,
+                owner_id=ownerId,
+                base_id=baseId,
+            )
+        except WorldDataError as error:
+            return error_response(503, error.code, str(error))
+
+    @api.post("/api/world/reparse", tags=["world"], response_model=MessageResponse)
+    def world_reparse(request: Request) -> MessageResponse | JSONResponse:
+        denied = require_write(request, deps.auth)
+        if denied:
+            return denied
+        deps.world.request_reparse()
+        deps.audit.record(
+            "world.reparse",
+            result="queued",
+            detail={"source": "save-snapshot"},
+            peer_ip=peer_ip(request),
+        )
+        return MessageResponse(message="已请求重新读取存档；文件稳定 5 秒后开始解析。")
+
+    return api

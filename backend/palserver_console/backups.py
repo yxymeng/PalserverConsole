@@ -17,6 +17,7 @@ from .config import ProfileError, ServerProfile
 from .control import ControlLock, create_control_lock
 from .persistence import Database, RestoreJournalConflictError
 from .steam import assert_no_reparse_points
+from .world.cache import inspect_storage
 
 BACKUP_NAME = re.compile(r"^\d{4}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}$")
 REQUIRED_FILES = ("Level.sav", "LevelMeta.sav")
@@ -102,15 +103,18 @@ class BackupService:
         return self._backup_root_for_world(self.world())
 
     @staticmethod
-    def _backup_root_for_world(world: Path) -> Path:
+    def _backup_root_for_world(world: Path, *, create: bool = True) -> Path:
         raw_root = world / "backup" / "world"
         try:
             assert_no_reparse_points(world)
             resolved_world = world.resolve(strict=True)
             assert_no_reparse_points(raw_root)
-            raw_root.mkdir(parents=True, exist_ok=True)
-            assert_no_reparse_points(raw_root)
-            root = raw_root.resolve(strict=True)
+            if create:
+                raw_root.mkdir(parents=True, exist_ok=True)
+                assert_no_reparse_points(raw_root)
+                root = raw_root.resolve(strict=True)
+            else:
+                root = raw_root.resolve(strict=False)
             relative = root.relative_to(resolved_world)
         except ValueError as error:
             raise BackupError("BACKUP_PATH_INVALID", str(error)) from error
@@ -121,6 +125,11 @@ class BackupService:
         if relative.parts != ("backup", "world"):
             raise BackupError("BACKUP_PATH_INVALID", "官方备份根目录已越出绑定世界。")
         return root
+
+    def inspection_root(self) -> Path:
+        """Return the official backup path without creating a new game directory."""
+
+        return self._backup_root_for_world(self.world(), create=False)
 
     @staticmethod
     def _assert_backup_id(backup_id: str) -> None:
@@ -162,15 +171,11 @@ class BackupService:
                 self._component_checksums(path)
             except BackupError:
                 missing.append("UnsafeTree")
-        size = 0
-        if path.is_dir() and not path.is_symlink():
-            for child in path.rglob("*"):
-                if child.is_file() and not child.is_symlink():
-                    size += child.stat().st_size
+        usage = inspect_storage(path)
+        size = int(usage["sizeBytes"])
         return not missing, missing, size
 
-    def list(self) -> dict[str, object]:
-        root = self.backup_root()
+    def _items(self, root: Path, *, record_index: bool) -> builtins.list[BackupItem]:
         items: builtins.list[BackupItem] = []
         for path in root.iterdir():
             if not path.is_dir() or path.is_symlink() or not BACKUP_NAME.fullmatch(path.name):
@@ -187,9 +192,14 @@ class BackupService:
                     "path": str(path),
                 }
             )
-            if self.index_upsert:
+            if record_index and self.index_upsert:
                 self.index_upsert(path.name, path.name, int(path.stat().st_mtime), validation)
         items.sort(key=lambda item: str(item["id"]), reverse=True)
+        return items
+
+    def list(self) -> dict[str, object]:
+        root = self.backup_root()
+        items = self._items(root, record_index=True)
         return {
             "source": "official-backup",
             "observedAt": int(time.time()),
@@ -200,6 +210,40 @@ class BackupService:
             "backupRoot": str(root),
             "restoreRecovery": self.recovery_status(),
             "items": items,
+        }
+
+    def health_summary(self) -> dict[str, object]:
+        """Inspect official backups without creating folders or updating the index."""
+
+        root = self.inspection_root()
+        checked_at = int(self.clock())
+        if not root.is_dir():
+            return {
+                "source": "official-backup",
+                "state": "no_data",
+                "checkedAt": checked_at,
+                "backupRoot": str(root),
+                "retention": self.retention_provider(),
+                "itemCount": 0,
+                "validCount": 0,
+                "invalidCount": 0,
+                "totalBytes": 0,
+                "lastValidAt": None,
+            }
+        items = self._items(root, record_index=False)
+        valid_items = [item for item in items if bool(item["valid"])]
+        last_valid_at = max((int(item["observedAt"]) for item in valid_items), default=None)
+        return {
+            "source": "official-backup",
+            "state": "healthy" if valid_items else ("invalid" if items else "no_data"),
+            "checkedAt": checked_at,
+            "backupRoot": str(root),
+            "retention": self.retention_provider(),
+            "itemCount": len(items),
+            "validCount": len(valid_items),
+            "invalidCount": len(items) - len(valid_items),
+            "totalBytes": sum(int(item["sizeBytes"]) for item in items),
+            "lastValidAt": last_valid_at,
         }
 
     def set_retention(self, value: int | None) -> dict[str, object]:

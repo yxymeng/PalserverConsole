@@ -27,7 +27,7 @@ def _is_disk_full_error(error: BaseException) -> bool:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Parse a read-only Palworld snapshot.")
     parser.add_argument("--snapshot", type=Path, required=True)
     parser.add_argument("--cache", type=Path, required=True)
@@ -36,7 +36,7 @@ def main() -> int:
     parser.add_argument("--collected-at", type=int)
     parser.add_argument("--parse-started-at", type=int)
     parser.add_argument("--ooz-dll", type=Path)
-    arguments = parser.parse_args()
+    arguments = parser.parse_args(argv)
     started = time.perf_counter()
     parse_started_at = arguments.parse_started_at or int(time.time())
     try:

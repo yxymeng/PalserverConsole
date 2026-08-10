@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 import uuid
@@ -8,6 +9,8 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+
+from ..steam import is_reparse_point
 
 CACHE_SCHEMA_VERSION = 1
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
@@ -88,6 +91,71 @@ CREATE INDEX inventory_items_container_idx ON inventory_items(container_id, slot
 CREATE INDEX inventory_items_item_idx ON inventory_items(item_id);
 CREATE INDEX inventory_items_base_idx ON inventory_items(base_id);
 """
+
+
+def inspect_storage(path: Path) -> dict[str, int | bool]:
+    """Measure a managed path without following links or Windows reparse points.
+
+    Capacity reporting must never walk into a redirected tree.  Errors are reported
+    in the result so the caller can keep the rest of an operational-health snapshot.
+    """
+
+    result: dict[str, int | bool] = {
+        "exists": False,
+        "sizeBytes": 0,
+        "fileCount": 0,
+        "directoryCount": 0,
+        "skippedEntries": 0,
+        "errors": 0,
+    }
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return result
+    except OSError:
+        result["errors"] = 1
+        return result
+
+    result["exists"] = True
+    if is_reparse_point(path):
+        result["skippedEntries"] = 1
+        return result
+    try:
+        if path.is_file():
+            result["fileCount"] = 1
+            result["sizeBytes"] = int(path.stat().st_size)
+            return result
+        if not path.is_dir():
+            return result
+    except OSError:
+        result["errors"] = int(result["errors"]) + 1
+        return result
+
+    result["directoryCount"] = 1
+    pending = [path]
+    while pending:
+        current = pending.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    child = Path(entry.path)
+                    if is_reparse_point(child):
+                        result["skippedEntries"] = int(result["skippedEntries"]) + 1
+                        continue
+                    try:
+                        if entry.is_file(follow_symlinks=False):
+                            result["fileCount"] = int(result["fileCount"]) + 1
+                            result["sizeBytes"] = int(result["sizeBytes"]) + int(
+                                entry.stat(follow_symlinks=False).st_size
+                            )
+                        elif entry.is_dir(follow_symlinks=False):
+                            result["directoryCount"] = int(result["directoryCount"]) + 1
+                            pending.append(child)
+                    except OSError:
+                        result["errors"] = int(result["errors"]) + 1
+        except OSError:
+            result["errors"] = int(result["errors"]) + 1
+    return result
 
 
 def build_world_cache(

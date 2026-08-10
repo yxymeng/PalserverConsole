@@ -11,6 +11,7 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     source: "console", observedAt: 1786000000, stale: false, errorCode: null,
     module: "M2", serverState: "stopped", configured: true, pids: [],
     executablePath: "C:\\PalServer\\PalServer.exe",
+    instanceId: "default",
   } }));
   const liveSnapshot = {
     info: { data: { version: "v0.6.1", worldName: "测试世界" }, source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
@@ -28,6 +29,9 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: {
     executablePath: "C:\\PalServer\\PalServer.exe", launchArguments: "",
   } }));
+  await page.route("**/api/maintenance/notifications", (route) =>
+    route.fulfill({ json: { enabled: false, configured: false } }),
+  );
   await page.route("**/api/server/operations/start", (route) => {
     startCalls += 1;
     if (startCalls === 1) {
@@ -36,13 +40,13 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
       } });
     }
     return route.fulfill({ json: {
-      id: "m8-operation", operationId: "m8-operation", kind: "start", state: "queued",
-      stage: "queued", error_code: null, errorCode: null, detail: null,
+      operationId: "m8-operation", kind: "start", state: "queued",
+      stage: "queued", errorCode: null, detail: null,
     } });
   });
   await page.route("**/api/server/operations/m8-operation", (route) => route.fulfill({ json: {
-    id: "m8-operation", operationId: "m8-operation", kind: "start", state: "succeeded",
-    stage: "process_running", error_code: null, errorCode: null, detail: null,
+    operationId: "m8-operation", kind: "start", state: "succeeded",
+    stage: "process_running", errorCode: null, detail: null,
   } }));
 
   await page.goto("/");

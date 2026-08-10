@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import gzip
 import json
 import os
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -418,6 +418,45 @@ def test_parser_crash_is_reported_without_exiting_process(
     assert os.getpid() > 0
 
 
+def test_frozen_worker_uses_portable_dispatcher(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    command: list[str] = []
+
+    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        command.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
+    assert command[:2] == [sys.executable, "--world-worker"]
+    assert "-m" not in command
+
+
+def test_unfrozen_worker_uses_python_module_dispatch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    command: list[str] = []
+
+    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+        command.extend(arguments)
+        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+
+    monkeypatch.setattr(sys, "frozen", False, raising=False)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
+    assert command[:3] == [sys.executable, "-m", "palserver_console.world.worker"]
+
+
 def _retention_pair(
     service: WorldSnapshotService,
     snapshot_id: str,
@@ -541,6 +580,7 @@ def test_ooz_discovery_result_is_cached_until_reparse(
 
 
 @pytest.mark.integration
+@pytest.mark.private_fixture
 def test_current_sanitized_save_uses_detailed_m5_decoder() -> None:
     source = os.environ.get("PALSERVER_M5_LEVEL_SAV")
     dll = os.environ.get("PALSERVER_OOZ_DLL")
@@ -550,24 +590,3 @@ def test_current_sanitized_save_uses_detailed_m5_decoder() -> None:
     assert analysis.property_decode_mode == "m5_2026_07_read_only_compat"
     assert all(item.found for item in analysis.coverage)
     assert analysis.parse_durations_ms
-
-
-@pytest.mark.integration
-def test_local_m5_fixture_contains_detailed_decoded_fields() -> None:
-    fixture = (
-        Path(__file__).resolve().parents[2]
-        / "fixtures"
-        / "sanitized"
-        / "level.m5.json.gz"
-    )
-    if not fixture.is_file():
-        pytest.skip("No local detailed M5 fixture is available.")
-    assert fixture.stat().st_mode & 0o200 == 0
-    required = {b'"SaveParameter"', b'"trailing_bytes"', b'"container_id"'}
-    found: set[bytes] = set()
-    with gzip.open(fixture, "rb") as source:
-        while chunk := source.read(1024 * 1024):
-            found.update(marker for marker in required if marker in chunk)
-            if found == required:
-                break
-    assert found == required

@@ -1,0 +1,180 @@
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_private_fixture:
+        description: Run read-only real-save validation on the private Windows runner
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  PYTHONUTF8: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  backend:
+    name: Backend / Python 3.13
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: x64
+          cache: pip
+          cache-dependency-path: |
+            requirements.lock
+            requirements-dev.lock
+            requirements-build.lock
+            pyproject.toml
+      - name: Install locked runtime and pinned test tools
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-dev.lock
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-build.lock
+          python -m pip install --disable-pip-version-check --no-deps --no-build-isolation -e .
+      - name: Ruff
+        run: python -m ruff check backend
+      - name: mypy
+        run: python -m mypy
+      - name: pytest
+        id: backend_tests
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          python -m pytest backend/tests --junitxml="artifacts/backend-3.13.xml"
+      - name: Backend test report
+        if: always()
+        shell: pwsh
+        run: |
+          $reportPath = "artifacts/backend-3.13.xml"
+          "## Backend / Python 3.13" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          if (Test-Path -LiteralPath $reportPath) {
+            [xml]$report = Get-Content -LiteralPath $reportPath
+            $suite = $report.testsuites.testsuite
+            $tests = [int]$suite.tests
+            $failures = [int]$suite.failures
+            $errors = [int]$suite.errors
+            $skipped = [int]$suite.skipped
+            $passed = $tests - $failures - $errors - $skipped
+            "- passed: $passed" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            "- skipped: $skipped" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+            "- failed/errors: $failures/$errors" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          } else {
+            "- test report: missing; step outcome was ${{ steps.backend_tests.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+          "- committed golden fixture: covered by the default pytest run" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- real environment validation: not configured (manual private runner only)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  frontend:
+    name: Frontend / Node.js 24 LTS
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked frontend dependencies
+        working-directory: frontend
+        run: npm.cmd ci
+      - name: ESLint
+        id: lint
+        working-directory: frontend
+        run: npm.cmd run lint
+      - name: TypeScript
+        id: typecheck
+        working-directory: frontend
+        run: npm.cmd run typecheck
+      - name: Vitest
+        id: unit_tests
+        working-directory: frontend
+        run: npm.cmd run test
+      - name: Build
+        id: build
+        working-directory: frontend
+        run: npm.cmd run build
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: npx.cmd playwright install chromium
+      - name: Playwright desktop and mobile
+        id: e2e
+        working-directory: frontend
+        run: npm.cmd run test:e2e
+      - name: Frontend test report
+        if: always()
+        shell: pwsh
+        run: |
+          "## Frontend / Node.js 24 LTS" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- lint: ${{ steps.lint.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- typecheck: ${{ steps.typecheck.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- unit tests: ${{ steps.unit_tests.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- build: ${{ steps.build.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- Playwright: ${{ steps.e2e.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- real environment validation: not configured (manual private runner only)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  private-fixture:
+    name: Private real-save fixture / read-only
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_private_fixture }}
+    runs-on: [self-hosted, Windows, palserver-private-fixture]
+    timeout-minutes: 30
+    environment: private-fixture
+    env:
+      PALSERVER_M5_LEVEL_SAV: ${{ vars.PALSERVER_M5_LEVEL_SAV }}
+      PALSERVER_OOZ_DLL: ${{ vars.PALSERVER_OOZ_DLL }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          architecture: x64
+      - name: Validate private runner configuration
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:PALSERVER_M5_LEVEL_SAV) -or -not (Test-Path -LiteralPath $env:PALSERVER_M5_LEVEL_SAV -PathType Leaf)) {
+            throw "Private fixture not configured: PALSERVER_M5_LEVEL_SAV must point to a readable file."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:PALSERVER_OOZ_DLL) -or -not (Test-Path -LiteralPath $env:PALSERVER_OOZ_DLL -PathType Leaf)) {
+            throw "Private fixture not configured: PALSERVER_OOZ_DLL must point to a readable file."
+          }
+      - name: Install parser dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements.lock
+          python -m pip install --disable-pip-version-check --require-hashes -r requirements-dev.lock
+          python -m pip install --disable-pip-version-check --no-deps --no-build-isolation -e .
+      - name: Read-only real-save parser validation
+        id: real_fixture
+        run: python -m pytest backend/tests/test_m5_world.py -k current_sanitized_save_uses_detailed_m5_decoder -q
+      - name: Private fixture report
+        if: always()
+        shell: pwsh
+        run: |
+          "## Private real-save fixture" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- real environment validation: ${{ steps.real_fixture.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- access mode: parser reads the configured save and DLL; the workflow performs no write, restore, lifecycle, or configuration operation" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+  required-checks:
+    name: OPT-11 required checks
+    if: always()
+    needs: [backend, frontend]
+    runs-on: windows-latest
+    steps:
+      - name: Enforce required results
+        shell: pwsh
+        run: |
+          if ("${{ needs.backend.result }}" -ne "success" -or "${{ needs.frontend.result }}" -ne "success") {
+            throw "Required Windows CI checks failed: backend=${{ needs.backend.result }}, frontend=${{ needs.frontend.result }}"
+          }
+          "All required public Windows CI checks passed." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

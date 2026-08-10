@@ -25,6 +25,7 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
         configured: true,
         pids: [],
         executablePath: "C:\\SteamLibrary\\steamapps\\common\\PalServer\\PalServer.exe",
+        instanceId: "north",
       },
     }),
   );
@@ -35,6 +36,9 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
         launchArguments: "-useperfthreads",
       },
     }),
+  );
+  await page.route("**/api/maintenance/notifications", (route) =>
+    route.fulfill({ json: { enabled: false, configured: false } }),
   );
   const liveSnapshot = {
     info: { data: { version: "v0.6.1", worldName: "测试世界" }, source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
@@ -149,7 +153,11 @@ test("M2 本机应用壳与服务器管理无横向溢出", async ({ page }, tes
   await page.getByRole("button", { name: "服务器管理" }).click();
   await page.waitForTimeout(220);
   await expect(page.getByRole("heading", { name: "PalServer 安装" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "安全更新与维护通知" })).toBeVisible();
+  await expect(page.getByText("当前实例：north。更新只能从本机明确确认后执行。")).toBeVisible();
+  await expect(page.getByRole("button", { name: "检查并执行 SteamCMD 更新" })).toBeDisabled();
   await expect(page.getByRole("heading", { name: "实时监控" })).toBeVisible();
+  await expect(page.getByText(/实时事件(已连接|正在重连|正在连接)/)).toBeVisible();
   await expect(page.getByText("203.0.113.9")).toBeVisible();
   await expect(page.getByRole("button", { name: "启动" })).toBeEnabled();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
