@@ -561,7 +561,14 @@ class WorldSnapshotService:
             )
             if isinstance(error, WorldDataError):
                 self._set_error(error.code, str(error))
+                if error.code == "DISK_SPACE_LOW":
+                    with self._lock:
+                        self._pending = expected
+                        self._pending_since = time.monotonic()
             elif self._is_disk_full_error(error):
+                with self._lock:
+                    self._pending = expected
+                    self._pending_since = time.monotonic()
                 self._set_error("DISK_SPACE_LOW", "磁盘剩余空间不足，已保留最后成功缓存。")
             else:
                 self._set_error("SNAPSHOT_PARSE_FAILED", f"{type(error).__name__}: {error}")

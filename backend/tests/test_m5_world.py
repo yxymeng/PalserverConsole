@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -560,6 +561,78 @@ def test_low_disk_preserves_last_successful_cache(tmp_path: Path) -> None:
     assert raised.value.code == "DISK_SPACE_LOW"
     assert current_cache.read_bytes() == b"last-success"
     assert list(service.snapshots_root.glob("*") if service.snapshots_root.exists() else []) == []
+
+
+def test_watcher_retries_after_worker_disk_space_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    data_dir = tmp_path / "data"
+    world = tmp_path / "world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        data_dir,
+        stability_seconds=0,
+        poll_seconds=0.01,
+        minimum_free_bytes=0,
+    )
+    monkeypatch.setattr(service, "_world_directory", lambda: world)
+    service.snapshots_root.mkdir(parents=True)
+    service.cache_root.mkdir(parents=True)
+    level, players = _synthetic_properties()
+    attempts = 0
+    retried = threading.Event()
+
+    def fake_worker(
+        snapshot: Path,
+        cache_path: Path,
+        snapshot_id: str,
+        observed_at: int,
+        *,
+        collected_at: int,
+        parse_started_at: int,
+    ) -> dict[str, object]:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise WorldDataError("DISK_SPACE_LOW", "disk full")
+        build_world_cache(
+            cache_path,
+            level,
+            players,
+            snapshot_id=snapshot_id,
+            source_observed_at=observed_at,
+            collected_at=collected_at,
+            parse_started_at=parse_started_at,
+        )
+        retried.set()
+        service._stop.set()
+        service._wake.set()
+        return {
+            "parsedAt": 2,
+            "durationMs": 1,
+            "peakMemoryBytes": 2,
+            "cacheSizeBytes": cache_path.stat().st_size,
+        }
+
+    monkeypatch.setattr(service, "_run_worker", fake_worker)
+    thread = threading.Thread(target=service._watch_loop, daemon=True)
+    thread.start()
+    try:
+        assert retried.wait(timeout=2)
+    finally:
+        service._stop.set()
+        service._wake.set()
+        thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert attempts == 2
+    assert database.current_snapshot_version() is not None
 
 
 def test_ooz_discovery_result_is_cached_until_reparse(
