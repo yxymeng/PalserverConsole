@@ -10,6 +10,7 @@ export function BackupsPage({ auth }: { auth: AuthStatus }) {
   const [retention, setRetention] = useState("infinite");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const nextRequestSignal = useAbortableRequest();
   const load = useCallback(async () => {
     const signal = nextRequestSignal();
@@ -25,7 +26,12 @@ export function BackupsPage({ auth }: { auth: AuthStatus }) {
   async function remove(id: string) { if (!window.confirm(`确认删除历史备份 ${id}？`)) return; try { await requestJson(`/api/backups/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "X-CSRF-Token": auth.csrfToken || "" } }); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : "删除失败"); } }
   async function restore(id: string) { if (!window.confirm(`确认恢复备份 ${id}？服务器必须已停止，恢复前会创建安全副本。`)) return; try { await requestJson(`/api/backups/${encodeURIComponent(id)}/restore`, { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setMessage("备份已恢复。"); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : "恢复失败"); } }
   async function openDirectory() { try { await requestJson("/api/backups/open-directory", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
+  async function recover(path: "/api/backups/restore/resume" | "/api/backups/restore/rollback", successMessage: string, confirmation?: string) { if (confirmation && !window.confirm(confirmation)) return; setRecoveryBusy(true); setError(""); setMessage(""); try { await requestJson(path, { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setMessage(successMessage); await load(); } catch (caught) { setError(caught instanceof Error ? caught.message : "恢复操作失败"); } finally { setRecoveryBusy(false); } }
+  const recovery = data?.restoreRecovery;
+  const journal = recovery?.journal;
+  const recoveryError = [journal?.errorType, journal?.errorMessage, journal?.originalError].filter(Boolean).join("；");
   return <div className="page-stack audit-page">
+    {recovery?.active && <section className="warning-strip" role="alert"><AlertTriangle size={18} /><div><strong>恢复事务未完成</strong><p>当前 phase：{journal?.phase || "未知"} · sourceBackupId：{journal?.sourceBackupId || "未知"}</p>{recoveryError && <p>错误：{recoveryError}</p>}<div className="config-toolbar"><button className="primary-button" type="button" disabled={recoveryBusy} onClick={() => void recover("/api/backups/restore/resume", "恢复已继续。")}>继续恢复</button><button className="danger-button" type="button" disabled={recoveryBusy} onClick={() => void recover("/api/backups/restore/rollback", "恢复已回滚。", "确认回滚当前恢复事务吗？")}>回滚</button></div></div></section>}
     <section className="audit-header"><div><h2>官方备份</h2><p>仅管理 PalServer 官方 backup/world 目录；活动世界没有删除入口。</p></div>{auth.local && <button className="quiet-button" onClick={() => void openDirectory()}><FolderSearch size={17} />打开目录</button>}</section>
     {data?.stale && <div className="warning-strip" role="status"><AlertTriangle size={18} />备份数据已过期{data.errorCode ? `（${data.errorCode}）` : ""}，请刷新后再执行恢复或删除。</div>}
     <section className="settings-section"><div className="section-heading"><div><h2>保留策略</h2><p>默认无限；设置数字后只清理最旧且完整的历史备份。</p></div></div><form className="settings-form port-form" onSubmit={saveRetention}><label htmlFor="backup-retention">保留数量</label><input id="backup-retention" value={retention} onChange={(event) => setRetention(event.target.value)} placeholder="infinite" /><button className="primary-button" type="submit"><Save size={17} />保存策略</button></form></section>

@@ -104,11 +104,31 @@ export type WorldResource = "players" | "pals" | "guilds" | "bases" | "inventori
 export type Theme = "light" | "dark";
 
 export type BackupItem = { id: string; observedAt: number; sizeBytes: number; valid: boolean; missing: string[] };
+export type RestoreRecoveryJournal = {
+  journalId: string | null;
+  worldId: string | null;
+  worldPath: string | null;
+  sourceBackupId: string | null;
+  sourcePath: string | null;
+  safetyCopyPath: string | null;
+  stagingPath: string | null;
+  phase: string | null;
+  component: string | null;
+  completedComponents: string[];
+  checksums: Record<string, unknown>;
+  errorType: string | null;
+  errorMessage: string | null;
+  originalError: string | null;
+  createdAt: number | null;
+  updatedAt: number | null;
+};
+export type RestoreRecovery = { active: boolean; journal: RestoreRecoveryJournal | null };
 export type BackupResponse = {
   items: BackupItem[];
   retention: number | null;
   worldPath: string;
   backupRoot: string;
+  restoreRecovery: RestoreRecovery;
   observedAt?: number;
   stale?: boolean;
   errorCode?: string | null;
