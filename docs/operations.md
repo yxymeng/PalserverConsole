@@ -22,6 +22,10 @@
 
 控制台监听端口位于“总览”页，只能在本机修改；修改后需重启控制台。控制台启动时根据是否已配置游戏 `AdminPassword` 决定监听地址：未配置时仅监听 `127.0.0.1`；首次设置并应用密码后需重启控制台才开放可信 LAN。实时数据已经并入“服务器管理”页，和生命周期操作一起检查。
 
+## 多实例提示
+
+PalServerConsole 主要面向单 PalServer 使用。多实例用户需要确保 Console、Game、Query、REST API、RCON 端口都不重复。当前版本存在两项已知限制：两个命名实例误用同一个 Console Port 时，可能打开到另一个已经运行的实例；当前多实例检查覆盖 Game/Query Port，但没有完整检查 REST API / RCON Port。它们只影响同机多实例用户，单 PalServer + 单 Console 用户不受影响。
+
 ## 故障排查顺序
 
 1. 记录页面上的 `errorCode`、中文说明和发生时间。

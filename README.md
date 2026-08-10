@@ -42,6 +42,8 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 该实例的数据位于 `data\instances\north\`，与默认实例及其他命名实例隔离。便携版可对根目录 `PalServerConsole.exe` 使用同样的 `-InstanceId north -Port 18224` 参数；可为这条命令创建 Windows 快捷方式后双击启动。再在“服务器管理”的启动参数中为每套 PalServer 指定不同的 `-port` 与 `-queryport`（例如 `-port=8211 -queryport=27015`、`-port=8212 -queryport=27016`）；不要让两个实例绑定相同的 `PalServer.exe`、世界目录、游戏端口或查询端口。
 
+> **多实例提醒：** PalServerConsole 主要面向单 PalServer 使用。多实例用户需要确保 Console、Game、Query、REST API、RCON 端口都不重复。当前版本对 Console 实例识别和 REST/RCON 跨实例冲突检查仍有已知限制。
+
 启动失败时不要关闭窗口，请保留窗口中的英文错误信息。它通常能直接说明是 Python、Node.js、端口还是文件路径问题。
 
 ## 第一次设置
