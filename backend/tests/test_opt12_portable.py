@@ -347,8 +347,8 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Portable self-check wrote runtime data into the release package." in build_script
     assert "INCOMPATIBLE_DOWNGRADE" in upgrade_script
     assert "upgrade-backups" in upgrade_script
-    assert "Import-Module Microsoft.PowerShell.Utility" in upgrade_script
-    assert "Get-FileHash" in upgrade_script
+    assert "function Get-Sha256Hash" in upgrade_script
+    assert "System.Security.Cryptography.SHA256" in upgrade_script
     assert "unlisted file" in upgrade_script
     assert "Program rollback completed" in upgrade_script
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script

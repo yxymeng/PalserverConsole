@@ -8,7 +8,26 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
-Import-Module Microsoft.PowerShell.Utility -ErrorAction Stop
+
+function Get-Sha256Hash {
+    param([Parameter(Mandatory = $true)][string]$PathValue)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $stream = [System.IO.File]::OpenRead($PathValue)
+        try {
+            return [System.BitConverter]::ToString(
+                $sha256.ComputeHash($stream)
+            ).Replace("-", "").ToLowerInvariant()
+        }
+        finally {
+            $stream.Dispose()
+        }
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
 
 function Resolve-Directory {
     param(
@@ -109,7 +128,7 @@ function Assert-PackageChecksums {
             if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
                 throw "CHECKSUM_MISMATCH: missing $relativePath"
             }
-            $actualHash = (Get-FileHash -LiteralPath $candidatePath -Algorithm SHA256).Hash
+            $actualHash = Get-Sha256Hash -PathValue $candidatePath
             if (-not [string]::Equals($actualHash, $Matches.hash, [System.StringComparison]::OrdinalIgnoreCase)) {
                 throw "CHECKSUM_MISMATCH: $relativePath"
             }
@@ -167,7 +186,7 @@ function Assert-ProgramChecksums {
         if (-not (Test-Path -LiteralPath $target -PathType Leaf)) {
             throw "CHECKSUM_MISMATCH: missing $relativePath after staging."
         }
-        $actualHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+        $actualHash = Get-Sha256Hash -PathValue $target
         if (-not [string]::Equals($actualHash, [string]$entry.Hash, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "CHECKSUM_MISMATCH: $relativePath after staging."
         }
@@ -199,7 +218,7 @@ function Assert-LauncherChecksum {
     if (-not (Test-Path -LiteralPath $LauncherPath -PathType Leaf)) {
         throw "CHECKSUM_MISMATCH: missing PalServerConsole.exe $Context."
     }
-    $actualHash = (Get-FileHash -LiteralPath $LauncherPath -Algorithm SHA256).Hash
+    $actualHash = Get-Sha256Hash -PathValue $LauncherPath
     if (-not [string]::Equals($actualHash, [string]$LauncherEntry.Hash, [System.StringComparison]::OrdinalIgnoreCase)) {
         throw "CHECKSUM_MISMATCH: PalServerConsole.exe $Context."
     }
@@ -244,7 +263,7 @@ function Backup-Database {
         createdAt = (Get-Date).ToUniversalTime().ToString("o")
         source = "app.db"
         schemaVersion = $SchemaVersion
-        sha256 = (Get-FileHash -LiteralPath $backupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        sha256 = Get-Sha256Hash -PathValue $backupPath
     }
     $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $backupDirectory "backup-info.json") -Encoding UTF8
     return $backupDirectory
