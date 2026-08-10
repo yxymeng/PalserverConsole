@@ -25,6 +25,8 @@ DEFAULT_SNAPSHOT_RETENTION_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_SNAPSHOT_RETENTION_AGE_SECONDS = 30 * 24 * 60 * 60
 DEFAULT_MINIMUM_FREE_BYTES = 512 * 1024 * 1024
 DEFAULT_OOZ_DISCOVERY_CACHE_TTL_SECONDS = 300.0
+DISK_SPACE_RETRY_INITIAL_SECONDS = 30.0
+DISK_SPACE_RETRY_MAX_SECONDS = 300.0
 CLEANUP_CONFIRMATION_TTL_SECONDS = 5 * 60
 
 
@@ -80,6 +82,8 @@ class WorldSnapshotService:
         self._last_seen: tuple[tuple[str, int, int], ...] | None = None
         self._pending: tuple[tuple[str, int, int], ...] | None = None
         self._pending_since = 0.0
+        self._disk_space_retry_delay_seconds = 0.0
+        self._disk_space_retry_until = 0.0
         self._parsing = False
         self._last_error: tuple[str, str] | None = None
         self._last_duration_ms: int | None = None
@@ -107,6 +111,7 @@ class WorldSnapshotService:
             self._last_watch_run_at = None
             self._last_watch_success_at = None
             self._last_watch_error = None
+            self._reset_disk_space_retry_locked()
             self._thread = threading.Thread(
                 target=self._watch_loop,
                 name="world-snapshot",
@@ -124,6 +129,7 @@ class WorldSnapshotService:
     def background_status(self) -> dict[str, object]:
         with self._lock:
             thread = self._thread
+            retry_delay_seconds = max(0.0, self._disk_space_retry_until - time.monotonic())
             return {
                 "name": "world-snapshot",
                 "alive": bool(thread and thread.is_alive()),
@@ -131,7 +137,7 @@ class WorldSnapshotService:
                 "lastRunAt": self._last_watch_run_at,
                 "lastSuccessAt": self._last_watch_success_at,
                 "lastError": dict(self._last_watch_error) if self._last_watch_error else None,
-                "retryDelaySeconds": 0.0,
+                "retryDelaySeconds": retry_delay_seconds,
             }
 
     def capacity_status(self) -> dict[str, object]:
@@ -188,8 +194,33 @@ class WorldSnapshotService:
         with self._lock:
             self._last_seen = None
             self._pending = None
+            self._reset_disk_space_retry_locked()
             self._ooz_discovery_cache = None
         self._wake.set()
+
+    def _reset_disk_space_retry_locked(self) -> None:
+        self._disk_space_retry_delay_seconds = 0.0
+        self._disk_space_retry_until = 0.0
+
+    def _schedule_disk_space_retry(
+        self, expected: tuple[tuple[str, int, int], ...]
+    ) -> None:
+        now = time.monotonic()
+        with self._lock:
+            if self._last_seen != expected:
+                return
+            delay = (
+                DISK_SPACE_RETRY_INITIAL_SECONDS
+                if self._disk_space_retry_delay_seconds <= 0
+                else min(
+                    DISK_SPACE_RETRY_MAX_SECONDS,
+                    self._disk_space_retry_delay_seconds * 2,
+                )
+            )
+            self._pending = expected
+            self._pending_since = now
+            self._disk_space_retry_delay_seconds = delay
+            self._disk_space_retry_until = now + delay
 
     def cleanup_storage(self) -> dict[str, int]:
         with self._lock:
@@ -379,12 +410,15 @@ class WorldSnapshotService:
                         self._last_seen = fingerprint
                         self._pending = fingerprint
                         self._pending_since = now
+                        self._reset_disk_space_retry_locked()
                     elif (
                         self._pending == fingerprint
                         and now - self._pending_since >= self.stability_seconds
                     ):
-                        self._pending = None
-                        should_parse = True
+                        if now >= self._disk_space_retry_until:
+                            self._pending = None
+                            self._disk_space_retry_until = 0.0
+                            should_parse = True
                 if should_parse:
                     self._capture_and_parse(world, fingerprint)
                 self._record_watch_success()
@@ -393,11 +427,20 @@ class WorldSnapshotService:
                 self._record_watch_failure(error.code)
                 if error.code == "DISK_SPACE_LOW":
                     with self._lock:
-                        self._pending = self._last_seen
-                        self._pending_since = time.monotonic()
+                        expected = self._last_seen
+                    if expected is not None:
+                        self._schedule_disk_space_retry(expected)
             except Exception as error:
-                self._set_error("SNAPSHOT_WATCH_FAILED", f"{type(error).__name__}: {error}")
-                self._record_watch_failure("SNAPSHOT_WATCH_FAILED", error)
+                if self._is_disk_full_error(error):
+                    self._set_error("DISK_SPACE_LOW", "磁盘剩余空间不足，已保留最后成功缓存。")
+                    self._record_watch_failure("DISK_SPACE_LOW", error)
+                    with self._lock:
+                        expected = self._last_seen
+                    if expected is not None:
+                        self._schedule_disk_space_retry(expected)
+                else:
+                    self._set_error("SNAPSHOT_WATCH_FAILED", f"{type(error).__name__}: {error}")
+                    self._record_watch_failure("SNAPSHOT_WATCH_FAILED", error)
             self._wake.wait(self.poll_seconds)
             self._wake.clear()
 
@@ -535,6 +578,7 @@ class WorldSnapshotService:
                 make_current=True,
             )
             with self._lock:
+                self._reset_disk_space_retry_locked()
                 self._last_error = None
                 self._last_duration_ms = duration_ms
                 self._last_peak_memory_bytes = peak_memory_bytes
@@ -562,13 +606,9 @@ class WorldSnapshotService:
             if isinstance(error, WorldDataError):
                 self._set_error(error.code, str(error))
                 if error.code == "DISK_SPACE_LOW":
-                    with self._lock:
-                        self._pending = expected
-                        self._pending_since = time.monotonic()
+                    self._schedule_disk_space_retry(expected)
             elif self._is_disk_full_error(error):
-                with self._lock:
-                    self._pending = expected
-                    self._pending_since = time.monotonic()
+                self._schedule_disk_space_retry(expected)
                 self._set_error("DISK_SPACE_LOW", "磁盘剩余空间不足，已保留最后成功缓存。")
             else:
                 self._set_error("SNAPSHOT_PARSE_FAILED", f"{type(error).__name__}: {error}")
