@@ -594,6 +594,7 @@ def test_watcher_retries_after_disk_space_failure(
     level, players = _synthetic_properties()
     attempts = 0
     failed = threading.Event()
+    scheduled = threading.Event()
     retried = threading.Event()
 
     def fake_worker(
@@ -632,12 +633,20 @@ def test_watcher_retries_after_disk_space_failure(
         }
 
     monkeypatch.setattr(service, "_run_worker", fake_worker)
+    original_schedule = service._schedule_disk_space_retry
+
+    def schedule_disk_retry(expected: tuple[tuple[str, int, int], ...]) -> None:
+        original_schedule(expected)
+        scheduled.set()
+
+    monkeypatch.setattr(service, "_schedule_disk_space_retry", schedule_disk_retry)
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
         assert failed.wait(timeout=1)
         time.sleep(0.025)
         assert attempts == 1
+        assert scheduled.wait(timeout=1)
         retry_delay = service.background_status()["retryDelaySeconds"]
         assert isinstance(retry_delay, (int, float))  # noqa: UP038
         assert retry_delay > 0
