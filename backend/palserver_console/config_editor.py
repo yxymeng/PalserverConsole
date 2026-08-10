@@ -637,8 +637,12 @@ class ConfigService:
         _, raw, source, original, order = self._read()
         merged = dict(original)
         updates = self._validate_updates(fields, original)
-        merged.update(updates)
         pending = self.data_dir / "pending" / "PalWorldSettings.ini"
+        if "AdminPassword" not in updates:
+            pending_password = self._pending_admin_password(pending)
+            if pending_password is not None:
+                merged["AdminPassword"] = pending_password
+        merged.update(updates)
         pending.parent.mkdir(parents=True, exist_ok=True)
         pending.write_text(_render_verified(raw, merged, order), encoding="utf-8", newline="")
         self.database.save_config_draft(str(pending), source.sha256, source.mtime_ns, "draft", None)
@@ -745,6 +749,26 @@ class ConfigService:
                 raise ConfigError("CONFIG_UNKNOWN_FIELD", f"未知配置字段不能新增: {key}")
             updates[key] = _normalise_unknown_value(key, value, original[key])
         return updates
+
+    def _pending_admin_password(self, pending: Path) -> str | None:
+        row = self.database.get_config_draft()
+        if row is None or Path(str(row["draft_path"])) != pending:
+            return None
+        draft_path = Path(str(row["draft_path"]))
+        if not draft_path.is_file():
+            return None
+        try:
+            _, _, _, fields, _ = self._read(draft_path)
+        except ConfigError:
+            return None
+        password = fields.get("AdminPassword")
+        if password is None:
+            return None
+        try:
+            normalized = _normalise_admin_password(password)
+        except ConfigError:
+            return None
+        return password if password == normalized else None
 
     @staticmethod
     def _validate_pending_document(
