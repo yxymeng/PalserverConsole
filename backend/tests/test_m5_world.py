@@ -18,7 +18,6 @@ from fastapi.testclient import TestClient
 from palserver_console.config import AppSettings, ProfileError, ServerProfileService
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
-from palserver_console.world import service as world_service
 from palserver_console.world.adapter import verify_stable_parse
 from palserver_console.world.cache import build_world_cache, query_cache, read_cache_metadata
 from palserver_console.world.service import WorldDataError, WorldSnapshotService
@@ -585,8 +584,10 @@ def test_watcher_retries_after_disk_space_failure(
         poll_seconds=0.005,
         minimum_free_bytes=0,
     )
-    monkeypatch.setattr(world_service, "DISK_SPACE_RETRY_INITIAL_SECONDS", 0.05)
-    monkeypatch.setattr(world_service, "DISK_SPACE_RETRY_MAX_SECONDS", 0.2)
+    monkeypatch.setattr(
+        "palserver_console.world.service.DISK_SPACE_RETRY_INITIAL_SECONDS", 0.05
+    )
+    monkeypatch.setattr("palserver_console.world.service.DISK_SPACE_RETRY_MAX_SECONDS", 0.2)
     monkeypatch.setattr(service, "_world_directory", lambda: world)
     service.snapshots_root.mkdir(parents=True)
     service.cache_root.mkdir(parents=True)
@@ -637,7 +638,9 @@ def test_watcher_retries_after_disk_space_failure(
         assert failed.wait(timeout=1)
         time.sleep(0.025)
         assert attempts == 1
-        assert service.background_status()["retryDelaySeconds"] > 0
+        retry_delay = service.background_status()["retryDelaySeconds"]
+        assert isinstance(retry_delay, (int, float))  # noqa: UP038
+        assert retry_delay > 0
         assert retried.wait(timeout=2)
     finally:
         service._stop.set()
@@ -659,12 +662,14 @@ def test_disk_space_retry_backoff_is_bounded_and_reported(
     expected = (("Level.sav", 1, 1),)
     service._last_seen = expected
     now = 100.0
-    monkeypatch.setattr(world_service.time, "monotonic", lambda: now)
+    monkeypatch.setattr("palserver_console.world.service.time.monotonic", lambda: now)
 
     observed: list[float] = []
     for delay in (30.0, 60.0, 120.0, 240.0, 300.0, 300.0):
         service._schedule_disk_space_retry(expected)
-        observed.append(float(service.background_status()["retryDelaySeconds"]))
+        retry_delay = service.background_status()["retryDelaySeconds"]
+        assert isinstance(retry_delay, (int, float))  # noqa: UP038
+        observed.append(float(retry_delay))
         now += delay
 
     assert observed == pytest.approx([30.0, 60.0, 120.0, 240.0, 300.0, 300.0])
@@ -696,7 +701,9 @@ def test_disk_space_retry_reset_allows_new_parse(
     with service._lock:
         service._last_seen = expected
     service._schedule_disk_space_retry(expected)
-    assert service.background_status()["retryDelaySeconds"] > 0
+    retry_delay = service.background_status()["retryDelaySeconds"]
+    assert isinstance(retry_delay, (int, float))  # noqa: UP038
+    assert retry_delay > 0
     if reset_mode == "fingerprint":
         (world / "Level.sav").write_bytes(b"level-changed")
     else:
