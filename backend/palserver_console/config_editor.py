@@ -539,6 +539,7 @@ class ConfigService:
         running: Callable[[], bool],
         profile_provider: Callable[[], ServerProfile] | None = None,
         control_lock: ControlLock | None = None,
+        admin_password_rotation_callback: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
         self.data_dir = data_dir
@@ -546,6 +547,7 @@ class ConfigService:
         self.running = running
         self.profile_provider = profile_provider
         self.control_lock = control_lock or create_control_lock()
+        self.admin_password_rotation_callback = admin_password_rotation_callback
 
     def path(self) -> Path:
         if self.profile_provider is not None:
@@ -698,6 +700,8 @@ class ConfigService:
         except OSError as error:
             raise ConfigError("CONFIG_DRAFT_NOT_FOUND", f"无法读取配置草稿: {error}") from error
         self._validate_pending_document(draft_raw, original, order)
+        draft_fields, _, _ = _parse_document(draft_raw)
+        admin_password_changed = self._admin_password_changed(original, draft_fields)
         backup = target.with_name(f"{target.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
         self._assert_path_safe(target)
         self._assert_path_safe(backup)
@@ -717,6 +721,8 @@ class ConfigService:
             ) from error
         self.database.clear_config_draft()
         self.database.set_setting("config.last_backup", str(backup))
+        if admin_password_changed and self.admin_password_rotation_callback is not None:
+            self.admin_password_rotation_callback()
         return {"message": "PalWorldSettings.ini 已原子替换。", "backupPath": str(backup)}
 
     @staticmethod
@@ -725,6 +731,17 @@ class ConfigService:
             assert_no_reparse_points(path)
         except ValueError as error:
             raise ConfigError("PATH_REPARSE_POINT", str(error)) from error
+
+    @staticmethod
+    def _admin_password_changed(original: dict[str, str], draft: dict[str, str]) -> bool:
+        current = original.get("AdminPassword")
+        pending = draft.get("AdminPassword")
+        if current is None or pending is None:
+            return current != pending
+        try:
+            return _normalise_admin_password(current) != _normalise_admin_password(pending)
+        except ConfigError:
+            return current != pending
 
     @staticmethod
     def _validate_updates(fields: dict[str, str], original: dict[str, str]) -> dict[str, str]:

@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from palserver_console.auth import COOKIE_NAME, AuthStore
 from palserver_console.config import AppSettings
-from palserver_console.config_editor import ConfigService
+from palserver_console.config_editor import ConfigError, ConfigService
 from palserver_console.main import CSRF_COOKIE_NAME, create_app
 from palserver_console.persistence import SCHEMA_VERSION, Database
 
@@ -310,6 +310,65 @@ def test_lan_login_uses_new_admin_password_after_config_apply(tmp_path: Path) ->
         assert old_login.status_code == 401
         assert old_password not in old_login.text
         assert new_password not in old_login.text
+
+
+def test_admin_password_rotation_revokes_lan_sessions_but_keeps_local_sessions(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    _configure_game_admin_password(settings, "old-password")
+    database = Database(settings.database_path)
+    database.migrate()
+    auth = AuthStore(database, settings)
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    service = ConfigService(
+        database,
+        settings.data_dir,
+        lambda: executable,
+        lambda: False,
+        admin_password_rotation_callback=auth.revoke_lan_sessions,
+    )
+    lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
+    local_cookie, _ = auth.create_session("127.0.0.1", local=True, now=100)
+
+    service.save_draft({"AutoSaveSpan": "900"})
+    service.apply()
+    assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is not None
+    assert auth.read_session(local_cookie, "127.0.0.1", now=100) is not None
+
+    rotated_lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
+    service.save_draft({"AdminPassword": '"new-password"'})
+    service.apply()
+
+    assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is None
+    assert auth.read_session(rotated_lan_cookie, "192.0.2.55", now=100) is None
+    assert auth.read_session(local_cookie, "127.0.0.1", now=100) is not None
+
+
+def test_failed_admin_password_apply_does_not_revoke_lan_sessions(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _configure_game_admin_password(settings, "old-password")
+    database = Database(settings.database_path)
+    database.migrate()
+    auth = AuthStore(database, settings)
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    running = False
+    service = ConfigService(
+        database,
+        settings.data_dir,
+        lambda: executable,
+        lambda: running,
+        admin_password_rotation_callback=auth.revoke_lan_sessions,
+    )
+    lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
+    service.save_draft({"AdminPassword": '"new-password"'})
+    running = True
+
+    with pytest.raises(ConfigError) as error:
+        service.apply()
+
+    assert error.value.code == "SERVER_RUNNING"
+    assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is not None
 
 
 def test_network_settings_reject_missing_origin_and_csrf(tmp_path: Path) -> None:

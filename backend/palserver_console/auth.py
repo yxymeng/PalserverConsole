@@ -121,6 +121,10 @@ class AuthStore:
         with self.database.connect() as connection:
             connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
 
+    def revoke_lan_sessions(self) -> None:
+        with self.database.connect() as connection:
+            connection.execute("DELETE FROM sessions WHERE is_local = 0")
+
     def cleanup_expired(self, now: int | None = None) -> dict[str, int]:
         """Remove expired sessions and login attempts outside the rate-limit window."""
 
