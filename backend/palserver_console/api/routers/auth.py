@@ -53,13 +53,14 @@ def router(deps: AppDependencies) -> APIRouter:
             return MessageResponse(message="本机访问无需登录。")
         if deps.auth.too_many_failures(request_ip):
             return error_response(429, "LOGIN_RATE_LIMITED", "登录失败次数过多，请稍后再试。")
-        if not deps.auth.verify_admin_password(payload.password):
+        authenticated_session = deps.auth.authenticate_lan(request_ip, payload.password)
+        if authenticated_session is None:
             deps.auth.record_login(request_ip, False)
             deps.logger.info("auth login rejected peer=%s", request_ip)
             return error_response(401, "INVALID_CREDENTIALS", "游戏管理员密码错误。")
         deps.auth.record_login(request_ip, True)
         deps.logger.info("auth login accepted peer=%s", request_ip)
-        cookie_value, session = deps.auth.create_session(request_ip, local=False)
+        cookie_value, session = authenticated_session
         set_session_cookies(response, cookie_value, session.csrf_token)
         return MessageResponse(message="登录成功。")
 
