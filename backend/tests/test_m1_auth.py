@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
 
-from palserver_console.auth import COOKIE_NAME, AuthStore
+from palserver_console.auth import COOKIE_NAME, AuthStore, Session
 from palserver_console.config import AppSettings
-from palserver_console.config_editor import ConfigService
+from palserver_console.config_editor import ConfigError, ConfigService
 from palserver_console.main import CSRF_COOKIE_NAME, create_app
 from palserver_console.persistence import SCHEMA_VERSION, Database
 
@@ -310,6 +312,174 @@ def test_lan_login_uses_new_admin_password_after_config_apply(tmp_path: Path) ->
         assert old_login.status_code == 401
         assert old_password not in old_login.text
         assert new_password not in old_login.text
+
+
+def test_lan_login_and_admin_password_rotation_are_serialized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    settings = _settings(tmp_path)
+    old_password = "old-password"
+    new_password = "new-password"
+    _configure_game_admin_password(settings, old_password)
+    app = create_app(settings)
+    auth = app.state.auth
+    login_entered_create = threading.Event()
+    allow_create = threading.Event()
+    rotation_entered_revoke = threading.Event()
+    login_statuses: list[int] = []
+    login_cookies: list[str] = []
+    login_errors: list[BaseException] = []
+    rotation_errors: list[BaseException] = []
+
+    original_create_session = cast(
+        Callable[..., tuple[str, Session]], auth.create_session
+    )
+
+    def blocked_create_session(
+        peer_ip: str, *, local: bool, now: int | None = None
+    ) -> tuple[str, Session]:
+        if not local:
+            login_entered_create.set()
+            if not allow_create.wait(timeout=5):
+                raise AssertionError("LAN login did not reach session creation")
+        return original_create_session(peer_ip, local=local, now=now)
+
+    original_revoke_lan_sessions = auth.revoke_lan_sessions
+
+    def signaled_revoke_lan_sessions() -> None:
+        rotation_entered_revoke.set()
+        original_revoke_lan_sessions()
+
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    config_service = ConfigService(
+        app.state.database,
+        settings.data_dir,
+        lambda: executable,
+        lambda: False,
+        admin_password_rotation_callback=signaled_revoke_lan_sessions,
+    )
+    monkeypatch.setattr(auth, "create_session", blocked_create_session)
+
+    with TestClient(
+        app,
+        base_url="http://192.0.2.20:8223",
+        client=("192.0.2.55", 51001),
+    ) as client:
+        local_cookie, _ = auth.create_session("127.0.0.1", local=True)
+        config_service.save_draft({"AdminPassword": f'"{new_password}"'})
+
+        def run_login() -> None:
+            try:
+                response = client.post(
+                    "/api/auth/login",
+                    headers=_origin("http://192.0.2.20:8223"),
+                    json={"password": old_password},
+                )
+                login_statuses.append(response.status_code)
+                cookie = response.cookies.get(COOKIE_NAME)
+                if cookie is not None:
+                    login_cookies.append(cookie)
+            except BaseException as error:
+                login_errors.append(error)
+
+        def run_rotation() -> None:
+            try:
+                config_service.apply()
+            except BaseException as error:
+                rotation_errors.append(error)
+
+        login_thread = threading.Thread(target=run_login)
+        login_thread.start()
+        assert login_entered_create.wait(timeout=5)
+
+        rotation_thread = threading.Thread(target=run_rotation)
+        rotation_thread.start()
+        try:
+            assert rotation_entered_revoke.wait(timeout=5)
+        finally:
+            allow_create.set()
+
+        login_thread.join(timeout=5)
+        rotation_thread.join(timeout=5)
+        assert not login_thread.is_alive()
+        assert not rotation_thread.is_alive()
+        assert not login_errors
+        assert not rotation_errors
+        assert login_statuses == [200]
+        assert len(login_cookies) == 1
+
+        old_session = auth.read_session(login_cookies[0], "192.0.2.55")
+        assert old_session is None
+        assert auth.read_session(local_cookie, "127.0.0.1") is not None
+
+        new_login = client.post(
+            "/api/auth/login",
+            headers=_origin("http://192.0.2.20:8223"),
+            json={"password": new_password},
+        )
+        assert new_login.status_code == 200
+        new_cookie = new_login.cookies.get(COOKIE_NAME)
+        assert new_cookie is not None
+        assert auth.read_session(new_cookie, "192.0.2.55") is not None
+
+
+def test_admin_password_rotation_revokes_lan_sessions_but_keeps_local_sessions(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    _configure_game_admin_password(settings, "old-password")
+    database = Database(settings.database_path)
+    database.migrate()
+    auth = AuthStore(database, settings)
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    service = ConfigService(
+        database,
+        settings.data_dir,
+        lambda: executable,
+        lambda: False,
+        admin_password_rotation_callback=auth.revoke_lan_sessions,
+    )
+    lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
+    local_cookie, _ = auth.create_session("127.0.0.1", local=True, now=100)
+
+    service.save_draft({"AutoSaveSpan": "900"})
+    service.apply()
+    assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is not None
+    assert auth.read_session(local_cookie, "127.0.0.1", now=100) is not None
+
+    rotated_lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
+    service.save_draft({"AdminPassword": '"new-password"'})
+    service.apply()
+
+    assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is None
+    assert auth.read_session(rotated_lan_cookie, "192.0.2.55", now=100) is None
+    assert auth.read_session(local_cookie, "127.0.0.1", now=100) is not None
+
+
+def test_failed_admin_password_apply_does_not_revoke_lan_sessions(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _configure_game_admin_password(settings, "old-password")
+    database = Database(settings.database_path)
+    database.migrate()
+    auth = AuthStore(database, settings)
+    executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    running = False
+    service = ConfigService(
+        database,
+        settings.data_dir,
+        lambda: executable,
+        lambda: running,
+        admin_password_rotation_callback=auth.revoke_lan_sessions,
+    )
+    lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
+    service.save_draft({"AdminPassword": '"new-password"'})
+    running = True
+
+    with pytest.raises(ConfigError) as error:
+        service.apply()
+
+    assert error.value.code == "SERVER_RUNNING"
+    assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is not None
 
 
 def test_network_settings_reject_missing_origin_and_csrf(tmp_path: Path) -> None:

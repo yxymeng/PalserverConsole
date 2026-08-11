@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import ipaddress
 import secrets
+import threading
 import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
@@ -39,13 +40,23 @@ class AuthStore:
     def __init__(self, database: Database, settings: AppSettings) -> None:
         self.database = database
         self.settings = settings
+        self._lan_auth_lock = threading.RLock()
 
     def admin_password_configured(self) -> bool:
         return self._game_admin_password() is not None
 
     def verify_admin_password(self, password: str) -> bool:
-        configured = self._game_admin_password()
-        return configured is not None and hmac.compare_digest(password, configured)
+        with self._lan_auth_lock:
+            configured = self._game_admin_password()
+            return configured is not None and hmac.compare_digest(password, configured)
+
+    def authenticate_lan(
+        self, peer_ip: str, password: str, *, now: int | None = None
+    ) -> tuple[str, Session] | None:
+        with self._lan_auth_lock:
+            if not self.verify_admin_password(password):
+                return None
+            return self.create_session(peer_ip, local=False, now=now)
 
     def create_session(
         self, peer_ip: str, *, local: bool, now: int | None = None
@@ -120,6 +131,10 @@ class AuthStore:
     def delete_session(self, session_id: str) -> None:
         with self.database.connect() as connection:
             connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+
+    def revoke_lan_sessions(self) -> None:
+        with self._lan_auth_lock, self.database.connect() as connection:
+            connection.execute("DELETE FROM sessions WHERE is_local = 0")
 
     def cleanup_expired(self, now: int | None = None) -> dict[str, int]:
         """Remove expired sessions and login attempts outside the rate-limit window."""

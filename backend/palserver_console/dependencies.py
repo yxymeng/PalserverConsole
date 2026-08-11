@@ -133,6 +133,7 @@ class DefaultDependencyFactory:
             lambda: lifecycle.status()["state"] == "running",
             profiles.profile,
             control_lock=lifecycle.control_lock,
+            admin_password_rotation_callback=auth.revoke_lan_sessions,
         )
         lifecycle.set_config_apply(config.apply)
         notifications = NotificationService(

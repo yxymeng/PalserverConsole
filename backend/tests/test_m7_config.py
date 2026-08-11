@@ -370,6 +370,23 @@ def test_admin_password_is_preserved_when_omitted_and_can_be_changed_safely(
     assert running_error.value.code == "SERVER_RUNNING"
 
 
+def test_save_draft_preserves_pending_admin_password_when_omitted(tmp_path: Path) -> None:
+    service, _, _ = make_service(tmp_path)
+    new_password = "pending-admin-password"
+    pending_path = tmp_path / "data" / "pending" / "PalWorldSettings.ini"
+
+    service.save_draft({"AdminPassword": new_password})
+    assert f"AdminPassword={json.dumps(new_password)}" in pending_path.read_text(
+        encoding="utf-8"
+    )
+
+    service.save_draft({"AutoSaveSpan": "900"})
+
+    pending = pending_path.read_text(encoding="utf-8")
+    assert f"AdminPassword={json.dumps(new_password)}" in pending
+    assert "AutoSaveSpan=900" in pending
+
+
 def test_config_read_and_write_reject_intermediate_reparse_point(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

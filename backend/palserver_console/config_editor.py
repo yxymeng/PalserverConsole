@@ -539,6 +539,7 @@ class ConfigService:
         running: Callable[[], bool],
         profile_provider: Callable[[], ServerProfile] | None = None,
         control_lock: ControlLock | None = None,
+        admin_password_rotation_callback: Callable[[], None] | None = None,
     ) -> None:
         self.database = database
         self.data_dir = data_dir
@@ -546,6 +547,7 @@ class ConfigService:
         self.running = running
         self.profile_provider = profile_provider
         self.control_lock = control_lock or create_control_lock()
+        self.admin_password_rotation_callback = admin_password_rotation_callback
 
     def path(self) -> Path:
         if self.profile_provider is not None:
@@ -637,8 +639,12 @@ class ConfigService:
         _, raw, source, original, order = self._read()
         merged = dict(original)
         updates = self._validate_updates(fields, original)
-        merged.update(updates)
         pending = self.data_dir / "pending" / "PalWorldSettings.ini"
+        if "AdminPassword" not in updates:
+            pending_password = self._pending_admin_password(pending)
+            if pending_password is not None:
+                merged["AdminPassword"] = pending_password
+        merged.update(updates)
         pending.parent.mkdir(parents=True, exist_ok=True)
         pending.write_text(_render_verified(raw, merged, order), encoding="utf-8", newline="")
         self.database.save_config_draft(str(pending), source.sha256, source.mtime_ns, "draft", None)
@@ -694,6 +700,8 @@ class ConfigService:
         except OSError as error:
             raise ConfigError("CONFIG_DRAFT_NOT_FOUND", f"无法读取配置草稿: {error}") from error
         self._validate_pending_document(draft_raw, original, order)
+        draft_fields, _, _ = _parse_document(draft_raw)
+        admin_password_changed = self._admin_password_changed(original, draft_fields)
         backup = target.with_name(f"{target.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
         self._assert_path_safe(target)
         self._assert_path_safe(backup)
@@ -713,6 +721,8 @@ class ConfigService:
             ) from error
         self.database.clear_config_draft()
         self.database.set_setting("config.last_backup", str(backup))
+        if admin_password_changed and self.admin_password_rotation_callback is not None:
+            self.admin_password_rotation_callback()
         return {"message": "PalWorldSettings.ini 已原子替换。", "backupPath": str(backup)}
 
     @staticmethod
@@ -721,6 +731,17 @@ class ConfigService:
             assert_no_reparse_points(path)
         except ValueError as error:
             raise ConfigError("PATH_REPARSE_POINT", str(error)) from error
+
+    @staticmethod
+    def _admin_password_changed(original: dict[str, str], draft: dict[str, str]) -> bool:
+        current = original.get("AdminPassword")
+        pending = draft.get("AdminPassword")
+        if current is None or pending is None:
+            return current != pending
+        try:
+            return _normalise_admin_password(current) != _normalise_admin_password(pending)
+        except ConfigError:
+            return current != pending
 
     @staticmethod
     def _validate_updates(fields: dict[str, str], original: dict[str, str]) -> dict[str, str]:
@@ -745,6 +766,26 @@ class ConfigService:
                 raise ConfigError("CONFIG_UNKNOWN_FIELD", f"未知配置字段不能新增: {key}")
             updates[key] = _normalise_unknown_value(key, value, original[key])
         return updates
+
+    def _pending_admin_password(self, pending: Path) -> str | None:
+        row = self.database.get_config_draft()
+        if row is None or Path(str(row["draft_path"])) != pending:
+            return None
+        draft_path = Path(str(row["draft_path"]))
+        if not draft_path.is_file():
+            return None
+        try:
+            _, _, _, fields, _ = self._read(draft_path)
+        except ConfigError:
+            return None
+        password = fields.get("AdminPassword")
+        if password is None:
+            return None
+        try:
+            normalized = _normalise_admin_password(password)
+        except ConfigError:
+            return None
+        return password if password == normalized else None
 
     @staticmethod
     def _validate_pending_document(
