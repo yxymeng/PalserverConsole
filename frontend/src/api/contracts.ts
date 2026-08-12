@@ -61,9 +61,13 @@ export type LiveSnapshot = {
 export type ProcessMetrics = {
   pids: number[];
   cpuPercent: number;
+  cpuReady?: boolean;
   memoryBytes: number;
   diskReadBytes: number;
   diskWriteBytes: number;
+  diskReadBytesPerSecond?: number;
+  diskWriteBytesPerSecond?: number;
+  ioReady?: boolean;
   startedAt?: number | null;
 };
 export type AuditItem = {

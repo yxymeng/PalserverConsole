@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux04-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-1" };
 const player = { id: "player-1", name: "Alice", level: 20, guildId: "guild-1", guildName: "测试工会" };
-const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", baseId: "base-1", containerId: "container-1", slotIndex: 2, assignment: "base_worker" };
+const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", containerId: "container-1", slotIndex: 2, assignment: "base_worker", detail: { gender: "Female", rank: 1, isLucky: true } };
 const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned" };
 const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned" };
 const guild = { id: "guild-1", name: "测试工会", memberCount: 1, baseCount: 1 };
@@ -39,7 +39,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
     if (path in lists) return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, stale: false, errorCode: null } });
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
-      "/api/world/pals/pal-1": { ...pal, owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, detail: { rank: 1 } },
+      "/api/world/pals/pal-1": { ...pal, owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 } },
       "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], detail: { adminPlayerId: "player-1" } },
       "/api/world/bases/base-1": { ...base, guild, workers: [pal], inventory: [{ id: "item-2", itemId: "Stone", quantity: 8, containerId: "base-bag" }], detail: { state: 1 } },
     };
@@ -73,14 +73,16 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer).toContainText("队伍帕鲁");
 
   await page.getByRole("tab", { name: "帕鲁" }).click();
-  await expect(page.locator(".world-list-panel")).toContainText("棉悠悠");
   await expect(page.locator(".world-list-panel")).toContainText("FuturePal");
+  await expect(page.locator(".world-list-panel")).toContainText("Alice");
+  await expect(page.locator(".world-list-panel")).toContainText("雌性 · 闪光 · 浓缩等级 1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
   await page.getByLabel("排序方式").selectOption("name");
   await expect(page.locator(".world-table-row").first()).toContainText("阿帕");
   await page.getByRole("button", { name: "小羊" }).click();
-  await expect(drawer).toContainText("中文种族");
+  await expect(drawer).toContainText("种族");
   await expect(drawer).toContainText("棉悠悠");
+  await expect(drawer).toContainText("雌性 · 闪光 · 浓缩等级 1");
   await page.screenshot({ path: testInfo.outputPath(`ux05-${testInfo.project.name}.png`), fullPage: true });
 
   await page.getByRole("tab", { name: "工会" }).click();

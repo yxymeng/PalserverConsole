@@ -111,6 +111,11 @@ def _character(
     character_id: str | None,
     nickname: str,
     is_player: bool,
+    gender: str | None = None,
+    rank: int | None = None,
+    is_rare: bool = False,
+    is_awakened: bool = False,
+    is_imported: bool = False,
 ) -> dict[str, Any]:
     parameter: dict[str, Any] = {
         "Level": _property(20, "IntProperty"),
@@ -121,6 +126,16 @@ def _character(
     elif character_id:
         parameter["CharacterID"] = _property(character_id, "NameProperty")
         parameter["OwnerPlayerUId"] = _property(player_id)
+        if gender:
+            parameter["Gender"] = _property(gender, "EnumProperty")
+        if rank is not None:
+            parameter["Rank"] = _property(rank, "IntProperty")
+        if is_rare:
+            parameter["IsRarePal"] = _property(True, "BoolProperty")
+        if is_awakened:
+            parameter["bIsAwakening"] = _property(True, "BoolProperty")
+        if is_imported:
+            parameter["bImportedCharacter"] = _property(True, "BoolProperty")
     return {
         "key": {
             "PlayerUId": _property(player_id),
@@ -211,9 +226,14 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
                         _character(
                             player_id,
                             pal_a,
-                            character_id="SheepBall",
+                            character_id="BOSS_SheepBall",
                             nickname="工作帕鲁甲",
                             is_player=False,
+                            gender="EPalGenderType::Male",
+                            rank=3,
+                            is_rare=True,
+                            is_awakened=True,
+                            is_imported=True,
                         ),
                         _character(
                             player_id,
@@ -312,6 +332,27 @@ def test_player_list_includes_linked_guild_name(tmp_path: Path) -> None:
     assert rows[0]["guildName"] == "测试工会"
 
 
+def test_pal_list_includes_owner_name_and_display_traits(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    rows, total = query_cache(cache, "pals", page=1, page_size=50)
+    boss = next(row for row in rows if row["characterId"] == "BOSS_SheepBall")
+
+    assert total == 2
+    assert boss["ownerName"] == "测试玩家"
+    assert boss["detail"] == {
+        "gender": "EPalGenderType::Male",
+        "rank": 3,
+        "isBoss": True,
+        "isPredator": False,
+        "isLucky": True,
+        "isAwakened": True,
+        "isImported": True,
+    }
+
+
 def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
@@ -321,9 +362,12 @@ def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) ->
     detail = entity_detail(cache, "pals", pal_id)
 
     assert detail is not None
-    assert detail["owner"]["name"] == "测试玩家"
-    assert detail["base"]["name"] == "据点甲"
-    assert detail["container"]["kind"] == "base_workers"
+    owner = detail["owner"]
+    base = detail["base"]
+    container = detail["container"]
+    assert isinstance(owner, dict) and owner["name"] == "测试玩家"
+    assert isinstance(base, dict) and base["name"] == "据点甲"
+    assert isinstance(container, dict) and container["kind"] == "base_workers"
 
 
 def test_cache_and_snapshot_keep_source_collection_and_parse_times(

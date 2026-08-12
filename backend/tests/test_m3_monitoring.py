@@ -89,29 +89,53 @@ class FakeProcessMetrics:
         return {
             "pids": [123],
             "cpuPercent": 12.5,
+            "cpuReady": True,
             "memoryBytes": 1048576,
             "diskReadBytes": 10,
             "diskWriteBytes": 20,
+            "diskReadBytesPerSecond": 1.0,
+            "diskWriteBytesPerSecond": 2.0,
+            "ioReady": True,
         }, None
 
 
 class FakeProcess:
-    def __init__(self, pid: int, started_at: float) -> None:
+    def __init__(
+        self,
+        pid: int,
+        started_at: float,
+        *,
+        cpu_seconds: float = 1.0,
+        read_bytes: int = 10,
+        write_bytes: int = 20,
+        rss: int = 1024,
+        executable: str = "C:/test/PalServer.exe",
+        children: list[FakeProcess] | None = None,
+    ) -> None:
         self.pid = pid
         self.started_at = started_at
+        self.cpu_seconds = cpu_seconds
+        self.read_bytes = read_bytes
+        self.write_bytes = write_bytes
+        self.rss = rss
+        self.info = {"pid": pid, "exe": executable}
+        self._children = children or []
 
-    def cpu_percent(self, interval: None = None) -> float:
-        assert interval is None
-        return 12.5
+    def cpu_times(self) -> SimpleNamespace:
+        return SimpleNamespace(user=self.cpu_seconds, system=0.0)
 
     def memory_info(self) -> SimpleNamespace:
-        return SimpleNamespace(rss=1024)
+        return SimpleNamespace(rss=self.rss)
 
     def io_counters(self) -> SimpleNamespace:
-        return SimpleNamespace(read_bytes=10, write_bytes=20)
+        return SimpleNamespace(read_bytes=self.read_bytes, write_bytes=self.write_bytes)
 
     def create_time(self) -> float:
         return self.started_at
+
+    def children(self, recursive: bool = False) -> list[FakeProcess]:
+        assert recursive is True
+        return self._children
 
 
 def test_process_metrics_include_oldest_process_start_time() -> None:
@@ -126,6 +150,68 @@ def test_process_metrics_include_oldest_process_start_time() -> None:
 
     assert error is None
     assert metrics["startedAt"] == 1_786_000_000
+    assert metrics["cpuReady"] is False
+    assert metrics["ioReady"] is False
+
+
+def test_process_metrics_calculates_cpu_and_io_rates_from_two_samples() -> None:
+    process = FakeProcess(
+        123,
+        1_786_000_000.2,
+        cpu_seconds=1.0,
+        read_bytes=100,
+        write_bytes=200,
+        rss=2048,
+    )
+    clock = [100.0]
+    collector = ProcessMetricsCollector(
+        process_lookup=lambda _: cast(Any, [process]),
+        clock=lambda: clock[0],
+        logical_cpu_count=lambda: 2,
+    )
+
+    first, first_error = collector.collect(Path("C:/test/PalServer.exe"))
+    assert first_error is None
+    assert first["cpuPercent"] == 0.0
+    assert first["cpuReady"] is False
+    assert first["ioReady"] is False
+
+    process.cpu_seconds = 1.25
+    process.read_bytes = 300
+    process.write_bytes = 260
+    clock[0] = 102.0
+    second, second_error = collector.collect(Path("C:/test/PalServer.exe"))
+
+    assert second_error is None
+    assert second["cpuPercent"] == 6.25
+    assert second["memoryBytes"] == 2048
+    assert second["diskReadBytes"] == 300
+    assert second["diskWriteBytes"] == 260
+    assert second["diskReadBytesPerSecond"] == 100.0
+    assert second["diskWriteBytesPerSecond"] == 30.0
+    assert second["cpuReady"] is True
+    assert second["ioReady"] is True
+
+
+def test_process_lookup_includes_palserver_descendants(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    child = FakeProcess(
+        456,
+        1_786_000_001.0,
+        rss=1_400_000_000,
+        executable="C:/test/Pal/Binaries/Win64/PalServer-Win64-Shipping-Cmd.exe",
+    )
+    root = FakeProcess(123, 1_786_000_000.0, rss=7_000_000, children=[child])
+    unrelated = FakeProcess(789, 1_786_000_000.0, executable="C:/test/Other.exe")
+    monkeypatch.setattr(
+        "palserver_console.monitoring.psutil.process_iter",
+        lambda _: cast(Any, [root, unrelated]),
+    )
+
+    processes = ProcessMetricsCollector._find_processes(Path("C:/test/PalServer.exe"))
+
+    assert [process.pid for process in processes] == [123, 456]
 
 
 def _monitor() -> tuple[MonitorCoordinator, FakeRest, FakeRcon]:

@@ -5,7 +5,7 @@ import type { AuthStatus, WorldResponse, WorldRow, WorldStatus } from "../../api
 import { isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
-import { playerInitial, resolvePal } from "./palCatalog";
+import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 
 type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
 type SortKey = "name" | "level" | "id";
@@ -176,7 +176,7 @@ function EntityMarker({ resource, item }: { resource: PrimaryWorldResource; item
   if (resource === "players") return <span className="world-entity-avatar world-player-avatar" aria-hidden="true">{playerInitial(item.name)}</span>;
   if (resource === "pals") {
     const pal = resolvePal(item);
-    return <span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.iconKey} aria-hidden="true"><PawPrint size={17} /></span>;
+    return <span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"} aria-hidden="true"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>;
   }
   return null;
 }
@@ -194,8 +194,9 @@ function PlayerDetail({ data, onNavigate }: DetailProps) {
 
 function PalDetail({ data, onNavigate }: DetailProps) {
   const pal = resolvePal(data);
+  const traitSummary = palTraitLabels(data).join(" · ") || "普通";
   return <>
-    <PropertyGrid data={{ ...data, displayName: pal.displayName, speciesName: pal.speciesName }} fields={[["名称", "displayName"], ["昵称", "nickname"], ["中文种族", "speciesName"], ["Character ID", "characterId"], ["等级", "level"], ["Container", "containerId"], ["Slot", "slotIndex"], ["工作状态", "assignment"]]} />
+    <PropertyGrid data={{ ...data, displayName: pal.displayName, speciesName: pal.speciesName, traitSummary }} fields={[["名称", "displayName"], ["种族", "speciesName"], ["属性", "traitSummary"], ["Character ID", "characterId"], ["等级", "level"], ["Container", "containerId"], ["Slot", "slotIndex"], ["工作状态", "assignment"]]} />
     <RelationButton title="主人" value={rowOf(data, "owner")} resource="players" onNavigate={onNavigate} />
     <RelationButton title="据点" value={rowOf(data, "base")} resource="bases" onNavigate={onNavigate} />
     <RelationButton title="容器" value={rowOf(data, "container")} />

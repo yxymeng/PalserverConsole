@@ -335,6 +335,8 @@ def query_cache(
         public_rows = [_public_row(dict(row)) for row in rows]
         if resource == "players":
             _add_player_guild_names(connection, public_rows)
+        elif resource in {"pals", "work-pals"}:
+            _add_pal_owner_names(connection, public_rows)
         return public_rows, total
     finally:
         connection.close()
@@ -465,6 +467,31 @@ def _add_player_guild_names(
         guild_id = row.get("guildId")
         if isinstance(guild_id, str) and guild_id in names:
             row["guildName"] = names[guild_id]
+
+
+def _add_pal_owner_names(
+    connection: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
+    owner_ids = sorted(
+        {
+            owner_id
+            for row in rows
+            if isinstance(owner_id := row.get("ownerPlayerId"), str) and owner_id
+        }
+    )
+    if not owner_ids:
+        return
+    placeholders = ", ".join("?" for _ in owner_ids)
+    names = {
+        str(player_id): str(name)
+        for player_id, name in connection.execute(
+            f"SELECT id, name FROM players WHERE id IN ({placeholders})", owner_ids
+        ).fetchall()
+    }
+    for row in rows:
+        owner_id = row.get("ownerPlayerId")
+        if isinstance(owner_id, str) and owner_id in names:
+            row["ownerName"] = names[owner_id]
 
 
 def _reference(
@@ -696,6 +723,16 @@ def _characters(
                     {
                         "gender": _scalar(save_parameter.get("Gender")),
                         "rank": _scalar(save_parameter.get("Rank")),
+                        "isBoss": character_id.upper().startswith(("BOSS_", "GYM_"))
+                        or character_id.upper().endswith("BOSS"),
+                        "isPredator": character_id.upper().startswith("PREDATOR_"),
+                        "isLucky": bool(_scalar(save_parameter.get("IsRarePal"))),
+                        "isAwakened": bool(
+                            _scalar(save_parameter.get("bIsAwakening"))
+                        ),
+                        "isImported": bool(
+                            _scalar(save_parameter.get("bImportedCharacter"))
+                        ),
                     }
                 ),
             )

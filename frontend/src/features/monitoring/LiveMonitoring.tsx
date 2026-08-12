@@ -1,12 +1,24 @@
 import { AlertTriangle, CircleStop, RefreshCw, Send, UserRoundX, Users } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { AuthStatus, LiveValue, LiveSnapshot } from "../../api/contracts";
+
+import type { AuthStatus, LiveSnapshot, LiveValue, ProcessMetrics, ShellStatus } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { liveConnectionLabel, useLiveEvents } from "../../hooks/useLiveEvents";
-import { playerText, playerId, displayValue, formatBytes, formatObservedAt, sourceLabel, liveStatus } from "../../utils/format";
+import { displayValue, formatByteRate, formatBytes, formatPercent, liveStatus, playerId, playerText, sourceLabel } from "../../utils/format";
+import { serverStateLabel } from "../server/labels";
 
-export function LiveMonitoring({ auth, embedded = false, onSnapshot }: { auth: AuthStatus; embedded?: boolean; onSnapshot?: (snapshot: LiveSnapshot) => void }) {
+export function LiveMonitoring({
+  auth,
+  embedded = false,
+  shell,
+  onSnapshot,
+}: {
+  auth: AuthStatus;
+  embedded?: boolean;
+  shell?: ShellStatus | null;
+  onSnapshot?: (snapshot: LiveSnapshot) => void;
+}) {
   const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [unbanId, setUnbanId] = useState("");
@@ -67,27 +79,29 @@ export function LiveMonitoring({ auth, embedded = false, onSnapshot }: { auth: A
 
   const players = playersFrom(snapshot?.players.data);
   const process = snapshot?.metrics.data.process;
+  const liveTitle = !snapshot ? "正在连接实时数据" : snapshot.info.stale ? "实时数据已过期" : "实时数据正常";
+  const liveDotClass = connectionStatus === "open" && snapshot && !snapshot.info.stale ? "status-dot" : "status-dot stale-dot";
+
   return <div className={embedded ? "live-monitoring-panel" : "page-stack live-page"}>
-    {embedded && <section className="section-heading live-monitoring-heading"><div><h2>实时监控</h2><p>在线玩家、服务器状态和进程指标</p></div></section>}
+    <section className="section-heading live-monitoring-heading"><div><h2>实时状态</h2><p>服务器状态、性能与在线玩家集中显示。</p></div></section>
     {!auth.local && <div className="warning-strip"><AlertTriangle size={18} />仅可信内网使用，禁止公网暴露。</div>}
     <section className="live-toolbar">
-      <div><span className={connectionStatus === "open" && !snapshot?.info.stale ? "status-dot" : "status-dot stale-dot"} /><strong>{snapshot?.info.stale ? "实时数据已过期" : "实时数据正常"}</strong><small>{liveStatus(snapshot?.info)} · {liveConnectionLabel(connectionStatus)}</small></div>
+      <div className="live-status-summary"><span className={liveDotClass} /><strong>{liveTitle}</strong><small>{liveStatus(snapshot?.info)} · {liveConnectionLabel(connectionStatus)}</small></div>
       <button className="icon-button bordered" title="立即刷新实时数据" onClick={() => void refresh()}><RefreshCw size={19} /></button>
     </section>
-    <section className="metric-grid live-metrics" aria-label="实时服务器指标">
-      <article><span>在线玩家</span><strong>{players.length}</strong><small>{sourceLabel(snapshot?.players)}</small></article>
-      <article><span>Server FPS</span><strong>{displayValue(snapshot?.metrics.data.server, ["serverfps", "serverFps", "ServerFPS", "fps"])}</strong><small>{sourceLabel(snapshot?.metrics)}</small></article>
-      <article><span>进程 CPU</span><strong>{process ? `${process.cpuPercent}%` : "不可用"}</strong><small>{process ? `内存 ${formatBytes(process.memoryBytes)}` : sourceLabel(snapshot?.metrics)}</small></article>
+    <section className="metric-grid live-status-grid" aria-label="实时服务器状态">
+      <article><span>服务器状态</span><strong>{shell ? serverStateLabel(shell.serverState) : "读取中"}</strong><small>{shell ? `检测于 ${new Date(shell.observedAt * 1_000).toLocaleTimeString("zh-CN")}` : "正在读取服务器状态"}</small></article>
+      <article><span>在线玩家</span><strong>{snapshot ? players.length : "读取中"}</strong><small>{sourceLabel(snapshot?.players)}</small></article>
+      <UptimeMetric state={shell?.serverState} startedAt={process?.startedAt} />
+      <article><span>服务器帧率</span><strong>{displayValue(snapshot?.metrics.data.server, ["serverfps", "serverFps", "ServerFPS", "fps"])}</strong><small>{sourceLabel(snapshot?.metrics)}</small></article>
+      <article><span>CPU 使用率</span><strong>{processCpuText(process)}</strong><small>{process?.cpuReady === false ? "首次采样后显示实时值" : "PalServer 进程树的整机占比"}</small></article>
+      <article><span>内存使用</span><strong>{processMemoryText(process)}</strong><small>{process?.pids.length ? "PalServer 进程树内存" : "未检测到 PalServer 进程"}</small></article>
+      <article><span>磁盘读取</span><strong>{processRateText(process, process?.diskReadBytesPerSecond)}</strong><small>{process?.ioReady === false ? "正在建立速率基线" : "PalServer 进程树读取速度"}</small></article>
+      <article><span>磁盘写入</span><strong>{processRateText(process, process?.diskWriteBytesPerSecond)}</strong><small>{process?.ioReady === false ? "正在建立速率基线" : "PalServer 进程树写入速度"}</small></article>
     </section>
-    <section className="live-section">
-      <div className="section-heading"><div><h2>服务器状态</h2><p>{sourceLabel(snapshot?.info)} · {formatObservedAt(snapshot?.info.observedAt)}</p></div><span className={snapshot?.info.stale ? "badge warning" : "badge success"}>{snapshot?.info.stale ? "已过期" : "最新"}</span></div>
-      <dl className="live-detail-grid">
-        <div><dt>服务器</dt><dd>{displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"] )}</dd></div>
-        <div><dt>版本</dt><dd>{displayValue(snapshot?.info.data, ["version", "Version"])}</dd></div>
-        <div><dt>世界</dt><dd>{displayValue(snapshot?.info.data, ["worldguid", "worldName", "WorldName", "worldId"] )}</dd></div>
-        <div><dt>磁盘读取</dt><dd>{process ? formatBytes(process.diskReadBytes) : "不可用"}</dd></div>
-        <div><dt>磁盘写入</dt><dd>{process ? formatBytes(process.diskWriteBytes) : "不可用"}</dd></div>
-      </dl>
+    <section className="live-info-row" aria-label="服务器附加信息">
+      <span><small>服务器</small><strong>{displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"])}</strong></span>
+      <span><small>版本</small><strong>{displayValue(snapshot?.info.data, ["version", "Version"])}</strong></span>
     </section>
     <section className="live-section">
       <div className="section-heading"><div><h2>在线玩家</h2><p>{sourceLabel(snapshot?.players)}。完整 IP 按管理需求显示。</p></div><Users size={22} /></div>
@@ -103,6 +117,45 @@ export function LiveMonitoring({ auth, embedded = false, onSnapshot }: { auth: A
       {message && <p className="form-success" role="status">{message}</p>}
     </section>
   </div>;
+}
+
+function UptimeMetric({ state, startedAt }: { state?: ShellStatus["serverState"]; startedAt?: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return <article><span>运行时间</span><strong>{uptimeText(state, startedAt, now)}</strong><small>{state === "running" && startedAt ? `自 ${new Date(startedAt * 1_000).toLocaleString("zh-CN")}` : state === "running" ? "进程启动时间不可用" : "服务器停止时不计时"}</small></article>;
+}
+
+function processCpuText(process?: ProcessMetrics) {
+  if (!process) return "不可用";
+  if (!process.pids.length) return "未运行";
+  return formatPercent(process.cpuPercent, process.cpuReady);
+}
+
+function processMemoryText(process?: ProcessMetrics) {
+  if (!process) return "不可用";
+  return process.pids.length ? formatBytes(process.memoryBytes) : "未运行";
+}
+
+function processRateText(process: ProcessMetrics | undefined, value: number | undefined) {
+  if (!process) return "不可用";
+  if (!process.pids.length) return "未运行";
+  return formatByteRate(value, process.ioReady);
+}
+
+function uptimeText(state: ShellStatus["serverState"] | undefined, startedAt: number | null | undefined, now: number): string {
+  if (!state) return "读取中";
+  if (state !== "running") return "未运行";
+  if (!startedAt) return "不可用";
+  const seconds = Math.max(0, Math.floor(now / 1_000 - startedAt));
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor(seconds % 86_400 / 3_600);
+  const minutes = Math.floor(seconds % 3_600 / 60);
+  return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分`;
 }
 
 function playersFrom(data: unknown): Record<string, unknown>[] {

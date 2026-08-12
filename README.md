@@ -126,6 +126,13 @@ npm.cmd run test:e2e
 
 脚本会生成 `artifacts\PalServerConsole-<版本>-windows-x64.zip`、`checksums.sha256`、构建元数据，以及 Python 与前端 npm 运行时依赖的第三方许可证；不会对真实 PalServer、存档或现有 `data/` 进行写入。当前产物默认未签名。
 
+## 致谢
+
+- 感谢 [deafdudecomputers/PalworldSaveTools](https://github.com/deafdudecomputers/PalworldSaveTools) 整理帕鲁英文资料和头像。本项目固定使用提交 `18b9554168ecf684c5f1e1e4d8e583083b942eb9` 中的选定 WebP，并保留 MIT License。
+- 感谢 [zaigie/palworld-server-tool](https://github.com/zaigie/palworld-server-tool) 整理 Character ID 的简体中文映射。本项目固定使用提交 `f45a48ef25ce08a5311a27e55b17062ba0bb4362`，并保留 Apache License 2.0。
+
+两份资料由 `scripts\sync-pal-catalog.ps1` 固定版本生成；完整来源、许可文件和 Pocketpair 权利声明见 `frontend/public/assets/pals/NOTICE.md` 与 `THIRD_PARTY_NOTICES.md`。
+
 ## 数据与公开发布
 
 `data/`、数据库、日志、真实 `.sav`、前端构建产物、Playwright 截图、开发计划、交接记录和生成报告都由 `.gitignore` 排除。`fixtures/` 只保留安全说明和目录忽略规则；本地脱敏样本不会提交或公开分发。

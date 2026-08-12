@@ -12,7 +12,9 @@ export function displayValue(value: Record<string, unknown> | undefined, keys: s
   }
   return fallback;
 }
-export function formatBytes(value: number) { if (!Number.isFinite(value)) return "不可用"; const units = ["B", "KB", "MB", "GB", "TB"]; let size = value; let unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; } return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`; }
+export function formatBytes(value: number | undefined) { if (typeof value !== "number" || !Number.isFinite(value)) return "不可用"; const units = ["B", "KB", "MB", "GB", "TB"]; let size = value; let unit = 0; while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; } return `${size.toFixed(unit ? 1 : 0)} ${units[unit]}`; }
+export function formatPercent(value: number | undefined, ready?: boolean) { if (ready === false) return "正在校准"; return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(1)}%` : "不可用"; }
+export function formatByteRate(value: number | undefined, ready?: boolean) { if (ready === false) return "正在校准"; return typeof value === "number" && Number.isFinite(value) ? `${formatBytes(value)}/秒` : "不可用"; }
 export function formatObservedAt(value?: number) { return value ? new Date(value * 1000).toLocaleTimeString("zh-CN") : "尚未采集"; }
-export function sourceLabel(value?: LiveValue<unknown>) { if (!value) return "尚未采集"; return value.stale ? `${value.source} · ${value.errorCode || "数据已过期"}` : value.source; }
+export function sourceLabel(value?: LiveValue<unknown>) { if (!value) return "尚未采集"; return value.stale ? "实时数据暂不可用" : "实时数据"; }
 export function liveStatus(value?: LiveValue<unknown>) { return value ? `${sourceLabel(value)} · ${formatObservedAt(value.observedAt)}` : "尚未采集"; }

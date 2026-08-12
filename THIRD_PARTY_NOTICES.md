@@ -89,14 +89,29 @@ https://github.com/zao/ooz.
 The MIT permission and warranty notice shown above for palworld-save-tools also
 applies to these adapted layout definitions.
 
-## deafdudecomputers/PalworldSaveTools optional game assets
+## deafdudecomputers/PalworldSaveTools bundled selected game assets
 
 - Source: https://github.com/deafdudecomputers/PalworldSaveTools
-- Purpose: optional character catalog and icon source for the M5 asset import script.
+- Fixed revision: `18b9554168ecf684c5f1e1e4d8e583083b942eb9`.
+- Purpose: character catalog and selected local WebP portrait source for the read-only world browser.
 - License reported by the source repository: MIT License.
-- Import behavior: `scripts/import-game-assets.ps1` requires an explicit local
-  checkout and revision, copies only a selected JSON catalog and PNG/WebP icons,
-  and records a manifest. No asset is downloaded or bundled automatically.
+- Import behavior: `scripts/sync-pal-catalog.ps1` checks out the fixed revision,
+  copies only the required WebP files, and retains the source license at
+  `frontend/public/assets/pals/LICENSE-PalworldSaveTools.txt`.
+
+We thank the PalworldSaveTools maintainers for making this catalog available.
+
+## zaigie/palworld-server-tool Chinese character mapping
+
+- Source: https://github.com/zaigie/palworld-server-tool
+- Fixed revision: `f45a48ef25ce08a5311a27e55b17062ba0bb4362`.
+- Purpose: Simplified Chinese labels for Pal and captured human/NPC Character IDs.
+- License: Apache License 2.0.
+- The source license is retained at
+  `frontend/public/assets/pals/LICENSE-palworld-server-tool.txt`.
+
+We thank the palworld-server-tool maintainers for maintaining the localization mapping.
 
 Palworld names, images and game data may have rights separate from the source
-code license. Imported assets must be reviewed before public redistribution.
+code licenses. Palworld and its character names and images belong to Pocketpair,
+Inc. and the relevant rights holders. This project is not affiliated with Pocketpair.

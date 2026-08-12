@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import socket
@@ -11,9 +12,11 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 
+import psutil
 import uvicorn
 from fastapi.testclient import TestClient
 
@@ -70,8 +73,8 @@ def main(argv: list[str] | None = None) -> None:
     should_open_browser = (
         not args.no_browser and os.environ.get("PALSERVER_CONSOLE_NO_BROWSER") != "1"
     )
-    host, local_url, reuse_existing = _select_listener(preferred_host, settings.port)
-    if reuse_existing:
+    sockets, local_url, addresses = _select_listeners(preferred_host, settings.port)
+    if not sockets:
         print(
             f"PalServerConsole is already running at {local_url}. "
             "Reusing the existing instance."
@@ -79,14 +82,29 @@ def main(argv: list[str] | None = None) -> None:
         if should_open_browser:
             _open_local_url(_browser_url(local_url))
         return
-    if host == "::1":
+    if addresses != (preferred_host,):
+        listener_urls = ", ".join(_local_url(address, settings.port) for address in addresses)
         print(
             f"Port {settings.port} is occupied on IPv4 by another service. "
-            f"Starting PalServerConsole on IPv6 loopback at {local_url}."
+            f"Starting PalServerConsole on specific IPv4 addresses: {listener_urls}."
         )
     if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
-    uvicorn.run(create_app(settings), host=host, port=settings.port, workers=1, log_level="info")
+    server = uvicorn.Server(
+        uvicorn.Config(
+            create_app(settings),
+            host=preferred_host,
+            port=settings.port,
+            workers=1,
+            log_level="info",
+        )
+    )
+    try:
+        server.run(sockets=sockets)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        _close_sockets(sockets)
 
 
 def _portable_self_check(settings: AppSettings) -> None:
@@ -171,37 +189,95 @@ def _browser_url(service_url: str) -> str:
     return f"{service_url.rstrip('/')}/?app=palserver-console"
 
 
-def _select_listener(host: str, port: int) -> tuple[str, str, bool]:
-    primary_url = _local_url("127.0.0.1" if host == "0.0.0.0" else host, port)
+def _select_listeners(
+    host: str, port: int
+) -> tuple[list[socket.socket], str, tuple[str, ...]]:
+    local_url = _local_url("127.0.0.1", port)
+    if _is_running_instance(local_url):
+        return [], local_url, ()
+    legacy_url = _local_url("::1", port)
+    if _is_running_instance(legacy_url):
+        return [], legacy_url, ()
     try:
-        _require_available_port(host, port)
+        listener = _bind_ipv4_socket(host, port)
     except RuntimeError as primary_error:
-        if _is_running_instance(primary_url):
-            return host, primary_url, True
-        if host == "::1":
-            raise
-
-        ipv6_url = _local_url("::1", port)
-        try:
-            _require_available_port("::1", port)
-        except RuntimeError:
-            if _is_running_instance(ipv6_url):
-                return "::1", ipv6_url, True
+        if host != "0.0.0.0":
+            if _is_running_instance(local_url):
+                return [], local_url, ()
             raise primary_error from None
-        return "::1", ipv6_url, False
-    return host, primary_url, False
-
-
-def _require_available_port(host: str, port: int) -> None:
-    family = socket.AF_INET6 if ":" in host else socket.AF_INET
-    with socket.socket(family, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind((host, port))
-        except OSError as error:
+        interface_addresses = _interface_ipv4_addresses() if host == "0.0.0.0" else ()
+        fallback_addresses = ("127.0.0.1", *interface_addresses)
+        listeners: list[socket.socket] = []
+        bound_addresses: list[str] = []
+        for address in fallback_addresses:
+            try:
+                listeners.append(_bind_ipv4_socket(address, port))
+                bound_addresses.append(address)
+            except RuntimeError:
+                if address == "127.0.0.1":
+                    _close_sockets(listeners)
+                    if _is_running_instance(local_url):
+                        return [], local_url, ()
+                    raise primary_error from None
+        if interface_addresses and len(bound_addresses) == 1:
+            _close_sockets(listeners)
             raise RuntimeError(
-                f"Port {port} is already in use. Close the program using it or change "
-                "the PalServerConsole port."
-            ) from error
+                f"Port {port} is unavailable on every active IPv4 interface."
+            ) from None
+        return listeners, local_url, tuple(bound_addresses)
+    return [listener], local_url, (host,)
+
+
+def _is_bindable_ipv4(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    blocked_networks = (
+        ipaddress.ip_network("0.0.0.0/8"),
+        ipaddress.ip_network("127.0.0.0/8"),
+        ipaddress.ip_network("169.254.0.0/16"),
+        ipaddress.ip_network("192.0.2.0/24"),
+        ipaddress.ip_network("198.18.0.0/15"),
+        ipaddress.ip_network("198.51.100.0/24"),
+        ipaddress.ip_network("203.0.113.0/24"),
+        ipaddress.ip_network("224.0.0.0/3"),
+    )
+    return isinstance(address, ipaddress.IPv4Address) and not any(
+        address in network for network in blocked_networks
+    )
+
+
+def _interface_ipv4_addresses() -> tuple[str, ...]:
+    interface_stats = psutil.net_if_stats()
+    addresses = {
+        address.address
+        for interface, interface_addresses in psutil.net_if_addrs().items()
+        if interface_stats.get(interface) is not None and interface_stats[interface].isup
+        for address in interface_addresses
+        if address.family == socket.AF_INET and _is_bindable_ipv4(address.address)
+    }
+    return tuple(sorted(addresses, key=ipaddress.ip_address))
+
+
+def _bind_ipv4_socket(host: str, port: int) -> socket.socket:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        listener.bind((host, port))
+    except OSError as error:
+        listener.close()
+        raise RuntimeError(
+            f"Port {port} is already in use. Close the program using it or change "
+            "the PalServerConsole port."
+        ) from error
+    listener.set_inheritable(True)
+    return listener
+
+
+def _close_sockets(sockets: list[socket.socket]) -> None:
+    for listener in sockets:
+        with suppress(OSError):
+            listener.close()
 
 
 def _open_local_url(url: str) -> None:

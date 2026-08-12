@@ -343,65 +343,155 @@ def _parse_rcon_payload(payload: str) -> Any:
         return {"raw": payload}
 
 
+@dataclass(frozen=True)
+class _ProcessSample:
+    created_at: float
+    observed_at: float
+    cpu_seconds: float
+    read_bytes: int
+    write_bytes: int
+
+
 class ProcessMetricsCollector:
     def __init__(
-        self, process_lookup: Callable[[Path], list[psutil.Process]] | None = None
+        self,
+        process_lookup: Callable[[Path], list[psutil.Process]] | None = None,
+        clock: Callable[[], float] | None = None,
+        logical_cpu_count: Callable[[], int | None] | None = None,
     ) -> None:
         self._process_lookup = process_lookup or self._find_processes
+        self._clock = clock or time.monotonic
+        self._logical_cpu_count = max(
+            1, int((logical_cpu_count or psutil.cpu_count)() or 1)
+        )
+        self._samples: dict[int, _ProcessSample] = {}
+        self._lock = threading.Lock()
 
     def collect(self, executable: Path) -> tuple[dict[str, object], str | None]:
         processes = self._process_lookup(executable)
         if not processes:
-            return {
-                "pids": [],
-                "cpuPercent": 0.0,
-                "memoryBytes": 0,
-                "diskReadBytes": 0,
-                "diskWriteBytes": 0,
-                "startedAt": None,
-            }, "PROCESS_NOT_RUNNING"
-        cpu = memory = read_bytes = write_bytes = 0.0
-        started_at: float | None = None
-        pids: list[int] = []
-        for process in processes:
-            try:
-                pids.append(process.pid)
-                cpu += process.cpu_percent(interval=None)
-                memory += float(process.memory_info().rss)
-                io = process.io_counters()
-                read_bytes += float(io.read_bytes)
-                write_bytes += float(io.write_bytes)
-            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                continue
-            try:
-                process_started_at = float(process.create_time())
+            with self._lock:
+                self._samples.clear()
+            return self._empty_metrics(), "PROCESS_NOT_RUNNING"
+
+        observed_at = self._clock()
+        with self._lock:
+            cpu_percent = 0.0
+            read_bytes_per_second = 0.0
+            write_bytes_per_second = 0.0
+            memory = 0
+            read_bytes = 0
+            write_bytes = 0
+            started_at: float | None = None
+            pids: list[int] = []
+            ready_samples = 0
+            current_samples: dict[int, _ProcessSample] = {}
+            for process in processes:
+                try:
+                    pid = int(process.pid)
+                    process_started_at = float(process.create_time())
+                    cpu_times = process.cpu_times()
+                    cpu_seconds = float(cpu_times.user) + float(cpu_times.system)
+                    rss = int(process.memory_info().rss)
+                    io = process.io_counters()
+                    process_read_bytes = int(io.read_bytes)
+                    process_write_bytes = int(io.write_bytes)
+                except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                    continue
+
+                pids.append(pid)
+                memory += rss
+                read_bytes += process_read_bytes
+                write_bytes += process_write_bytes
                 if process_started_at > 0 and (
                     started_at is None or process_started_at < started_at
                 ):
                     started_at = process_started_at
-            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
-                continue
+
+                previous = self._samples.get(pid)
+                if (
+                    previous is not None
+                    and previous.created_at == process_started_at
+                    and observed_at > previous.observed_at
+                ):
+                    elapsed = observed_at - previous.observed_at
+                    cpu_percent += (
+                        max(0.0, cpu_seconds - previous.cpu_seconds)
+                        / elapsed
+                        * 100
+                        / self._logical_cpu_count
+                    )
+                    read_bytes_per_second += (
+                        max(0, process_read_bytes - previous.read_bytes) / elapsed
+                    )
+                    write_bytes_per_second += (
+                        max(0, process_write_bytes - previous.write_bytes) / elapsed
+                    )
+                    ready_samples += 1
+                current_samples[pid] = _ProcessSample(
+                    created_at=process_started_at,
+                    observed_at=observed_at,
+                    cpu_seconds=cpu_seconds,
+                    read_bytes=process_read_bytes,
+                    write_bytes=process_write_bytes,
+                )
+            self._samples = current_samples
+
+        if not pids:
+            return self._empty_metrics(), "PROCESS_METRICS_UNAVAILABLE"
+        sampled = ready_samples > 0
         return {
             "pids": pids,
-            "cpuPercent": round(cpu, 2),
-            "memoryBytes": int(memory),
-            "diskReadBytes": int(read_bytes),
-            "diskWriteBytes": int(write_bytes),
+            # Match Windows Task Manager: 100% means all logical processors are saturated.
+            "cpuPercent": round(cpu_percent, 2),
+            "cpuReady": sampled,
+            "memoryBytes": memory,
+            # Keep cumulative counters for API compatibility; the UI uses the explicit rates below.
+            "diskReadBytes": read_bytes,
+            "diskWriteBytes": write_bytes,
+            "diskReadBytesPerSecond": round(read_bytes_per_second, 2),
+            "diskWriteBytesPerSecond": round(write_bytes_per_second, 2),
+            "ioReady": sampled,
             "startedAt": int(started_at) if started_at is not None else None,
-        }, None if pids else "PROCESS_METRICS_UNAVAILABLE"
+        }, None
+
+    @staticmethod
+    def _empty_metrics() -> dict[str, object]:
+        return {
+            "pids": [],
+            "cpuPercent": 0.0,
+            "cpuReady": False,
+            "memoryBytes": 0,
+            "diskReadBytes": 0,
+            "diskWriteBytes": 0,
+            "diskReadBytesPerSecond": 0.0,
+            "diskWriteBytesPerSecond": 0.0,
+            "ioReady": False,
+            "startedAt": None,
+        }
 
     @staticmethod
     def _find_processes(executable: Path) -> list[psutil.Process]:
         expected = str(executable.resolve()).casefold()
-        result: list[psutil.Process] = []
+        roots: list[psutil.Process] = []
         for process in psutil.process_iter(["pid", "exe"]):
             try:
                 value = process.info.get("exe")
                 if value and str(Path(value).resolve()).casefold() == expected:
-                    result.append(process)
+                    roots.append(process)
             except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                 continue
-        return result
+
+        # PalServer.exe is a small launcher.  The real server load lives in its
+        # PalServer-Win64-Shipping-Cmd.exe child, so metrics must cover the tree.
+        result = {int(process.pid): process for process in roots}
+        for root in roots:
+            try:
+                for child in root.children(recursive=True):
+                    result[int(child.pid)] = child
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                continue
+        return [result[pid] for pid in sorted(result)]
 
 
 @dataclass
