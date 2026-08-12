@@ -10,12 +10,12 @@ import { ThemeToggle } from "./ThemeToggle";
 const THEME_STORAGE_KEY = "palserver-console-theme";
 
 function initialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
+  if (typeof window === "undefined") return "dark";
   try {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return saved === "dark" || saved === "light" ? saved : "light";
+    return saved === "dark" || saved === "light" ? saved : "dark";
   } catch {
-    return "light";
+    return "dark";
   }
 }
 

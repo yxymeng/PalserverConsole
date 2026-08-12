@@ -13,6 +13,53 @@ from pytest import MonkeyPatch
 import palserver_console.__main__ as console_main
 
 
+def test_browser_url_has_a_palserver_console_cache_key() -> None:
+    assert console_main._browser_url("http://127.0.0.1:8223") == (
+        "http://127.0.0.1:8223/?app=palserver-console"
+    )
+
+
+def test_select_listener_falls_back_to_ipv6_on_the_same_port(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    checked_hosts: list[str] = []
+
+    def require_available_port(host: str, _port: int) -> None:
+        checked_hosts.append(host)
+        if host == "127.0.0.1":
+            raise RuntimeError("IPv4 listener is occupied")
+
+    monkeypatch.setattr(console_main, "_require_available_port", require_available_port)
+    monkeypatch.setattr(console_main, "_is_running_instance", lambda _url: False)
+
+    assert console_main._select_listener("127.0.0.1", 8223) == (
+        "::1",
+        "http://[::1]:8223",
+        False,
+    )
+    assert checked_hosts == ["127.0.0.1", "::1"]
+
+
+def test_select_listener_reuses_an_existing_ipv6_console(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def require_available_port(_host: str, _port: int) -> None:
+        raise RuntimeError("listener is occupied")
+
+    monkeypatch.setattr(console_main, "_require_available_port", require_available_port)
+    monkeypatch.setattr(
+        console_main,
+        "_is_running_instance",
+        lambda url: url == "http://[::1]:8223",
+    )
+
+    assert console_main._select_listener("0.0.0.0", 8223) == (
+        "::1",
+        "http://[::1]:8223",
+        True,
+    )
+
+
 def test_open_local_url_prefers_a_windows_browser(
     monkeypatch: MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -67,7 +114,7 @@ def test_open_when_ready_only_opens_the_palserver_console(
 
     console_main._open_when_ready("http://127.0.0.1:18223", max_attempts=1, delay_seconds=0)
 
-    assert opened == ["http://127.0.0.1:18223"]
+    assert opened == ["http://127.0.0.1:18223/?app=palserver-console"]
 
 
 def test_open_when_ready_does_not_open_another_service(

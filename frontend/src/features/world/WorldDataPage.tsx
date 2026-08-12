@@ -1,18 +1,41 @@
-import { ChevronLeft, ChevronRight, Database, RefreshCw, Users, Warehouse, PawPrint, X } from "lucide-react";
-import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
-import type { AuthStatus, WorldStatus, WorldRow, WorldResponse, WorldResource } from "../../api/contracts";
+import { ChevronLeft, ChevronRight, Database, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
+
+import type { AuthStatus, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
-import { formatWorldTime, worldCell, worldColumns } from "./worldTable";
+import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
+import { playerInitial, resolvePal } from "./palCatalog";
+
+type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
+type SortKey = "name" | "level" | "id";
+type RelationFilter = "all" | "linked" | "unlinked";
+
+const PRIMARY_RESOURCES: { key: PrimaryWorldResource; label: string; icon: typeof Users }[] = [
+  { key: "players", label: "玩家", icon: Users },
+  { key: "pals", label: "帕鲁", icon: PawPrint },
+  { key: "guilds", label: "工会", icon: Users },
+  { key: "bases", label: "据点", icon: Warehouse },
+];
+
+const RESOURCE_LABELS: Record<PrimaryWorldResource, string> = {
+  players: "玩家",
+  pals: "帕鲁",
+  guilds: "工会",
+  bases: "据点",
+};
 
 export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<WorldStatus | null>(null);
-  const [resource, setResource] = useState<WorldResource>("players");
+  const [resource, setResource] = useState<PrimaryWorldResource>("players");
   const [result, setResult] = useState<WorldResponse | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
-  const [selectedPlayer, setSelectedPlayer] = useState<WorldRow | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [relationFilter, setRelationFilter] = useState<RelationFilter>("all");
+  const [selected, setSelected] = useState<EntityDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const pageSize = 50;
@@ -37,10 +60,11 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  function chooseResource(next: WorldResource) {
+  function chooseResource(next: PrimaryWorldResource) {
     setResource(next);
     setPage(1);
-    setSelectedPlayer(null);
+    setRelationFilter("all");
+    setSelected(null);
   }
 
   function submitSearch(event: FormEvent) {
@@ -50,7 +74,8 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   }
 
   async function reparse() {
-    setError(""); setMessage("");
+    setError("");
+    setMessage("");
     try {
       const response = await requestJson<{ message: string }>("/api/world/reparse", {
         method: "POST",
@@ -64,47 +89,196 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     }
   }
 
-  async function showPlayer(playerId: string) {
+  const openDetail = useCallback(async (nextResource: PrimaryWorldResource, id: string) => {
+    setDetailLoading(true);
     setError("");
-    try { setSelectedPlayer(await requestJson<WorldRow>(`/api/world/players/${playerId}`)); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : "玩家详情读取失败"); }
-  }
+    try {
+      setSelected({
+        resource: nextResource,
+        data: await requestJson<WorldRow>(`/api/world/${nextResource}/${encodeURIComponent(id)}`),
+      });
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "实体详情读取失败");
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
 
-  const tabs: { key: WorldResource; label: string; icon: typeof Users }[] = [
-    { key: "players", label: "玩家", icon: Users },
-    { key: "pals", label: "帕鲁", icon: PawPrint },
-    { key: "guilds", label: "工会", icon: Users },
-    { key: "bases", label: "据点", icon: Warehouse },
-    { key: "inventories", label: "库存", icon: Database },
-    { key: "work-pals", label: "工作帕鲁", icon: PawPrint },
-  ];
+  const displayedItems = useMemo(
+    () => sortRows(
+      (result?.items || []).filter((item) => matchesRelationFilter(item, resource, relationFilter)),
+      resource,
+      sortKey,
+    ),
+    [relationFilter, resource, result?.items, sortKey],
+  );
   const columns = worldColumns(resource);
   const totalPages = result?.total ? Math.ceil(result.total / pageSize) : 1;
+
   return <div className="page-stack world-page">
     <section className={`world-status ${status?.stale ? "stale" : ""}`}>
       <div className="status-icon">{status?.parsing ? <RefreshCw className="spin" size={23} /> : <Database size={23} />}</div>
       <div><h2>{status?.parsing ? "正在解析存档快照" : status?.stale ? "正在显示最后成功缓存" : "存档缓存可用"}</h2><p>{status?.error || `最后成功：${formatWorldTime(status?.observedAt)}${status?.parseDurationMs ? ` · ${status.parseDurationMs} ms` : ""}`}</p></div>
-      <button className="quiet-button" onClick={() => void reparse()}><RefreshCw size={17} />重新解析</button>
+      <button className="quiet-button" type="button" onClick={() => void reparse()}><RefreshCw size={17} />重新解析</button>
     </section>
-    <section className="world-counts" aria-label="世界数据数量">
+    <section className="world-counts" aria-label="世界实体数量">
       <span><strong>{status?.counts.players ?? "-"}</strong>玩家</span>
       <span><strong>{status?.counts.pals ?? "-"}</strong>帕鲁</span>
       <span><strong>{status?.counts.guilds ?? "-"}</strong>工会</span>
       <span><strong>{status?.counts.bases ?? "-"}</strong>据点</span>
-      <span><strong>{status?.counts.inventory_items ?? "-"}</strong>物品槽</span>
-      <span><strong>{status?.counts.work_pals ?? "-"}</strong>工作帕鲁</span>
     </section>
-    <div className="world-tabs" role="tablist" aria-label="世界数据分类">
-      {tabs.map(({ key, label, icon: Icon }) => <button key={key} className={resource === key ? "active" : ""} role="tab" aria-selected={resource === key} onClick={() => chooseResource(key)}><Icon size={17} />{label}</button>)}
+    <div className="world-tabs" role="tablist" aria-label="世界实体分类">
+      {PRIMARY_RESOURCES.map(({ key, label, icon: Icon }) => <button key={key} className={resource === key ? "active" : ""} type="button" role="tab" aria-selected={resource === key} onClick={() => chooseResource(key)}><Icon size={17} />{label}</button>)}
     </div>
-    <form className="world-search" onSubmit={submitSearch}><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /><button className="primary-button" type="submit">搜索</button></form>
-    {error && <p className="form-error" role="alert">{error}</p>}
-    {message && <p className="form-success" role="status">{message}</p>}
-    <section className="world-table" aria-live="polite">
-      <div className="world-table-head" style={{ "--world-columns": columns.length } as CSSProperties}>{columns.map((column) => <span key={column.key}>{column.label}</span>)}</div>
-      {result?.items.length ? result.items.map((item, index) => <div className="world-table-row" style={{ "--world-columns": columns.length } as CSSProperties} key={String(item.id || `${resource}-${index}`)}>{columns.map((column) => <span key={column.key} data-label={column.label}>{column.key === "name" && resource === "players" && item.id ? <button className="world-link" onClick={() => void showPlayer(String(item.id))}>{worldCell(item, column.key)}</button> : worldCell(item, column.key)}</span>)}</div>) : <p className="empty-state">暂无符合条件的数据。</p>}
-    </section>
-    <section className="audit-footer"><span>共 {result?.total || 0} 条，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
-    {selectedPlayer && <section className="world-detail"><div className="section-heading"><div><h2>{String(selectedPlayer.name || "玩家详情")}</h2><p>{String(selectedPlayer.id || "")}</p></div><button className="icon-button bordered" title="关闭详情" onClick={() => setSelectedPlayer(null)}><X size={18} /></button></div><dl><div><dt>等级</dt><dd>{String(selectedPlayer.level ?? "不可用")}</dd></div><div><dt>工会 ID</dt><dd>{String(selectedPlayer.guildId || "未分配")}</dd></div><div><dt>背包物品</dt><dd>{Array.isArray(selectedPlayer.inventory) ? selectedPlayer.inventory.length : 0}</dd></div><div><dt>所属帕鲁</dt><dd>{Array.isArray(selectedPlayer.pals) ? selectedPlayer.pals.length : 0}</dd></div></dl></section>}
+    <div className="world-browser">
+      <section className="world-list-panel" aria-label={`${RESOURCE_LABELS[resource]}列表`}>
+        <form className="world-search" onSubmit={submitSearch}>
+          <label><Search size={18} aria-hidden="true" /><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
+          <button className="primary-button" type="submit">搜索</button>
+        </form>
+        <div className="world-list-controls">
+          <label><SlidersHorizontal size={16} aria-hidden="true" />筛选<select aria-label="关联筛选" value={relationFilter} onChange={(event) => setRelationFilter(event.target.value as RelationFilter)}><option value="all">全部</option><option value="linked">已关联</option><option value="unlinked">未关联</option></select></label>
+          <label>排序<select aria-label="排序方式" value={sortKey} onChange={(event) => setSortKey(event.target.value as SortKey)}><option value="name">名称</option><option value="level">等级 / 数量</option><option value="id">稳定 ID</option></select></label>
+          <span>{displayedItems.length}/{result?.items.length || 0} 条</span>
+        </div>
+        {error && <p className="form-error" role="alert">{error}</p>}
+        {message && <p className="form-success" role="status">{message}</p>}
+        <section className="world-table" aria-live="polite">
+          <div className="world-table-head" style={{ "--world-columns": columns.length } as CSSProperties}>{columns.map((column) => <span key={column.key}>{column.label}</span>)}</div>
+          {displayedItems.length ? displayedItems.map((item, index) => <div className="world-table-row" style={{ "--world-columns": columns.length } as CSSProperties} key={String(item.id || `${resource}-${index}`)}>{columns.map((column, columnIndex) => {
+            const cell = worldCell(item, column.key);
+            return <span key={column.key} data-label={column.label}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={cell} onClick={() => void openDetail(resource, String(item.id))}><EntityMarker resource={resource} item={item} /><span>{cell}</span></button> : cell}</span>;
+          })}</div>) : <p className="empty-state">{result ? "暂无符合条件的数据。" : "正在读取世界数据..."}</p>}
+        </section>
+        <section className="audit-footer"><span>共 {result?.total || 0} 条，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
+      </section>
+      <EntityDrawer detail={selected} loading={detailLoading} onClose={() => setSelected(null)} onNavigate={(target, id) => void openDetail(target, id)} />
+    </div>
   </div>;
+}
+
+function EntityDrawer({ detail, loading, onClose, onNavigate }: { detail: EntityDetail | null; loading: boolean; onClose: () => void; onNavigate: (resource: PrimaryWorldResource, id: string) => void }) {
+  if (!detail) return <aside className="world-entity-drawer empty" aria-label="世界实体详情"><Database size={24} /><h2>{loading ? "正在读取详情..." : "选择一个实体"}</h2><p>从左侧列表选择玩家、帕鲁、工会或据点，查看属性和可用关联。</p></aside>;
+
+  const { data, resource } = detail;
+  return <aside className="world-entity-drawer" aria-label="世界实体详情">
+    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><p className="world-detail-kicker">{RESOURCE_LABELS[resource]}详情</p><h2>{entityName(data, resource)}</h2><p>{valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" onClick={onClose}><X size={18} /></button></header>
+    <div className="world-detail-properties">
+      {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} />}
+      {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} />}
+      {resource === "guilds" && <GuildDetail data={data} onNavigate={onNavigate} />}
+      {resource === "bases" && <BaseDetail data={data} onNavigate={onNavigate} />}
+    </div>
+  </aside>;
+}
+
+function EntityMarker({ resource, item }: { resource: PrimaryWorldResource; item: WorldRow }) {
+  if (resource === "players") return <span className="world-entity-avatar world-player-avatar" aria-hidden="true">{playerInitial(item.name)}</span>;
+  if (resource === "pals") {
+    const pal = resolvePal(item);
+    return <span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.iconKey} aria-hidden="true"><PawPrint size={17} /></span>;
+  }
+  return null;
+}
+
+function PlayerDetail({ data, onNavigate }: DetailProps) {
+  return <>
+    <PropertyGrid data={data} fields={[["等级", "level"], ["工会 ID", "guildId"], ["Player ID", "id"], ["实例", "instanceId"]]} />
+    <RelationButton title="所属工会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
+    <RelationList title="拥有帕鲁" rows={rowsOf(data, "pals")} resource="pals" onNavigate={onNavigate} />
+    <RelationList title="队伍帕鲁" rows={rowsOf(data, "partyPals")} resource="pals" onNavigate={onNavigate} />
+    <RelationList title="储存帕鲁" rows={rowsOf(data, "storagePals")} resource="pals" onNavigate={onNavigate} />
+    <DataList title="玩家库存" rows={rowsOf(data, "inventory")} />
+  </>;
+}
+
+function PalDetail({ data, onNavigate }: DetailProps) {
+  const pal = resolvePal(data);
+  return <>
+    <PropertyGrid data={{ ...data, displayName: pal.displayName, speciesName: pal.speciesName }} fields={[["名称", "displayName"], ["昵称", "nickname"], ["中文种族", "speciesName"], ["Character ID", "characterId"], ["等级", "level"], ["Container", "containerId"], ["Slot", "slotIndex"], ["工作状态", "assignment"]]} />
+    <RelationButton title="主人" value={rowOf(data, "owner")} resource="players" onNavigate={onNavigate} />
+    <RelationButton title="据点" value={rowOf(data, "base")} resource="bases" onNavigate={onNavigate} />
+    <RelationButton title="容器" value={rowOf(data, "container")} />
+    <RawDetail value={data.detail} />
+  </>;
+}
+
+function GuildDetail({ data, onNavigate }: DetailProps) {
+  return <>
+    <PropertyGrid data={data} fields={[["Guild ID", "id"], ["成员数量", "memberCount"], ["据点数量", "baseCount"]]} />
+    <RelationList title="成员" rows={rowsOf(data, "members")} resource="players" onNavigate={onNavigate} />
+    <RelationList title="关联据点" rows={rowsOf(data, "bases")} resource="bases" onNavigate={onNavigate} />
+    <RawDetail value={data.detail} />
+  </>;
+}
+
+function BaseDetail({ data, onNavigate }: DetailProps) {
+  return <>
+    <PropertyGrid data={data} fields={[["Base ID", "id"], ["X", "x"], ["Y", "y"], ["Z", "z"], ["工作容器", "workerContainerId"]]} />
+    <RelationButton title="所属工会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
+    <RelationList title="工作帕鲁" rows={rowsOf(data, "workers")} resource="pals" onNavigate={onNavigate} />
+    <DataList title="可明确关联的库存" rows={rowsOf(data, "inventory")} />
+    <RawDetail value={data.detail} />
+  </>;
+}
+
+type DetailProps = { data: WorldRow; onNavigate: (resource: PrimaryWorldResource, id: string) => void };
+
+function PropertyGrid({ data, fields }: { data: WorldRow; fields: [string, string][] }) {
+  return <dl className="world-detail-grid">{fields.map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{valueOf(data, key)}</dd></div>)}</dl>;
+}
+
+function RelationButton({ title, value, resource, onNavigate }: { title: string; value: WorldRow | null; resource?: PrimaryWorldResource; onNavigate?: DetailProps["onNavigate"] }) {
+  return <section className="world-relation-section"><h3>{title}</h3>{value ? resource && value.id && onNavigate ? <button className="world-relation-link" type="button" onClick={() => onNavigate(resource, String(value.id))}>{entityName(value, resource)}<small>{String(value.id)}</small></button> : <p>{entityName(value, "bases")}</p> : <p className="muted">未关联</p>}</section>;
+}
+
+function RelationList({ title, rows, resource, onNavigate }: { title: string; rows: WorldRow[]; resource: PrimaryWorldResource; onNavigate: DetailProps["onNavigate"] }) {
+  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item, index) => item.id ? <button className="world-relation-link" type="button" key={String(item.id)} onClick={() => onNavigate(resource, String(item.id))}>{entityName(item, resource)}<small>{String(item.id)}</small></button> : <p key={index}>{entityName(item, resource)}</p>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
+}
+
+function DataList({ title, rows }: { title: string; rows: WorldRow[] }) {
+  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-data-list">{rows.map((item, index) => <p key={String(item.id || index)}>{entityName(item, "bases")}<small>{valueOf(item, "quantity") !== "不可用" ? ` × ${valueOf(item, "quantity")}` : valueOf(item, "containerId")}</small></p>)}</div> : <p className="muted">暂无可明确关联的数据</p>}</section>;
+}
+
+function RawDetail({ value }: { value: unknown }) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length) return null;
+  return <section className="world-relation-section"><h3>其他解析数据</h3><pre className="world-detail-json">{JSON.stringify(value, null, 2)}</pre></section>;
+}
+
+function sortRows(items: WorldRow[], resource: PrimaryWorldResource, sortKey: SortKey): WorldRow[] {
+  const keyBySort: Record<SortKey, string> = { name: "name", level: "level", id: "id" };
+  const key = keyBySort[sortKey];
+  const sortValue = (item: WorldRow) => sortKey === "name" && resource === "pals" ? resolvePal(item).displayName : valueOf(item, key);
+  return [...items].sort((left, right) => sortValue(left).localeCompare(sortValue(right), "zh-CN", { numeric: true }));
+}
+
+function matchesRelationFilter(item: WorldRow, resource: PrimaryWorldResource, filter: RelationFilter): boolean {
+  if (filter === "all") return true;
+  const linked = resource === "pals" ? Boolean(item.ownerPlayerId || item.baseId) : resource === "guilds" ? Number(item.memberCount || 0) > 0 || Number(item.baseCount || 0) > 0 : Boolean(item.guildId);
+  return filter === "linked" ? linked : !linked;
+}
+
+function rowsOf(data: WorldRow, key: string): WorldRow[] {
+  const value = data[key];
+  return Array.isArray(value) ? value.filter(isWorldRow) : [];
+}
+
+function rowOf(data: WorldRow, key: string): WorldRow | null {
+  return isWorldRow(data[key]) ? data[key] : null;
+}
+
+function isWorldRow(value: unknown): value is WorldRow {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function valueOf(data: WorldRow, key: string): string {
+  const value = data[key];
+  if (value === undefined || value === null || value === "") return "不可用";
+  if (typeof value === "object") return Array.isArray(value) ? `${value.length} 项` : "已关联";
+  return String(value);
+}
+
+function entityName(data: WorldRow, resource: PrimaryWorldResource): string {
+  if (resource === "pals") return resolvePal(data).displayName;
+  return valueOf(data, "name") !== "不可用" ? valueOf(data, "name") : valueOf(data, "id");
 }

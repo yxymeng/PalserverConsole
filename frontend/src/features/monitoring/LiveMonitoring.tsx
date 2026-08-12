@@ -6,7 +6,7 @@ import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { liveConnectionLabel, useLiveEvents } from "../../hooks/useLiveEvents";
 import { playerText, playerId, displayValue, formatBytes, formatObservedAt, sourceLabel, liveStatus } from "../../utils/format";
 
-export function LiveMonitoring({ auth, embedded = false }: { auth: AuthStatus; embedded?: boolean }) {
+export function LiveMonitoring({ auth, embedded = false, onSnapshot }: { auth: AuthStatus; embedded?: boolean; onSnapshot?: (snapshot: LiveSnapshot) => void }) {
   const [snapshot, setSnapshot] = useState<LiveSnapshot | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [unbanId, setUnbanId] = useState("");
@@ -14,6 +14,11 @@ export function LiveMonitoring({ auth, embedded = false }: { auth: AuthStatus; e
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const nextRequestSignal = useAbortableRequest();
+
+  const publishSnapshot = useCallback((nextSnapshot: LiveSnapshot) => {
+    setSnapshot(nextSnapshot);
+    onSnapshot?.(nextSnapshot);
+  }, [onSnapshot]);
 
   const refresh = useCallback(async () => {
     const signal = nextRequestSignal();
@@ -24,19 +29,19 @@ export function LiveMonitoring({ auth, embedded = false }: { auth: AuthStatus; e
         requestJson<LiveValue<LiveSnapshot["metrics"]["data"]>>("/api/live/metrics", { signal }),
         requestJson<LiveValue<Record<string, unknown>>>("/api/live/settings", { signal }),
       ]);
-      setSnapshot({ info, players, metrics, settings });
+      publishSnapshot({ info, players, metrics, settings });
       setError("");
     } catch (caught) {
       if (isAbortError(caught)) return;
       setError(caught instanceof Error ? caught.message : "实时数据刷新失败");
     }
-  }, [nextRequestSignal]);
+  }, [nextRequestSignal, publishSnapshot]);
 
   useEffect(() => { void refresh(); }, [refresh]);
   const handleSnapshot = useCallback((nextSnapshot: LiveSnapshot) => {
-    setSnapshot(nextSnapshot);
+    publishSnapshot(nextSnapshot);
     setError("");
-  }, []);
+  }, [publishSnapshot]);
   const handleMalformedSnapshot = useCallback(() => setError("实时数据格式无效。"), []);
   const connectionStatus = useLiveEvents(
     "/api/events",

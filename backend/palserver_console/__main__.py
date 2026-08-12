@@ -62,23 +62,28 @@ def main(argv: list[str] | None = None) -> None:
     stored_port = database.get_setting("network.port")
     if stored_port is not None:
         settings = replace(settings, port=int(stored_port))
-    host = "0.0.0.0" if AuthStore(database, settings).admin_password_configured() else "127.0.0.1"
-    local_url = f"http://127.0.0.1:{settings.port}"
+    preferred_host = (
+        "0.0.0.0"
+        if AuthStore(database, settings).admin_password_configured()
+        else "127.0.0.1"
+    )
     should_open_browser = (
         not args.no_browser and os.environ.get("PALSERVER_CONSOLE_NO_BROWSER") != "1"
     )
-    try:
-        _require_available_port(host, settings.port)
-    except RuntimeError:
-        if not _is_running_instance(local_url):
-            raise
+    host, local_url, reuse_existing = _select_listener(preferred_host, settings.port)
+    if reuse_existing:
         print(
             f"PalServerConsole is already running at {local_url}. "
             "Reusing the existing instance."
         )
         if should_open_browser:
-            _open_local_url(local_url)
+            _open_local_url(_browser_url(local_url))
         return
+    if host == "::1":
+        print(
+            f"Port {settings.port} is occupied on IPv4 by another service. "
+            f"Starting PalServerConsole on IPv6 loopback at {local_url}."
+        )
     if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
     uvicorn.run(create_app(settings), host=host, port=settings.port, workers=1, log_level="info")
@@ -130,7 +135,7 @@ def _open_when_ready(url: str, max_attempts: int = 80, delay_seconds: float = 0.
         try:
             with urllib.request.urlopen(f"{url}/api/health", timeout=0.5) as response:
                 if _is_own_health_response(response):
-                    _open_local_url(url)
+                    _open_local_url(_browser_url(url))
                     return
         except (OSError, json.JSONDecodeError):
             pass
@@ -157,8 +162,39 @@ def _is_running_instance(url: str) -> bool:
         return False
 
 
+def _local_url(host: str, port: int) -> str:
+    url_host = f"[{host}]" if ":" in host else host
+    return f"http://{url_host}:{port}"
+
+
+def _browser_url(service_url: str) -> str:
+    return f"{service_url.rstrip('/')}/?app=palserver-console"
+
+
+def _select_listener(host: str, port: int) -> tuple[str, str, bool]:
+    primary_url = _local_url("127.0.0.1" if host == "0.0.0.0" else host, port)
+    try:
+        _require_available_port(host, port)
+    except RuntimeError as primary_error:
+        if _is_running_instance(primary_url):
+            return host, primary_url, True
+        if host == "::1":
+            raise
+
+        ipv6_url = _local_url("::1", port)
+        try:
+            _require_available_port("::1", port)
+        except RuntimeError:
+            if _is_running_instance(ipv6_url):
+                return "::1", ipv6_url, True
+            raise primary_error from None
+        return "::1", ipv6_url, False
+    return host, primary_url, False
+
+
 def _require_available_port(host: str, port: int) -> None:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+    family = socket.AF_INET6 if ":" in host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as probe:
         try:
             probe.bind((host, port))
         except OSError as error:

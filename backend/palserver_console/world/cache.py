@@ -332,37 +332,158 @@ def query_cache(
             f"SELECT * FROM {table}{where} ORDER BY {order} LIMIT ? OFFSET ?",
             (*parameters, page_size, (page - 1) * page_size),
         ).fetchall()
-        return [_public_row(dict(row)) for row in rows], total
+        public_rows = [_public_row(dict(row)) for row in rows]
+        if resource == "players":
+            _add_player_guild_names(connection, public_rows)
+        return public_rows, total
     finally:
         connection.close()
 
 
-def player_detail(path: Path, player_id: str) -> dict[str, object] | None:
+def entity_detail(path: Path, resource: str, entity_id: str) -> dict[str, object] | None:
     connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        row = connection.execute("SELECT * FROM players WHERE id = ?", (player_id,)).fetchone()
-        if row is None:
-            return None
-        result = _public_row(dict(row))
-        result["pals"] = [
-            _public_row(dict(item))
-            for item in connection.execute(
-                "SELECT * FROM pals WHERE owner_player_id = ? ORDER BY rowid LIMIT 200",
-                (player_id,),
-            ).fetchall()
-        ]
-        result["inventory"] = [
-            _public_row(dict(item))
-            for item in connection.execute(
-                "SELECT * FROM inventory_items WHERE owner_id = ? "
-                "ORDER BY container_id, slot_index LIMIT 200",
-                (player_id,),
-            ).fetchall()
-        ]
-        return result
+        if resource == "players":
+            return _player_detail(connection, entity_id)
+        if resource == "pals":
+            return _pal_detail(connection, entity_id)
+        if resource == "guilds":
+            return _guild_detail(connection, entity_id)
+        if resource == "bases":
+            return _base_detail(connection, entity_id)
+        raise ValueError("Unknown entity resource.")
     finally:
         connection.close()
+
+
+def _player_detail(connection: sqlite3.Connection, player_id: str) -> dict[str, object] | None:
+    row = connection.execute("SELECT * FROM players WHERE id = ?", (player_id,)).fetchone()
+    if row is None:
+        return None
+    result = _public_row(dict(row))
+    pals = _rows(
+        connection,
+        "SELECT * FROM pals WHERE owner_player_id = ? ORDER BY rowid LIMIT 200",
+        (player_id,),
+    )
+    result["pals"] = pals
+    result["partyPals"] = [
+        pal for pal in pals if pal.get("containerId") == result.get("partyContainerId")
+    ]
+    result["storagePals"] = [
+        pal for pal in pals if pal.get("containerId") == result.get("storageContainerId")
+    ]
+    result["inventory"] = _rows(
+        connection,
+        "SELECT * FROM inventory_items WHERE owner_id = ? "
+        "ORDER BY container_id, slot_index LIMIT 200",
+        (player_id,),
+    )
+    result["guild"] = _reference(connection, "guilds", result.get("guildId"))
+    return result
+
+
+def _pal_detail(connection: sqlite3.Connection, pal_id: str) -> dict[str, object] | None:
+    row = connection.execute("SELECT * FROM pals WHERE id = ?", (pal_id,)).fetchone()
+    if row is None:
+        return None
+    result = _public_row(dict(row))
+    result["owner"] = _reference(connection, "players", result.get("ownerPlayerId"))
+    result["base"] = _reference(connection, "bases", result.get("baseId"))
+    result["container"] = _reference(connection, "containers", result.get("containerId"))
+    return result
+
+
+def _guild_detail(connection: sqlite3.Connection, guild_id: str) -> dict[str, object] | None:
+    row = connection.execute("SELECT * FROM guilds WHERE id = ?", (guild_id,)).fetchone()
+    if row is None:
+        return None
+    result = _public_row(dict(row))
+    result["members"] = _rows(
+        connection,
+        "SELECT id, name, level, guild_id FROM players WHERE guild_id = ? "
+        "ORDER BY name COLLATE NOCASE LIMIT 200",
+        (guild_id,),
+    )
+    result["bases"] = _rows(
+        connection,
+        "SELECT id, name, guild_id, worker_container_id, x, y, z FROM bases "
+        "WHERE guild_id = ? ORDER BY name COLLATE NOCASE LIMIT 200",
+        (guild_id,),
+    )
+    return result
+
+
+def _base_detail(connection: sqlite3.Connection, base_id: str) -> dict[str, object] | None:
+    row = connection.execute("SELECT * FROM bases WHERE id = ?", (base_id,)).fetchone()
+    if row is None:
+        return None
+    result = _public_row(dict(row))
+    result["guild"] = _reference(connection, "guilds", result.get("guildId"))
+    result["workers"] = _rows(
+        connection,
+        "SELECT * FROM pals WHERE base_id = ? AND assignment = 'base_worker' "
+        "ORDER BY rowid LIMIT 200",
+        (base_id,),
+    )
+    result["inventory"] = _rows(
+        connection,
+        "SELECT * FROM inventory_items WHERE base_id = ? "
+        "ORDER BY container_id, slot_index LIMIT 200",
+        (base_id,),
+    )
+    return result
+
+
+def _rows(
+    connection: sqlite3.Connection, query: str, parameters: tuple[object, ...]
+) -> list[dict[str, object]]:
+    return [_public_row(dict(item)) for item in connection.execute(query, parameters).fetchall()]
+
+
+def _add_player_guild_names(
+    connection: sqlite3.Connection, rows: list[dict[str, object]]
+) -> None:
+    guild_ids = sorted(
+        {
+            guild_id
+            for row in rows
+            if isinstance(guild_id := row.get("guildId"), str) and guild_id
+        }
+    )
+    if not guild_ids:
+        return
+    placeholders = ", ".join("?" for _ in guild_ids)
+    names = {
+        str(guild_id): str(name)
+        for guild_id, name in connection.execute(
+            f"SELECT id, name FROM guilds WHERE id IN ({placeholders})", guild_ids
+        ).fetchall()
+    }
+    for row in rows:
+        guild_id = row.get("guildId")
+        if isinstance(guild_id, str) and guild_id in names:
+            row["guildName"] = names[guild_id]
+
+
+def _reference(
+    connection: sqlite3.Connection, table: str, entity_id: object
+) -> dict[str, object] | None:
+    if not isinstance(entity_id, str) or not entity_id:
+        return None
+    columns = {
+        "players": "id, name, level, guild_id",
+        "guilds": "id, name, member_count, base_count",
+        "bases": "id, name, guild_id, worker_container_id, x, y, z",
+        "containers": "id, kind, owner_id, guild_id, base_id, slot_count",
+    }
+    if table not in columns:
+        raise ValueError("Unknown reference table.")
+    row = connection.execute(
+        f"SELECT {columns[table]} FROM {table} WHERE id = ?", (entity_id,)
+    ).fetchone()
+    return _public_row(dict(row)) if row else None
 
 
 def _player_profiles(properties: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:

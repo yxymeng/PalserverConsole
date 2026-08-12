@@ -35,6 +35,7 @@ EXPECTED_API_CONTRACT = {
     "GET /api/server/settings",
     "GET /api/shell/status",
     "GET /api/world/players/{player_id}",
+    "GET /api/world/{resource}/{entity_id}",
     "GET /api/world/snapshots/current",
     "GET /api/world/storage/cleanup-preview",
     "GET /api/world/{resource}",

@@ -18,7 +18,7 @@ from typing import Any
 from ..config import ProfileError, ServerProfile
 from ..persistence import Database
 from ..steam import is_reparse_point
-from .cache import inspect_storage, player_detail, query_cache, validate_cache_file
+from .cache import entity_detail, inspect_storage, query_cache, validate_cache_file
 
 DEFAULT_SNAPSHOT_RETENTION_COUNT = 8
 DEFAULT_SNAPSHOT_RETENTION_BYTES = 4 * 1024 * 1024 * 1024
@@ -372,9 +372,24 @@ class WorldSnapshotService:
         }
 
     def get_player(self, player_id: str) -> dict[str, object]:
-        result = player_detail(self._current_cache(), player_id)
+        result = entity_detail(self._current_cache(), "players", player_id)
         if result is None:
             raise WorldDataError("PLAYER_NOT_FOUND", "玩家不存在于当前存档缓存。")
+        state = self.status()
+        return {
+            **result,
+            "source": state["source"],
+            "observedAt": state["observedAt"],
+            "stale": state["stale"],
+            "errorCode": state["errorCode"],
+        }
+
+    def get_entity(self, resource: str, entity_id: str) -> dict[str, object]:
+        if resource not in {"players", "pals", "guilds", "bases"}:
+            raise WorldDataError("WORLD_RESOURCE_NOT_FOUND", "世界数据类型不存在。")
+        result = entity_detail(self._current_cache(), resource, entity_id)
+        if result is None:
+            raise WorldDataError("WORLD_ENTITY_NOT_FOUND", "实体不存在于当前存档缓存。")
         state = self.status()
         return {
             **result,

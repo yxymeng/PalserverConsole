@@ -13,10 +13,19 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     executablePath: "C:\\PalServer\\PalServer.exe",
     instanceId: "default",
   } }));
+  await page.route("**/api/operations/health", (route) => route.fulfill({ json: {
+    observedAt: 1_786_000_000,
+    capacity: { state: "ok", freeBytes: 100_000_000, totalBytes: 200_000_000, minimumFreeBytes: 1, copyBytes: 1, requiredFreeBytes: 1, warningFreeBytes: 1, sourceErrorCode: null, errorCode: null },
+    directories: [],
+    world: { state: "healthy", lastSuccessAt: 1_786_000_000, snapshotId: null, parsing: false, errorCode: null, cacheSizeBytes: 0 },
+    backups: { state: "healthy", lastSuccessAt: 1_786_000_000, itemCount: 0, validCount: 0, invalidCount: 0, totalBytes: 0, errorCode: null },
+    background: [],
+    alerts: [],
+  } }));
   const liveSnapshot = {
     info: { data: { version: "v0.6.1", worldName: "测试世界" }, source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
     players: { data: [], source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
-    metrics: { data: { server: { serverFps: 60 }, process: { pids: [], cpuPercent: 0, memoryBytes: 0, diskReadBytes: 0, diskWriteBytes: 0 } }, source: "rest+process", observedAt: 1_786_000_000, stale: false, errorCode: null },
+    metrics: { data: { server: { serverFps: 60 }, process: { pids: [], cpuPercent: 0, memoryBytes: 0, diskReadBytes: 0, diskWriteBytes: 0, startedAt: 1_786_000_000 } }, source: "rest+process", observedAt: 1_786_000_000, stale: false, errorCode: null },
     settings: { data: {}, source: "rest", observedAt: 1_786_000_000, stale: false, errorCode: null },
   };
   for (const key of ["info", "players", "metrics", "settings"] as const) {
@@ -50,15 +59,35 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
   } }));
 
   await page.goto("/");
+  const primaryNavigation = page.getByRole("navigation", { name: "主导航" });
+  await expect(primaryNavigation.getByRole("button")).toHaveCount(4);
+  await expect(primaryNavigation).toContainText("首页");
+  await expect(primaryNavigation).toContainText("世界数据");
+  await expect(primaryNavigation).toContainText("配置");
+  await expect(primaryNavigation).toContainText("维护");
+  await expect(primaryNavigation).not.toContainText("服务器管理");
+  await expect(primaryNavigation).not.toContainText("官方备份");
+  await expect(primaryNavigation).not.toContainText("运营审计");
   if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
-  await page.getByRole("button", { name: "服务器管理" }).click();
-  await expect(page.getByRole("heading", { name: "PalServer 安装" })).toBeVisible();
+  await page.getByRole("button", { name: "首页" }).click();
+  const hero = page.getByLabel("首页主视觉");
+  await expect(hero).toBeVisible();
+  await expect(hero.locator(".hero-character")).toHaveAttribute("src", "/hero-character-placeholder.svg");
+  await expect(page.getByRole("heading", { name: "服务器控制" })).toBeVisible();
+  const homeStatus = page.getByLabel("PalServer 当前状态");
+  await expect(homeStatus).toContainText("当前世界 / 实例");
+  await expect(homeStatus).toContainText("测试世界");
+  await expect(homeStatus).toContainText("在线玩家");
+  await expect(homeStatus).toContainText("进程 CPU");
+  await expect(homeStatus).toContainText("进程内存");
+  await expect(homeStatus).toContainText("运行告警");
 
   await page.getByRole("button", { name: "启动" }).click();
-  await expect(page.getByRole("alert")).toContainText("OPERATION_IN_PROGRESS");
+  await expect(page.getByText("OPERATION_IN_PROGRESS")).toBeVisible();
   await page.getByRole("button", { name: "启动" }).click();
   await expect(page.getByText("start · process_running")).toBeVisible({ timeout: 5_000 });
   await expect(page.getByText("succeeded")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
+  await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: testInfo.outputPath(`m8-operation-${testInfo.project.name}.png`), fullPage: true });
 });

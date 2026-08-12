@@ -56,6 +56,23 @@ def router(deps: AppDependencies) -> APIRouter:
             status = 404 if error.code == "PLAYER_NOT_FOUND" else 503
             return error_response(status, error.code, str(error))
 
+    @api.get("/api/world/{resource}/{entity_id}", tags=["world"], response_model=None)
+    def world_entity(
+        resource: str, entity_id: str, request: Request
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            return deps.world.get_entity(resource, entity_id)
+        except WorldDataError as error:
+            status = (
+                404
+                if error.code in {"WORLD_ENTITY_NOT_FOUND", "WORLD_RESOURCE_NOT_FOUND"}
+                else 503
+            )
+            return error_response(status, error.code, str(error))
+
     @api.get("/api/world/{resource}", tags=["world"], response_model=None)
     def world_resource(
         resource: str,

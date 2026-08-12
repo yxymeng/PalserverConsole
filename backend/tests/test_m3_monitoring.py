@@ -5,6 +5,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
@@ -16,6 +17,7 @@ from palserver_console.main import create_app
 from palserver_console.monitoring import (
     MonitorCoordinator,
     PalServerRestClient,
+    ProcessMetricsCollector,
     SensitiveValue,
     ServerConnectionConfig,
     SourceError,
@@ -91,6 +93,39 @@ class FakeProcessMetrics:
             "diskReadBytes": 10,
             "diskWriteBytes": 20,
         }, None
+
+
+class FakeProcess:
+    def __init__(self, pid: int, started_at: float) -> None:
+        self.pid = pid
+        self.started_at = started_at
+
+    def cpu_percent(self, interval: None = None) -> float:
+        assert interval is None
+        return 12.5
+
+    def memory_info(self) -> SimpleNamespace:
+        return SimpleNamespace(rss=1024)
+
+    def io_counters(self) -> SimpleNamespace:
+        return SimpleNamespace(read_bytes=10, write_bytes=20)
+
+    def create_time(self) -> float:
+        return self.started_at
+
+
+def test_process_metrics_include_oldest_process_start_time() -> None:
+    collector = ProcessMetricsCollector(
+        process_lookup=lambda _: cast(
+            Any,
+            [FakeProcess(123, 1_786_000_120.8), FakeProcess(456, 1_786_000_000.2)],
+        )
+    )
+
+    metrics, error = collector.collect(Path("C:/test/PalServer.exe"))
+
+    assert error is None
+    assert metrics["startedAt"] == 1_786_000_000
 
 
 def _monitor() -> tuple[MonitorCoordinator, FakeRest, FakeRcon]:

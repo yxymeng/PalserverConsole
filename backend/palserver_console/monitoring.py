@@ -358,8 +358,10 @@ class ProcessMetricsCollector:
                 "memoryBytes": 0,
                 "diskReadBytes": 0,
                 "diskWriteBytes": 0,
+                "startedAt": None,
             }, "PROCESS_NOT_RUNNING"
         cpu = memory = read_bytes = write_bytes = 0.0
+        started_at: float | None = None
         pids: list[int] = []
         for process in processes:
             try:
@@ -371,12 +373,21 @@ class ProcessMetricsCollector:
                 write_bytes += float(io.write_bytes)
             except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                 continue
+            try:
+                process_started_at = float(process.create_time())
+                if process_started_at > 0 and (
+                    started_at is None or process_started_at < started_at
+                ):
+                    started_at = process_started_at
+            except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+                continue
         return {
             "pids": pids,
             "cpuPercent": round(cpu, 2),
             "memoryBytes": int(memory),
             "diskReadBytes": int(read_bytes),
             "diskWriteBytes": int(write_bytes),
+            "startedAt": int(started_at) if started_at is not None else None,
         }, None if pids else "PROCESS_METRICS_UNAVAILABLE"
 
     @staticmethod

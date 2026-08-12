@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -19,7 +20,12 @@ from palserver_console.config import AppSettings, ProfileError, ServerProfileSer
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import verify_stable_parse
-from palserver_console.world.cache import build_world_cache, query_cache, read_cache_metadata
+from palserver_console.world.cache import (
+    build_world_cache,
+    entity_detail,
+    query_cache,
+    read_cache_metadata,
+)
 from palserver_console.world.service import WorldDataError, WorldSnapshotService
 
 
@@ -287,6 +293,39 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     }
 
 
+def test_player_list_includes_linked_guild_name(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    player_id = str(uuid.UUID(int=300))
+    guild_id = str(uuid.UUID(int=500))
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
+            (guild_id, "测试工会", 1, 0, "{}"),
+        )
+        connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
+
+    rows, total = query_cache(cache, "players", page=1, page_size=50)
+
+    assert total == 1
+    assert rows[0]["guildName"] == "测试工会"
+
+
+def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    pal_id = str(uuid.UUID(int=401))
+
+    detail = entity_detail(cache, "pals", pal_id)
+
+    assert detail is not None
+    assert detail["owner"]["name"] == "测试玩家"
+    assert detail["base"]["name"] == "据点甲"
+    assert detail["container"]["kind"] == "base_workers"
+
+
 def test_cache_and_snapshot_keep_source_collection_and_parse_times(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -372,12 +411,15 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     ) as client:
         response = client.get("/api/world/bases?page=1&pageSize=1")
         rejected = client.get("/api/world/pals?pageSize=201")
+        pal_detail = client.get(f"/api/world/pals/{uuid.UUID(int=401)}")
 
     assert response.status_code == 200
     assert response.json()["total"] == 2
     assert len(response.json()["items"]) == 1
     assert rejected.status_code == 422
     assert rejected.json()["errorCode"] == "INVALID_WORLD_PAGE"
+    assert pal_detail.status_code == 200
+    assert pal_detail.json()["owner"]["name"] == "测试玩家"
 
 
 def test_source_change_discards_snapshot_before_parser(

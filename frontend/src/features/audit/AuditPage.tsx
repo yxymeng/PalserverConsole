@@ -58,9 +58,9 @@ export function AuditPage({ auth }: { auth: AuthStatus }) {
   }
 
   const totalPages = events ? Math.max(1, Math.ceil(events.total / pageSize)) : 1;
-  return <div className="page-stack audit-page">
+  return <section className="maintenance-section maintenance-audit" id="maintenance-audit" aria-labelledby="maintenance-audit-title">
     <section className="audit-header">
-      <div><h2>运营审计</h2><p>仅记录管理动作、玩家进出、可识别日志事件和错误结果。</p></div>
+      <div><h2 id="maintenance-audit-title">运营审计</h2><p>包含生命周期操作、配置修改、备份/恢复、SteamCMD 和其他管理员写操作。</p></div>
       <div className="audit-export"><button className="quiet-button" onClick={() => exportEvents("json")}><Download size={17} />JSON</button><button className="quiet-button" onClick={() => exportEvents("csv")}><Download size={17} />CSV</button></div>
     </section>
     <section className="audit-filters">
@@ -77,7 +77,7 @@ export function AuditPage({ auth }: { auth: AuthStatus }) {
     </section>
     <section className="audit-footer"><span>共 {events?.total || 0} 条，第 {events?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
     <section className="audit-retention"><form onSubmit={saveRetention}><label htmlFor="audit-retention">保留天数（0 表示不限）</label><input id="audit-retention" type="number" min={0} max={3650} value={retention} onChange={(event) => setRetention(event.target.value)} /><button className="primary-button" type="submit">保存策略</button></form></section>
-  </div>;
+  </section>;
 }
 
 function auditEventLabel(type: string) { const labels: Record<string, string> = { "player.joined": "玩家进入", "player.left": "玩家退出", "chat.message": "聊天", "command.executed": "命令", "server.operation": "服务器操作", "live.announce": "公告", "live.kick": "踢出", "live.ban": "封禁", "live.unban": "解封", "config.server_settings": "服务器配置", "config.network": "网络配置", "audit.retention": "审计策略" }; return labels[type] || type; }

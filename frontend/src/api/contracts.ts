@@ -64,6 +64,7 @@ export type ProcessMetrics = {
   memoryBytes: number;
   diskReadBytes: number;
   diskWriteBytes: number;
+  startedAt?: number | null;
 };
 export type AuditItem = {
   id: number;

@@ -3,8 +3,10 @@ import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } 
 import type { AuthStatus, ConfigDocument } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
+import { ConsolePortSettings } from "../server/ConsolePortSettings";
+import { ServerSettingsPanel } from "../server/ServerSettingsPanel";
 
-type ConfigEditorTab = "panel" | "world";
+type ConfigEditorTab = "common" | "advanced";
 type ConfigCategoryId =
   | "server"
   | "runtime"
@@ -42,6 +44,7 @@ const CONFIG_LABELS: Record<string, string> = {
   ServerDescription: "服务器描述",
   AdminPassword: "管理员密码",
   ServerPassword: "服务器密码",
+  Difficulty: "难度",
   PublicIP: "公共 IP",
   PublicPort: "公共端口",
   ServerPlayerMaxNum: "服务器玩家最大数量",
@@ -165,7 +168,7 @@ const CONFIG_DESCRIPTIONS: Record<string, string> = {
   DenyTechnologyList: "选择需要从科技树中禁用的项目。",
 };
 
-type ConfigCategoryGroup = { id: ConfigCategoryId; tab: ConfigEditorTab; label: string; description: string; keys: string[] };
+type ConfigCategoryGroup = { id: ConfigCategoryId; tab: "panel" | "world"; label: string; description: string; keys: string[] };
 
 const CONFIG_CATEGORY_GROUPS: ConfigCategoryGroup[] = [
   { id: "server", tab: "panel", label: "基本信息", description: "名称、描述、密码、地区与玩家人数", keys: ["ServerName", "ServerDescription", "AdminPassword", "ServerPassword", "PublicIP", "PublicPort", "ServerPlayerMaxNum", "Region"] },
@@ -187,10 +190,16 @@ const CONFIG_CATEGORY_GROUPS: ConfigCategoryGroup[] = [
   { id: "advanced", tab: "world", label: "高级字段", description: "版本化 schema 外的配置键", keys: [] },
 ];
 
+const COMMON_CONFIG_KEYS = [
+  "ServerName", "ServerDescription", "ServerPassword", "AdminPassword", "ServerPlayerMaxNum", "PublicPort", "Difficulty",
+  "ExpRate", "PalCaptureRate", "EnemyDropItemRate", "PalEggDefaultHatchingTime", "DayTimeSpeedRate", "NightTimeSpeedRate",
+  "PlayerDamageRateAttack", "PlayerDamageRateDefense", "PalDamageRateAttack", "PalDamageRateDefense",
+  "PlayerStomachDecreaceRate", "PlayerStaminaDecreaceRate", "PalStomachDecreaceRate", "PalStaminaDecreaceRate",
+  "DeathPenalty", "bIsPvP", "bEnablePlayerToPlayerDamage", "bEnableFriendlyFire",
+];
+
 const CONFIG_CATEGORY_BY_KEY: Record<string, ConfigCategoryId> = {};
-const CONFIG_TAB_BY_CATEGORY: Partial<Record<ConfigCategoryId, ConfigEditorTab>> = {};
 for (const group of CONFIG_CATEGORY_GROUPS) {
-  CONFIG_TAB_BY_CATEGORY[group.id] = group.tab;
   for (const key of group.keys) CONFIG_CATEGORY_BY_KEY[key] = group.id;
 }
 
@@ -303,10 +312,6 @@ const CONFIG_BOOLEAN_KEYS = new Set([
 
 function configCategoryFor(key: string): ConfigCategoryId {
   return CONFIG_CATEGORY_BY_KEY[key] || "advanced";
-}
-
-function configTabFor(key: string): ConfigEditorTab {
-  return CONFIG_TAB_BY_CATEGORY[configCategoryFor(key)] ?? "world";
 }
 
 function configLabelFor(key: string): string {
@@ -551,12 +556,12 @@ function ConfigFieldEditor({
   );
 }
 
-export function ConfigPage({ auth }: { auth: AuthStatus }) {
+export function ConfigPage({ auth, onAuthChanged }: { auth: AuthStatus; onAuthChanged: () => void }) {
   const [document, setDocument] = useState<ConfigDocument | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [diff, setDiff] = useState<{ hasDraft: boolean; conflict: Record<string, unknown> | null; text: string; fields: { key: string; current: string; draft: string }[] } | null>(null);
   const [query, setQuery] = useState("");
-  const [editorTab, setEditorTab] = useState<ConfigEditorTab>("panel");
+  const [editorTab, setEditorTab] = useState<ConfigEditorTab>("common");
   const [selectedCategory, setSelectedCategory] = useState<ConfigCategoryId>("server");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -593,7 +598,12 @@ export function ConfigPage({ auth }: { auth: AuthStatus }) {
     catch (caught) { setError(caught instanceof Error ? caught.message : "重启应用失败"); }
   }
   async function openFolder() { try { await requestJson("/api/config/open-folder", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
-  if (!document) return <div className="page-stack"><p className="muted">正在读取 PalWorldSettings.ini...</p></div>;
+  const consoleAndInstanceSettings = <section className="config-console-settings">
+    <div className="section-heading"><div><h2>控制台与实例设置</h2><p>安装路径、World 绑定、启动参数和控制台端口集中在这里。</p></div></div>
+    <ServerSettingsPanel auth={auth} />
+    <ConsolePortSettings auth={auth} onAuthChanged={onAuthChanged} />
+  </section>;
+  if (!document) return <div className="page-stack config-page">{consoleAndInstanceSettings}{error ? <p className="form-error" role="alert">{error}</p> : <p className="muted">正在读取 PalWorldSettings.ini...</p>}</div>;
 
   const allKeys = [
     ...document.schema.filter((key) => key === "AdminPassword" || key in fields),
@@ -603,45 +613,47 @@ export function ConfigPage({ auth }: { auth: AuthStatus }) {
   CONFIG_CATEGORY_GROUPS.forEach((group, groupIndex) => group.keys.forEach((key, keyIndex) => configOrder.set(key, groupIndex * 1000 + keyIndex)));
   const orderedKeys = [...allKeys].sort((left, right) => (configOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (configOrder.get(right) ?? Number.MAX_SAFE_INTEGER));
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const activeGroups = CONFIG_CATEGORY_GROUPS.filter((group) => group.tab === editorTab);
-  const visibleKeys = orderedKeys.filter((key) => {
-    const inTab = Boolean(normalizedQuery) || configTabFor(key) === editorTab;
-    const inCategory = Boolean(normalizedQuery) || configCategoryFor(key) === selectedCategory;
+  const commonKeys = COMMON_CONFIG_KEYS.filter((key) => allKeys.includes(key));
+  const commonKeySet = new Set(commonKeys);
+  const advancedKeys = orderedKeys.filter((key) => !commonKeySet.has(key));
+  const activeGroups = CONFIG_CATEGORY_GROUPS.filter((group) => advancedKeys.some((key) => configCategoryFor(key) === group.id));
+  const visibleKeys = (editorTab === "common" ? commonKeys : advancedKeys).filter((key) => {
+    const inCategory = editorTab === "common" || Boolean(normalizedQuery) || configCategoryFor(key) === selectedCategory;
     const searchable = `${configLabelFor(key)} ${key} ${CONFIG_DESCRIPTIONS[key] || ""}`.toLocaleLowerCase();
-    return inTab && inCategory && (!normalizedQuery || searchable.includes(normalizedQuery));
+    return inCategory && (!normalizedQuery || searchable.includes(normalizedQuery));
   });
-  const selectedGroup = CONFIG_CATEGORY_GROUPS.find((group) => group.id === selectedCategory) || CONFIG_CATEGORY_GROUPS[0];
-  const tabTotal = allKeys.filter((key) => configTabFor(key) === editorTab).length;
+  const selectedGroup = activeGroups.find((group) => group.id === selectedCategory) || activeGroups[0] || CONFIG_CATEGORY_GROUPS[0];
+  const tabTotal = editorTab === "common" ? commonKeys.length : advancedKeys.length;
   function switchEditorTab(tab: ConfigEditorTab) {
-    const firstGroup = CONFIG_CATEGORY_GROUPS.find((group) => group.tab === tab && allKeys.some((key) => configCategoryFor(key) === group.id));
     setEditorTab(tab);
     setQuery("");
-    setSelectedCategory(firstGroup?.id || (tab === "panel" ? "server" : "random"));
+    if (tab === "advanced") setSelectedCategory(activeGroups[0]?.id || "advanced");
   }
 
   return <div className="page-stack config-page">
+    {consoleAndInstanceSettings}
     <section className="config-status"><div><h2>PalWorldSettings.ini</h2><p>{document.path}</p></div><div className="config-actions">{auth.local && <button className="quiet-button" type="button" onClick={() => void openFolder()}><FolderSearch size={17} />打开配置目录</button>}<span className={document.adminPasswordConfigured ? "badge success" : "badge warning"}>AdminPassword：{document.adminPasswordConfigured ? "已配置" : "未配置"}</span></div></section>
     <div className="notice-band"><AlertTriangle size={20} /><span>运行中的 PalServer 不会被实时写入；保存草稿后可停服应用，或提交“重启并应用”。</span></div>
     {document.worldOptionPresent && <div className="warning-strip"><AlertTriangle size={19} /><span>检测到当前世界存在 WorldOption.sav，游戏内设置可能覆盖此 INI。仍可继续应用。</span></div>}
     <form className="config-form" onSubmit={saveDraft}>
       <section className="config-editor-shell">
         <div className="config-editor-tabs" role="tablist" aria-label="配置设置类型">
-          <button className={editorTab === "panel" ? "is-active" : ""} type="button" role="tab" aria-selected={editorTab === "panel"} onClick={() => switchEditorTab("panel")}>面板设置</button>
-          <button className={editorTab === "world" ? "is-active" : ""} type="button" role="tab" aria-selected={editorTab === "world"} onClick={() => switchEditorTab("world")}>世界设置</button>
+          <button className={editorTab === "common" ? "is-active" : ""} type="button" role="tab" aria-selected={editorTab === "common"} onClick={() => switchEditorTab("common")}>常用配置</button>
+          <button className={editorTab === "advanced" ? "is-active" : ""} type="button" role="tab" aria-selected={editorTab === "advanced"} onClick={() => switchEditorTab("advanced")}>高级配置</button>
         </div>
         <div className="config-editor-toolbar">
-          <label className="config-search"><Search size={19} aria-hidden="true" /><input type="search" value={query} placeholder="搜索名称或配置键" aria-label="搜索名称或配置键" onChange={(event) => setQuery(event.target.value)} /></label>
+          {editorTab === "advanced" && <label className="config-search"><Search size={19} aria-hidden="true" /><input type="search" value={query} placeholder="搜索名称或配置键" aria-label="搜索名称或配置键" onChange={(event) => setQuery(event.target.value)} /></label>}
           <span className="config-count">{normalizedQuery ? visibleKeys.length : tabTotal} 项配置</span>
         </div>
-        <div className="config-editor-layout">
-          <nav className="config-category-nav" aria-label="配置分类">
+        <div className={editorTab === "advanced" ? "config-editor-layout" : "config-editor-layout common-config-layout"}>
+          {editorTab === "advanced" && <nav className="config-category-nav" aria-label="高级配置分类">
             {activeGroups.map((group) => {
-              const count = allKeys.filter((key) => configCategoryFor(key) === group.id).length;
+              const count = advancedKeys.filter((key) => configCategoryFor(key) === group.id).length;
               return <button key={group.id} className={selectedCategory === group.id && !normalizedQuery ? "is-active" : ""} type="button" onClick={() => { setSelectedCategory(group.id); setQuery(""); }}><span>{group.label}</span><small>{count}</small></button>;
             })}
-          </nav>
+          </nav>}
           <div className="config-editor-main">
-            <header className="config-section-header"><div><p className="config-section-kicker">{normalizedQuery ? "搜索结果" : editorTab === "panel" ? "面板设置" : "世界设置"}</p><h2>{normalizedQuery ? "匹配的配置" : selectedGroup.label}</h2><p>{normalizedQuery ? `共找到 ${visibleKeys.length} 项配置。` : selectedGroup.description}</p></div><span className="config-section-total">{visibleKeys.length} 项</span></header>
+            <header className="config-section-header"><div><p className="config-section-kicker">{normalizedQuery ? "搜索结果" : editorTab === "common" ? "常用配置" : "高级配置"}</p><h2>{normalizedQuery ? "匹配的配置" : editorTab === "common" ? "日常服务器规则" : selectedGroup.label}</h2><p>{normalizedQuery ? `共找到 ${visibleKeys.length} 项配置。` : editorTab === "common" ? "仅展示日常会调整的服务器规则；完整字段可从高级配置进入。" : selectedGroup.description}</p></div><span className="config-section-total">{visibleKeys.length} 项</span></header>
             <div className="config-field-list">
               {visibleKeys.map((key) => {
                 const meta = configMetaFor(key, fields[key] || "");
@@ -655,7 +667,7 @@ export function ConfigPage({ auth }: { auth: AuthStatus }) {
                   return { ...current, [key]: document.fields[key] || "" };
                 })} />;
               })}
-              {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>没有找到匹配的配置。</p><button className="quiet-button" type="button" onClick={() => { setQuery(""); setSelectedCategory("server"); }}>清除搜索</button></div>}
+              {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>{editorTab === "common" ? "当前配置中没有可显示的常用字段。" : "没有找到匹配的配置。"}</p>{editorTab === "advanced" && <button className="quiet-button" type="button" onClick={() => { setQuery(""); setSelectedCategory(activeGroups[0]?.id || "advanced"); }}>清除搜索</button>}</div>}
             </div>
           </div>
         </div>

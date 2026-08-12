@@ -1,12 +1,10 @@
-import { Activity, Archive, Database, FileClock, FileCog, LogOut, Menu, MonitorCog, Server, X } from "lucide-react";
+import { Activity, Database, FileCog, LogOut, Menu, MonitorCog, Wrench, X } from "lucide-react";
 import { useState } from "react";
 import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { requestJson } from "../api/client";
-import { AuditPage } from "../features/audit/AuditPage";
-import { BackupsPage } from "../features/backups/BackupsPage";
 import { ConfigPage } from "../features/config/ConfigPage";
+import { MaintenancePage } from "../features/maintenance/MaintenancePage";
 import { Overview } from "../features/overview/Overview";
-import { ServerManagement } from "../features/server/ServerManagement";
 import { WorldDataPage } from "../features/world/WorldDataPage";
 import { text } from "./text";
 import { ThemeToggle } from "./ThemeToggle";
@@ -25,7 +23,7 @@ export function ConsoleShell({
   theme: Theme;
   onThemeToggle: () => void;
 }) {
-  const [active, setActive] = useState<"overview" | "server" | "audit" | "world" | "backups" | "config">("overview");
+  const [active, setActive] = useState<"overview" | "world" | "config" | "maintenance">("overview");
   const [menuOpen, setMenuOpen] = useState(false);
   return (
     <div className="app-shell">
@@ -39,22 +37,16 @@ export function ConsoleShell({
         </div>
         <nav aria-label="主导航">
           <button className={active === "overview" ? "active" : ""} onClick={() => { setActive("overview"); setMenuOpen(false); }}>
-            <Activity size={19} />{text.overview}
-          </button>
-          <button className={active === "server" ? "active" : ""} onClick={() => { setActive("server"); setMenuOpen(false); }}>
-            <Server size={19} />{text.server}
-          </button>
-          <button className={active === "audit" ? "active" : ""} onClick={() => { setActive("audit"); setMenuOpen(false); }}>
-            <FileClock size={19} />{text.audit}
+            <Activity size={19} />首页
           </button>
           <button className={active === "world" ? "active" : ""} onClick={() => { setActive("world"); setMenuOpen(false); }}>
             <Database size={19} />{text.world}
           </button>
-          <button className={active === "backups" ? "active" : ""} onClick={() => { setActive("backups"); setMenuOpen(false); }}>
-            <Archive size={19} />官方备份
-          </button>
           <button className={active === "config" ? "active" : ""} onClick={() => { setActive("config"); setMenuOpen(false); }}>
-            <FileCog size={19} />{text.config}
+            <FileCog size={19} />配置
+          </button>
+          <button className={active === "maintenance" ? "active" : ""} onClick={() => { setActive("maintenance"); setMenuOpen(false); }}>
+            <Wrench size={19} />维护
           </button>
         </nav>
         <div className="sidebar-foot">
@@ -70,7 +62,7 @@ export function ConsoleShell({
             <button className="icon-button menu-button" title="打开菜单" onClick={() => setMenuOpen(true)}><Menu size={21} /></button>
             <div>
               <p className="eyebrow">{text.product}</p>
-              <h1>{active === "overview" ? text.overview : active === "server" ? text.server : active === "audit" ? text.audit : active === "world" ? text.world : active === "backups" ? "官方备份" : text.config}</h1>
+              <h1>{active === "overview" ? "首页" : active === "world" ? text.world : active === "config" ? "配置" : "维护"}</h1>
             </div>
             <div className="topbar-actions">
               <ThemeToggle theme={theme} onToggle={onThemeToggle} />
@@ -78,12 +70,10 @@ export function ConsoleShell({
             </div>
           </div>
         </header>
-        {active === "overview" && <Overview shell={shell} auth={auth} onAuthChanged={onAuthChanged} />}
-        {active === "server" && <ServerManagement auth={auth} initialStatus={shell} />}
-        {active === "audit" && <AuditPage auth={auth} />}
+        {active === "overview" && <Overview shell={shell} auth={auth} />}
         {active === "world" && <WorldDataPage auth={auth} />}
-        {active === "backups" && <BackupsPage auth={auth} />}
-        {active === "config" && <ConfigPage auth={auth} />}
+        {active === "config" && <ConfigPage auth={auth} onAuthChanged={onAuthChanged} />}
+        {active === "maintenance" && <MaintenancePage auth={auth} />}
       </main>
     </div>
   );
