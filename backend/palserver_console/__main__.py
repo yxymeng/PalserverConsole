@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
 import socket
@@ -16,7 +15,6 @@ from contextlib import suppress
 from dataclasses import replace
 from pathlib import Path
 
-import psutil
 import uvicorn
 from fastapi.testclient import TestClient
 
@@ -24,6 +22,8 @@ from .auth import AuthStore
 from .config import AppSettings, default_settings
 from .main import create_app
 from .persistence import Database
+
+CONFLICT_FALLBACK_PORT = 18223
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None) -> None:
     should_open_browser = (
         not args.no_browser and os.environ.get("PALSERVER_CONSOLE_NO_BROWSER") != "1"
     )
-    sockets, local_url, addresses = _select_listeners(preferred_host, settings.port)
+    configured_port = settings.port
+    sockets, local_url, active_port = _select_listeners(preferred_host, configured_port)
     if not sockets:
         print(
             f"PalServerConsole is already running at {local_url}. "
@@ -82,12 +83,13 @@ def main(argv: list[str] | None = None) -> None:
         if should_open_browser:
             _open_local_url(_browser_url(local_url))
         return
-    if addresses != (preferred_host,):
-        listener_urls = ", ".join(_local_url(address, settings.port) for address in addresses)
+    if active_port != configured_port:
         print(
-            f"Port {settings.port} is occupied on IPv4 by another service. "
-            f"Starting PalServerConsole on specific IPv4 addresses: {listener_urls}."
+            f"Port {configured_port} is occupied by another service. "
+            f"Starting PalServerConsole on fallback port {active_port} at {local_url}. "
+            "The saved port setting is unchanged."
         )
+        settings = replace(settings, port=active_port)
     if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
     server = uvicorn.Server(
@@ -191,73 +193,37 @@ def _browser_url(service_url: str) -> str:
 
 def _select_listeners(
     host: str, port: int
-) -> tuple[list[socket.socket], str, tuple[str, ...]]:
+) -> tuple[list[socket.socket], str, int]:
     local_url = _local_url("127.0.0.1", port)
     if _is_running_instance(local_url):
-        return [], local_url, ()
+        return [], local_url, port
     legacy_url = _local_url("::1", port)
     if _is_running_instance(legacy_url):
-        return [], legacy_url, ()
+        return [], legacy_url, port
     try:
         listener = _bind_ipv4_socket(host, port)
     except RuntimeError as primary_error:
-        if host != "0.0.0.0":
-            if _is_running_instance(local_url):
-                return [], local_url, ()
+        if _is_running_instance(local_url):
+            return [], local_url, port
+        if port == CONFLICT_FALLBACK_PORT:
             raise primary_error from None
-        interface_addresses = _interface_ipv4_addresses() if host == "0.0.0.0" else ()
-        fallback_addresses = ("127.0.0.1", *interface_addresses)
-        listeners: list[socket.socket] = []
-        bound_addresses: list[str] = []
-        for address in fallback_addresses:
-            try:
-                listeners.append(_bind_ipv4_socket(address, port))
-                bound_addresses.append(address)
-            except RuntimeError:
-                if address == "127.0.0.1":
-                    _close_sockets(listeners)
-                    if _is_running_instance(local_url):
-                        return [], local_url, ()
-                    raise primary_error from None
-        if interface_addresses and len(bound_addresses) == 1:
-            _close_sockets(listeners)
+        fallback_url = _local_url("127.0.0.1", CONFLICT_FALLBACK_PORT)
+        if _is_running_instance(fallback_url):
+            return [], fallback_url, CONFLICT_FALLBACK_PORT
+        fallback_legacy_url = _local_url("::1", CONFLICT_FALLBACK_PORT)
+        if _is_running_instance(fallback_legacy_url):
+            return [], fallback_legacy_url, CONFLICT_FALLBACK_PORT
+        try:
+            listener = _bind_ipv4_socket(host, CONFLICT_FALLBACK_PORT)
+        except RuntimeError as fallback_error:
+            if _is_running_instance(fallback_url):
+                return [], fallback_url, CONFLICT_FALLBACK_PORT
             raise RuntimeError(
-                f"Port {port} is unavailable on every active IPv4 interface."
-            ) from None
-        return listeners, local_url, tuple(bound_addresses)
-    return [listener], local_url, (host,)
-
-
-def _is_bindable_ipv4(value: str) -> bool:
-    try:
-        address = ipaddress.ip_address(value)
-    except ValueError:
-        return False
-    blocked_networks = (
-        ipaddress.ip_network("0.0.0.0/8"),
-        ipaddress.ip_network("127.0.0.0/8"),
-        ipaddress.ip_network("169.254.0.0/16"),
-        ipaddress.ip_network("192.0.2.0/24"),
-        ipaddress.ip_network("198.18.0.0/15"),
-        ipaddress.ip_network("198.51.100.0/24"),
-        ipaddress.ip_network("203.0.113.0/24"),
-        ipaddress.ip_network("224.0.0.0/3"),
-    )
-    return isinstance(address, ipaddress.IPv4Address) and not any(
-        address in network for network in blocked_networks
-    )
-
-
-def _interface_ipv4_addresses() -> tuple[str, ...]:
-    interface_stats = psutil.net_if_stats()
-    addresses = {
-        address.address
-        for interface, interface_addresses in psutil.net_if_addrs().items()
-        if interface_stats.get(interface) is not None and interface_stats[interface].isup
-        for address in interface_addresses
-        if address.family == socket.AF_INET and _is_bindable_ipv4(address.address)
-    }
-    return tuple(sorted(addresses, key=ipaddress.ip_address))
+                f"Ports {port} and {CONFLICT_FALLBACK_PORT} are already in use. "
+                "Close the programs using them or change the PalServerConsole port."
+            ) from fallback_error
+        return [listener], fallback_url, CONFLICT_FALLBACK_PORT
+    return [listener], local_url, port
 
 
 def _bind_ipv4_socket(host: str, port: int) -> socket.socket:

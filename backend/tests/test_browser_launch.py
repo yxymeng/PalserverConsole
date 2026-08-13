@@ -6,9 +6,7 @@ import webbrowser
 from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 
-import psutil
 import pytest
 from pytest import MonkeyPatch
 
@@ -21,30 +19,28 @@ def test_browser_url_has_a_palserver_console_cache_key() -> None:
     )
 
 
-def test_select_listeners_falls_back_to_specific_ipv4_addresses(
+def test_select_listeners_uses_a_separate_port_for_an_unrelated_service(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    bound: list[str] = []
+    bound: list[tuple[str, int]] = []
 
-    def bind_ipv4_socket(host: str, _port: int) -> socket.socket:
-        bound.append(host)
-        if host == "0.0.0.0":
+    def bind_ipv4_socket(host: str, port: int) -> socket.socket:
+        bound.append((host, port))
+        if port == 8223:
             raise RuntimeError("IPv4 wildcard listener is occupied")
         return object()  # type: ignore[return-value]
 
     monkeypatch.setattr(console_main, "_bind_ipv4_socket", bind_ipv4_socket)
-    monkeypatch.setattr(console_main, "_interface_ipv4_addresses", lambda: ("192.168.50.2",))
     monkeypatch.setattr(console_main, "_is_running_instance", lambda _url: False)
 
-    sockets, local_url, addresses = console_main._select_listeners("0.0.0.0", 8223)
+    sockets, local_url, active_port = console_main._select_listeners("0.0.0.0", 8223)
 
-    assert len(sockets) == 2
-    assert local_url == "http://127.0.0.1:8223"
-    assert addresses == ("127.0.0.1", "192.168.50.2")
+    assert len(sockets) == 1
+    assert local_url == "http://127.0.0.1:18223"
+    assert active_port == 18223
     assert bound == [
-        "0.0.0.0",
-        "127.0.0.1",
-        "192.168.50.2",
+        ("0.0.0.0", 8223),
+        ("0.0.0.0", 18223),
     ]
 
 
@@ -60,7 +56,7 @@ def test_select_listeners_reuses_an_existing_ipv4_console(
     assert console_main._select_listeners("0.0.0.0", 8223) == (
         [],
         "http://127.0.0.1:8223",
-        (),
+        8223,
     )
 
 
@@ -76,69 +72,65 @@ def test_select_listeners_reuses_a_legacy_ipv6_console_during_upgrade(
     assert console_main._select_listeners("0.0.0.0", 8223) == (
         [],
         "http://[::1]:8223",
-        (),
+        8223,
     )
 
 
-@pytest.mark.parametrize(
-    ("address", "expected"),
-    [
-        ("10.0.0.5", True),
-        ("100.64.1.5", True),
-        ("192.168.50.2", True),
-        ("127.0.0.1", False),
-        ("169.254.1.5", False),
-        ("198.18.0.1", False),
-        ("203.0.113.5", False),
-    ],
-)
-def test_is_bindable_ipv4(address: str, expected: bool) -> None:
-    assert console_main._is_bindable_ipv4(address) is expected
-
-
-def test_interface_ipv4_addresses_keeps_vpn_but_excludes_meta_and_inactive(
+def test_select_listeners_reuses_an_existing_console_on_the_fallback_port(
     monkeypatch: MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        psutil,
-        "net_if_stats",
-        lambda: {
-            "Ethernet": SimpleNamespace(isup=True),
-            "Tailscale": SimpleNamespace(isup=True),
-            "Meta": SimpleNamespace(isup=True),
-            "WLAN": SimpleNamespace(isup=False),
-        },
+        console_main,
+        "_bind_ipv4_socket",
+        lambda _host, _port: (_ for _ in ()).throw(RuntimeError("occupied")),
     )
     monkeypatch.setattr(
-        psutil,
-        "net_if_addrs",
-        lambda: {
-            "Ethernet": [SimpleNamespace(family=socket.AF_INET, address="192.168.50.2")],
-            "Tailscale": [SimpleNamespace(family=socket.AF_INET, address="100.64.0.2")],
-            "Meta": [SimpleNamespace(family=socket.AF_INET, address="198.18.0.1")],
-            "WLAN": [SimpleNamespace(family=socket.AF_INET, address="192.168.60.2")],
-        },
+        console_main,
+        "_is_running_instance",
+        lambda url: url == "http://127.0.0.1:18223",
     )
 
-    assert console_main._interface_ipv4_addresses() == ("100.64.0.2", "192.168.50.2")
+    assert console_main._select_listeners("0.0.0.0", 8223) == (
+        [],
+        "http://127.0.0.1:18223",
+        18223,
+    )
 
 
-def test_select_listeners_rejects_an_unrelated_loopback_service_without_lan_password(
+def test_select_listeners_uses_loopback_on_the_fallback_port_without_lan_password(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    bound: list[str] = []
+    bound: list[tuple[str, int]] = []
 
-    def bind_ipv4_socket(host: str, _port: int) -> socket.socket:
-        bound.append(host)
-        raise RuntimeError("IPv4 loopback listener is occupied")
+    def bind_ipv4_socket(host: str, port: int) -> socket.socket:
+        bound.append((host, port))
+        if port == 8223:
+            raise RuntimeError("IPv4 loopback listener is occupied")
+        return object()  # type: ignore[return-value]
 
     monkeypatch.setattr(console_main, "_bind_ipv4_socket", bind_ipv4_socket)
     monkeypatch.setattr(console_main, "_is_running_instance", lambda _url: False)
 
-    with pytest.raises(RuntimeError, match="loopback listener is occupied"):
-        console_main._select_listeners("127.0.0.1", 8223)
+    sockets, local_url, active_port = console_main._select_listeners("127.0.0.1", 8223)
 
-    assert bound == ["127.0.0.1"]
+    assert len(sockets) == 1
+    assert local_url == "http://127.0.0.1:18223"
+    assert active_port == 18223
+    assert bound == [("127.0.0.1", 8223), ("127.0.0.1", 18223)]
+
+
+def test_select_listeners_reports_when_primary_and_fallback_ports_are_occupied(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        console_main,
+        "_bind_ipv4_socket",
+        lambda _host, _port: (_ for _ in ()).throw(RuntimeError("occupied")),
+    )
+    monkeypatch.setattr(console_main, "_is_running_instance", lambda _url: False)
+
+    with pytest.raises(RuntimeError, match="Ports 8223 and 18223 are already in use"):
+        console_main._select_listeners("127.0.0.1", 8223)
 
 
 def test_close_sockets_ignores_an_already_closed_socket() -> None:
