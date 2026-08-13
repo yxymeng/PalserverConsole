@@ -313,7 +313,7 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     }
 
 
-def test_player_list_includes_linked_guild_name(tmp_path: Path) -> None:
+def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
     build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
@@ -327,12 +327,15 @@ def test_player_list_includes_linked_guild_name(tmp_path: Path) -> None:
         connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
 
     rows, total = query_cache(cache, "players", page=1, page_size=50)
+    bases, base_total = query_cache(cache, "bases", page=1, page_size=50)
 
     assert total == 1
     assert rows[0]["guildName"] == "测试工会"
+    assert base_total == 2
+    assert {row["guildName"] for row in bases} == {"测试工会"}
 
 
-def test_pal_list_includes_owner_name_and_display_traits(tmp_path: Path) -> None:
+def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
     build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
@@ -342,6 +345,7 @@ def test_pal_list_includes_owner_name_and_display_traits(tmp_path: Path) -> None
 
     assert total == 2
     assert boss["ownerName"] == "测试玩家"
+    assert boss["baseName"] == "据点甲"
     assert boss["detail"] == {
         "gender": "EPalGenderType::Male",
         "rank": 3,

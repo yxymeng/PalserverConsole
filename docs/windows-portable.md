@@ -1,6 +1,6 @@
 # Windows 便携版
 
-Windows 便携版由 64 位 CPython 3.13 构建，并在 `Program/` 内自带 Python runtime、后端依赖和已构建的前端页面。普通使用者不需要安装 Python 或 Node.js。
+Windows 便携版由 64 位 CPython 3.13 构建，并在 `Program/` 内自带 Python runtime、后端依赖和已构建的前端页面。普通使用者不需要安装 Python 或 Node.js。发布包根目录同时包含项目 `LICENSE` 和 `THIRD_PARTY_NOTICES.md`；两者分别说明项目自有内容与第三方内容的许可边界。
 
 ## 启动
 

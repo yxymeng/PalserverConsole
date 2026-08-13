@@ -1,5 +1,7 @@
 # Third-party notices
 
+本文件用于记录第三方代码、资料和资产的来源与许可证；项目自有内容的许可证见根目录 [`LICENSE`](LICENSE)。
+
 ## Windows portable package
 
 `scripts/build-portable.ps1` generates `THIRD_PARTY_LICENSES.md` from the exact

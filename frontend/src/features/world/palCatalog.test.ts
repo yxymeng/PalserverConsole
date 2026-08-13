@@ -32,11 +32,12 @@ describe("Pal catalog presentation", () => {
     });
   });
 
-  it("presents gender, lucky, boss and other parsed traits", () => {
+  it("keeps gender separate from lucky, boss and other parsed traits", () => {
     expect(palTraitLabels({
       characterId: "BOSS_ChickenPal",
       detail: { gender: "EPalGenderType::Female", rank: 3, isLucky: true, isAwakened: true },
-    })).toEqual(["雌性", "闪光", "头目", "觉醒", "浓缩等级 3"]);
+    })).toEqual(["闪光", "头目", "觉醒", "浓缩等级 3"]);
+    expect(resolvePal({ detail: { gender: "EPalGenderType::Female" } }).gender).toBe("female");
     expect(palTraitLabels({ characterId: "GrassBoss" })).toContain("头目");
   });
 

@@ -58,8 +58,6 @@ export function resolvePal(source: PalSource): PalPresentation {
 export function palTraitLabels(source: PalSource): string[] {
   const pal = resolvePal(source);
   const labels: string[] = [];
-  if (pal.gender === "male") labels.push("雄性");
-  if (pal.gender === "female") labels.push("雌性");
   if (pal.isLucky) labels.push("闪光");
   if (pal.isBoss) labels.push("头目");
   if (pal.isPredator) labels.push("狂暴");

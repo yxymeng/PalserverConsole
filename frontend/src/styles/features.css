@@ -177,13 +177,18 @@
 .world-link { max-width: 100%; overflow: hidden; border: 0; padding: 0; color: var(--primary); background: transparent; font-weight: 650; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .world-link:hover { color: var(--primary-hover); text-decoration: underline; }
 .world-link.world-entity-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
-.world-link.world-entity-link > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.world-link.world-entity-link > .world-entity-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.world-pal-gender { display: inline-grid; flex: 0 0 auto; width: 16px; height: 16px; place-items: center; border: 1px solid currentColor; border-radius: 50%; font-size: 11px; font-weight: 800; line-height: 1; text-decoration: none; }
+.world-pal-gender.male { color: #65a9ff; background: color-mix(in srgb, #65a9ff 14%, transparent); }
+.world-pal-gender.female { color: #ff78bb; background: color-mix(in srgb, #ff78bb 14%, transparent); }
 .world-entity-avatar { display: grid; flex: 0 0 auto; width: 30px; height: 30px; place-items: center; border-radius: 50%; font-size: 13px; font-weight: 750; line-height: 1; }
 .world-player-avatar { color: #fff; background: linear-gradient(135deg, var(--primary), var(--primary-hover)); }
 .world-pal-avatar { overflow: hidden; color: var(--primary); background: var(--surface-muted); border: 1px solid var(--border); }
 .world-pal-avatar img { width: 100%; height: 100%; object-fit: cover; }
 .world-drawer-title { display: flex; min-width: 0; align-items: flex-start; gap: 10px; }
 .world-drawer-title > div { min-width: 0; }
+.world-entity-name, .world-relation-name { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.world-entity-name h2 { min-width: 0; }
 .backup-table .world-table-row > span:last-child { display: flex; gap: 8px; align-items: center; overflow: visible; }
 .backup-table .quiet-button, .backup-table .danger-button { min-height: 34px; padding: 0 10px; font-size: 12px; }
 

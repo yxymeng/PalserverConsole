@@ -6,6 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "palserver-console"
 dynamic = ["version"]
 description = "Windows-local PalServer console"
+license = "MIT"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     "fastapi==0.115.12",

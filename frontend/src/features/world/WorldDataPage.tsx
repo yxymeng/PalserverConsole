@@ -62,6 +62,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
 
   function chooseResource(next: PrimaryWorldResource) {
     setResource(next);
+    setResult(null);
     setPage(1);
     setRelationFilter("all");
     setSelected(null);
@@ -147,7 +148,8 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
           <div className="world-table-head" style={{ "--world-columns": columns.length } as CSSProperties}>{columns.map((column) => <span key={column.key}>{column.label}</span>)}</div>
           {displayedItems.length ? displayedItems.map((item, index) => <div className="world-table-row" style={{ "--world-columns": columns.length } as CSSProperties} key={String(item.id || `${resource}-${index}`)}>{columns.map((column, columnIndex) => {
             const cell = worldCell(item, column.key);
-            return <span key={column.key} data-label={column.label}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={cell} onClick={() => void openDetail(resource, String(item.id))}><EntityMarker resource={resource} item={item} /><span>{cell}</span></button> : cell}</span>;
+            const palGender = resource === "pals" && column.key === "displayName" ? genderLabel(item) : null;
+            return <span key={column.key} data-label={column.label}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} onClick={() => void openDetail(resource, String(item.id))}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && <PalGenderIcon item={item} />}</button> : cell}</span>;
           })}</div>) : <p className="empty-state">{result ? "暂无符合条件的数据。" : "正在读取世界数据..."}</p>}
         </section>
         <section className="audit-footer"><span>共 {result?.total || 0} 条，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
@@ -162,7 +164,7 @@ function EntityDrawer({ detail, loading, onClose, onNavigate }: { detail: Entity
 
   const { data, resource } = detail;
   return <aside className="world-entity-drawer" aria-label="世界实体详情">
-    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><p className="world-detail-kicker">{RESOURCE_LABELS[resource]}详情</p><h2>{entityName(data, resource)}</h2><p>{valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" onClick={onClose}><X size={18} /></button></header>
+    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><p className="world-detail-kicker">{RESOURCE_LABELS[resource]}详情</p><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p>{valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" onClick={onClose}><X size={18} /></button></header>
     <div className="world-detail-properties">
       {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} />}
       {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} />}
@@ -179,6 +181,18 @@ function EntityMarker({ resource, item }: { resource: PrimaryWorldResource; item
     return <span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"} aria-hidden="true"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>;
   }
   return null;
+}
+
+function PalGenderIcon({ item }: { item: WorldRow }) {
+  const gender = resolvePal(item).gender;
+  if (!gender) return null;
+  const label = gender === "male" ? "雄性" : "雌性";
+  return <span className={`world-pal-gender ${gender}`} title={label} aria-hidden="true">{gender === "male" ? "♂" : "♀"}</span>;
+}
+
+function genderLabel(item: WorldRow): string | null {
+  const gender = resolvePal(item).gender;
+  return gender === "male" ? "雄性" : gender === "female" ? "雌性" : null;
 }
 
 function PlayerDetail({ data, onNavigate }: DetailProps) {
@@ -234,7 +248,7 @@ function RelationButton({ title, value, resource, onNavigate }: { title: string;
 }
 
 function RelationList({ title, rows, resource, onNavigate }: { title: string; rows: WorldRow[]; resource: PrimaryWorldResource; onNavigate: DetailProps["onNavigate"] }) {
-  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item, index) => item.id ? <button className="world-relation-link" type="button" key={String(item.id)} onClick={() => onNavigate(resource, String(item.id))}>{entityName(item, resource)}<small>{String(item.id)}</small></button> : <p key={index}>{entityName(item, resource)}</p>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
+  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item, index) => item.id ? <button className="world-relation-link" type="button" key={String(item.id)} onClick={() => onNavigate(resource, String(item.id))}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && <PalGenderIcon item={item} />}</span><small>{String(item.id)}</small></button> : <p key={index}>{entityName(item, resource)}</p>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
 }
 
 function DataList({ title, rows }: { title: string; rows: WorldRow[] }) {

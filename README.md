@@ -133,6 +133,10 @@ npm.cmd run test:e2e
 
 两份资料由 `scripts\sync-pal-catalog.ps1` 固定版本生成；完整来源、许可文件和 Pocketpair 权利声明见 `frontend/public/assets/pals/NOTICE.md` 与 `THIRD_PARTY_NOTICES.md`。
 
+## 许可证
+
+本项目自有源代码、脚本和文档采用 MIT License，完整文本见 [`LICENSE`](LICENSE)。该许可不改变 `THIRD_PARTY_NOTICES.md` 与 `frontend/public/assets/pals/` 中第三方代码、资料、头像、Palworld 角色名称和游戏数据的各自权利与许可证。
+
 ## 数据与公开发布
 
 `data/`、数据库、日志、真实 `.sav`、前端构建产物、Playwright 截图、开发计划、交接记录和生成报告都由 `.gitignore` 排除。`fixtures/` 只保留安全说明和目录忽略规则；本地脱敏样本不会提交或公开分发。
