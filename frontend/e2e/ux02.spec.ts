@@ -2,7 +2,6 @@ import { expect, test } from "@playwright/test";
 
 test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在完成后隐去", async ({ page }, testInfo) => {
   let operationPoll = 0;
-  await page.on("dialog", async (dialog) => dialog.accept());
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: {
     local: true, authenticated: true, adminPasswordConfigured: true,
     csrfToken: "ux02-csrf", lanWarning: null, port: 8223,
@@ -37,6 +36,11 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   for (const key of ["info", "players", "metrics", "settings"] as const) {
     await page.route(`**/api/live/${key}`, (route) => route.fulfill({ json: liveSnapshot[key] }));
   }
+  await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: {
+    source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null,
+    snapshotId: "ux02-world", parsing: false, parseDurationMs: 120, gameTimeTicks: 110_628_000_000_000,
+    counts: { players: 8, pals: 797, guilds: 3, bases: 8 },
+  } }));
   await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
   await page.route("**/api/server/operations/stop", (route) => route.fulfill({ json: {
     operationId: "ux02-stop", kind: "stop", state: "queued", stage: "queued", errorCode: null, detail: null,
@@ -56,18 +60,66 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
 
   const control = page.getByLabel("首页服务器控制");
   const liveStatus = page.getByLabel("实时服务器状态");
+  const hostStatus = page.getByLabel("主机性能状态");
+  if (testInfo.project.name === "desktop") {
+    await expect(page.locator('.brand-mark img[src="/zoe-console-icon.png"]')).toBeVisible();
+  }
   await expect(control).toBeVisible();
   await expect(control.getByRole("button", { name: "关闭" })).toBeEnabled();
   await expect(liveStatus).toBeVisible();
   await expect(page.getByLabel("PalServer 当前状态")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "服务器状态" })).toHaveCount(0);
   await expect(page.getByText("实时监控", { exact: true })).toHaveCount(0);
-  await expect(liveStatus).toContainText("12.5%");
-  await expect(liveStatus).toContainText("4.0 MB");
-  await expect(liveStatus).toContainText("1.0 KB/秒");
-  await expect(liveStatus).toContainText("2.0 KB/秒");
+  await expect(hostStatus).toContainText("12.5%");
+  await expect(hostStatus).toContainText("4.0 MB");
+  await expect(hostStatus).toContainText("1.0 KB/秒");
+  await expect(hostStatus).toContainText("2.0 KB/秒");
+  await expect(page.getByLabel("游戏世界状态")).toContainText("128 天 1 小时");
+  await expect(page.getByLabel("游戏世界状态")).toContainText("797 / 8");
+  await expect(page.getByText("实时数据正在重连", { exact: true })).toBeVisible();
+  if (testInfo.project.name === "mobile") {
+    await expect(page.locator(".psc-player-card")).toBeVisible();
+    await expect(page.locator(".psc-player-table-wrap")).toBeHidden();
+    await page.getByRole("button", { name: "打开菜单" }).click();
+    const navigation = page.getByRole("navigation", { name: "主导航" });
+    await expect(page.locator('.brand-mark img[src="/zoe-console-icon.png"]')).toBeVisible();
+    await expect(navigation.getByRole("button")).toHaveCount(4);
+    await navigation.getByRole("button", { name: "首页" }).click();
+    await expect(navigation).toBeHidden();
+  } else {
+    await expect(page.locator(".psc-player-table-wrap")).toBeVisible();
+    await expect(page.locator(".psc-player-list")).toBeHidden();
+  }
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("light");
+  if (testInfo.project.name === "desktop") {
+    await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "首页" })).toHaveCSS("color", "rgb(45, 49, 50)");
+  }
+  await expect(control.getByRole("button", { name: "保存" })).toHaveCSS("color", "rgb(61, 105, 115)");
+  await page.screenshot({ path: testInfo.outputPath(`overview-light-${testInfo.project.name}.png`) });
+  await page.getByRole("button", { name: "切换到深色界面" }).click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
+  await expect(control.getByRole("button", { name: "关闭" })).toHaveCSS("background-color", "rgb(39, 44, 43)");
+  await page.screenshot({ path: testInfo.outputPath(`overview-dark-${testInfo.project.name}.png`) });
+  await page.getByRole("button", { name: "切换到浅色界面" }).click();
 
-  await control.getByRole("button", { name: "关闭" }).click();
+  for (const action of ["保存", "重启"] as const) {
+    const button = control.getByRole("button", { name: action });
+    if (testInfo.project.name === "mobile") await button.tap();
+    else await button.click();
+    await expect(page.getByRole("alertdialog")).toBeVisible();
+    const cancel = page.getByRole("alertdialog").getByRole("button", { name: "取消" });
+    if (testInfo.project.name === "mobile") await cancel.tap();
+    else await cancel.click();
+    await expect(page.getByRole("alertdialog")).toBeHidden();
+  }
+  const stopButton = control.getByRole("button", { name: "关闭" });
+  if (testInfo.project.name === "mobile") await stopButton.tap();
+  else await stopButton.click();
+  const confirmation = page.getByRole("alertdialog");
+  await expect(confirmation).toContainText("将先通知并保存世界");
+  const confirmStop = confirmation.getByRole("button", { name: "确认关闭" });
+  if (testInfo.project.name === "mobile") await confirmStop.tap();
+  else await confirmStop.click();
   const operationIsland = page.getByLabel("当前操作状态");
   await expect(operationIsland).toContainText("关闭服务器");
   await expect(operationIsland).toContainText("维护倒计时中，仍可取消。", { timeout: 2_500 });

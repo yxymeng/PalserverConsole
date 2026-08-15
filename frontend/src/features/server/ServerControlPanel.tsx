@@ -1,13 +1,18 @@
-import { AlertTriangle, CheckCircle2, CircleStop, LoaderCircle, Play, RefreshCw, RotateCw, Save } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleStop, Play, RefreshCw, RotateCw, Save } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { AuthStatus, Operation, ServerSettings, ShellStatus } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
+import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
+import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
+import { Button } from "../../components/ui/button";
+import { Spinner } from "../../components/ui/spinner";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 
 const ACTIVE_OPERATION_STATES = new Set(["queued", "running", "awaiting_force_confirmation"]);
 const TERMINAL_OPERATION_STATES = new Set(["succeeded", "failed", "cancelled"]);
+type ControlAction = "start" | "save" | "stop" | "restart";
 
 export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { auth: AuthStatus; initialStatus: ShellStatus | null; onStatusChange?: (status: ShellStatus) => void }) {
   const [status, setStatus] = useState(initialStatus);
@@ -16,6 +21,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingAction, setPendingAction] = useState<ControlAction | "force" | null>(null);
   const nextRequestSignal = useAbortableRequest();
 
   const publishStatus = useCallback((nextStatus: ShellStatus) => {
@@ -73,9 +79,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
     return () => window.clearTimeout(timer);
   }, [operation]);
 
-  async function begin(kind: "start" | "save" | "stop" | "restart") {
-    const labels = { start: "启动", save: "保存", stop: "关闭", restart: "重启" };
-    if (!window.confirm(`确认对 ${settings.executablePath || "当前 PalServer"} 执行“${labels[kind]}”？`)) return;
+  async function begin(kind: ControlAction) {
     setBusy(true);
     setError("");
     setMessage("");
@@ -114,7 +118,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
   }
 
   async function forceStop() {
-    if (!operation || !window.confirm(`PalServer 未能优雅退出。确认强制结束 PID ${status?.pids.join(", ") || "未知"}？`)) return;
+    if (!operation) return;
     try {
       const next = await requestJson<Operation>(`/api/server/operations/${operation.operationId}/force-stop`, {
         method: "POST",
@@ -128,17 +132,31 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
   }
 
   const operating = !!operation && ACTIVE_OPERATION_STATES.has(operation.state);
+  const confirmation = controlConfirmation(pendingAction, settings.executablePath, status?.pids || []);
   return <>
-    <section className="action-toolbar" aria-label="服务器操作">
-      <button disabled={busy || operating || status?.serverState === "running"} onClick={() => void begin("start")}><Play size={18} />启动</button>
-      <button disabled={busy || operating || status?.serverState !== "running"} onClick={() => void begin("save")}><Save size={18} />保存</button>
-      <button disabled={busy || operating || status?.serverState !== "running"} onClick={() => void begin("stop")}><CircleStop size={18} />关闭</button>
-      <button disabled={busy || operating || status?.serverState !== "running"} onClick={() => void begin("restart")}><RotateCw size={18} />重启</button>
-      <button className="icon-button bordered control-refresh" type="button" title="刷新服务器状态" onClick={() => void refresh()}><RefreshCw size={19} /></button>
+    <section className="psc-control-actions" aria-label="服务器操作">
+      <Button disabled={busy || operating || status?.serverState === "running"} onClick={() => setPendingAction("start")}><Play data-icon="inline-start" aria-hidden="true" />启动</Button>
+      <Button variant={status?.serverState === "running" ? "default" : "secondary"} disabled={busy || operating || status?.serverState !== "running"} onClick={() => setPendingAction("save")}><Save data-icon="inline-start" aria-hidden="true" />保存</Button>
+      <Button variant="outline" disabled={busy || operating || status?.serverState !== "running"} onClick={() => setPendingAction("stop")}><CircleStop data-icon="inline-start" aria-hidden="true" />关闭</Button>
+      <Button variant="outline" disabled={busy || operating || status?.serverState !== "running"} onClick={() => setPendingAction("restart")}><RotateCw data-icon="inline-start" aria-hidden="true" />重启</Button>
+      <Button variant="ghost" size="icon" type="button" title="刷新服务器状态" aria-label="刷新服务器状态" onClick={() => void refresh()}>{busy ? <Spinner /> : <RefreshCw aria-hidden="true" />}</Button>
     </section>
-    {operation && createPortal(<OperationIsland operation={operation} onCancel={cancel} onForceStop={forceStop} />, document.body)}
-    {error && <p className="form-error" role="alert">{error}</p>}
-    {message && <p className="form-success" role="status">{message}</p>}
+    {operation && createPortal(<OperationIsland operation={operation} onCancel={cancel} onForceStop={() => setPendingAction("force")} />, document.body)}
+    {error && <Alert className="psc-control-feedback" variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>服务器操作未完成</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+    {message && <Alert className="psc-control-feedback" variant="success" role="status"><CheckCircle2 aria-hidden="true" /><AlertTitle>请求已提交</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
+    <ConfirmActionDialog
+      open={pendingAction !== null}
+      title={confirmation.title}
+      description={confirmation.description}
+      confirmLabel={confirmation.confirmLabel}
+      destructive={pendingAction === "stop" || pendingAction === "restart" || pendingAction === "force"}
+      disabled={busy}
+      onOpenChange={(open) => { if (!open) setPendingAction(null); }}
+      onConfirm={() => {
+        if (pendingAction === "force") void forceStop();
+        else if (pendingAction) void begin(pendingAction);
+      }}
+    />
   </>;
 }
 
@@ -151,16 +169,26 @@ function OperationIsland({ operation, onCancel, onForceStop }: { operation: Oper
   return <section className={islandClass} aria-label="当前操作状态" aria-live="polite">
     <span className="operation-island-icon" aria-hidden="true">{operationIcon(operation)}</span>
     <div className="operation-island-copy"><span>当前操作</span><strong>{operationKindLabel(operation.kind)}</strong><small>{operationDescription(operation)}</small></div>
-    {canCancel && <button className="quiet-button operation-island-action" type="button" onClick={onCancel}>取消</button>}
-    {needsForceConfirmation && <button className="danger-button operation-island-action" type="button" onClick={onForceStop}><CircleStop size={16} />确认强制停止</button>}
+    {canCancel && <Button className="operation-island-action" variant="outline" type="button" onClick={onCancel}>取消</Button>}
+    {needsForceConfirmation && <Button className="operation-island-action" variant="destructive" type="button" onClick={onForceStop}><CircleStop data-icon="inline-start" aria-hidden="true" />确认强制停止</Button>}
   </section>;
 }
 
 function operationIcon(operation: Operation) {
-  if (operation.state === "succeeded") return <CheckCircle2 size={21} />;
-  if (operation.state === "failed" || operation.state === "awaiting_force_confirmation") return <AlertTriangle size={21} />;
-  if (operation.state === "cancelled") return <CircleStop size={21} />;
-  return <LoaderCircle className="spin" size={21} />;
+  if (operation.state === "succeeded") return <CheckCircle2 />;
+  if (operation.state === "failed" || operation.state === "awaiting_force_confirmation") return <AlertTriangle />;
+  if (operation.state === "cancelled") return <CircleStop />;
+  return <Spinner />;
+}
+
+function controlConfirmation(action: ControlAction | "force" | null, executablePath: string | null, pids: number[]) {
+  const target = executablePath || "当前 PalServer";
+  if (action === "start") return { title: "启动 PalServer？", description: `将启动 ${target}。启动完成前请保留当前页面。`, confirmLabel: "确认启动" };
+  if (action === "save") return { title: "保存当前世界？", description: `将请求 ${target} 保存世界数据，不会停止服务器。`, confirmLabel: "确认保存" };
+  if (action === "stop") return { title: "关闭 PalServer？", description: `将先通知并保存世界，然后进入 30 秒可取消倒计时，再关闭 ${target}。`, confirmLabel: "确认关闭" };
+  if (action === "restart") return { title: "重启 PalServer？", description: `将先保存并关闭 ${target}，完成后重新启动；不会隐式应用配置草稿。`, confirmLabel: "确认重启" };
+  if (action === "force") return { title: "强制结束 PalServer？", description: `PalServer 未能优雅退出。确认后将强制结束 PID ${pids.join(", ") || "未知"}。`, confirmLabel: "确认强制停止" };
+  return { title: "确认服务器操作", description: "请确认目标和影响后再继续。", confirmLabel: "确认" };
 }
 
 function operationKindLabel(kind: string) {

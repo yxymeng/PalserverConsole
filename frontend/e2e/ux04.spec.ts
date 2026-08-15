@@ -65,12 +65,15 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
 
   await page.getByRole("button", { name: "Alice" }).click();
   const drawer = page.getByLabel("世界实体详情");
+  await expect(page.locator('.world-table-row[data-selected="true"]')).toContainText("Alice");
+  if (testInfo.project.name === "mobile") await expect(drawer).toHaveAttribute("role", "dialog");
   await expect(drawer).toContainText("拥有帕鲁");
   await drawer.locator(".world-relation-section").filter({ hasText: "拥有帕鲁" }).getByRole("button", { name: /小羊/ }).click();
   await expect(drawer).toContainText("Character ID");
   await expect(drawer).toContainText("主人");
   await drawer.getByRole("button", { name: /Alice/ }).click();
   await expect(drawer).toContainText("队伍帕鲁");
+  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
 
   await page.getByRole("tab", { name: "帕鲁" }).click();
   await expect(page.locator(".world-list-panel")).toContainText("FuturePal");
@@ -90,17 +93,21 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer.locator(".world-pal-gender")).toHaveText("♀");
   await expect(drawer).toContainText("闪光 · 浓缩等级 1");
   await page.screenshot({ path: testInfo.outputPath(`ux05-${testInfo.project.name}.png`), fullPage: true });
+  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
 
   await page.getByRole("tab", { name: "工会" }).click();
   await page.getByRole("button", { name: "测试工会" }).click();
   await expect(drawer).toContainText("成员");
   await expect(drawer).toContainText("关联据点");
+  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
 
   await page.getByRole("tab", { name: "据点" }).click();
   await page.getByRole("button", { name: "据点一号" }).click();
   await expect(drawer).toContainText("工作帕鲁");
   await expect(drawer).toContainText("可明确关联的库存");
+  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
   await page.getByLabel("关联筛选").selectOption("linked");
   await page.getByLabel("排序方式").selectOption("id");
+  await expect(page.getByRole("button", { name: "清除筛选条件" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });

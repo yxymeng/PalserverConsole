@@ -182,6 +182,7 @@ def build_world_cache(
     character_containers = _list_property(world.get("CharacterContainerSaveData"))
     groups = _list_property(world.get("GroupSaveDataMap"))
     base_camps = _list_property(world.get("BaseCampSaveData"))
+    game_time_ticks = _game_time_ticks(world)
 
     group_rows, player_group = _groups(groups)
     base_rows, worker_container_to_base = _bases(base_camps)
@@ -216,6 +217,8 @@ def build_world_cache(
             "created_at": str(int(time.time())),
             "counts": json.dumps(counts, separators=(",", ":")),
         }
+        if game_time_ticks is not None:
+            metadata["game_time_ticks"] = str(game_time_ticks)
         if collected_at is not None:
             metadata["collected_at"] = str(collected_at)
         if parse_started_at is not None:
@@ -251,6 +254,18 @@ def build_world_cache(
         with suppress(Exception):
             connection.close()
     return counts
+
+
+def _game_time_ticks(world: Mapping[str, Any]) -> int | None:
+    game_time = _mapping(world.get("GameTimeSaveData"))
+    value = _scalar(game_time.get("GameDateTimeTicks"))
+    if isinstance(value, bool):
+        return None
+    try:
+        ticks = int(value)
+    except (TypeError, ValueError):
+        return None
+    return ticks if ticks >= 0 else None
 
 
 def read_cache_metadata(path: Path) -> dict[str, str]:

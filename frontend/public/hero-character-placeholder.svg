@@ -1,35 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 640" fill="none">
   <defs>
     <linearGradient id="cloak" x1="104" y1="160" x2="424" y2="576" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#F3A4FF"/>
-      <stop offset=".5" stop-color="#C85CE7"/>
-      <stop offset="1" stop-color="#61359A"/>
+      <stop stop-color="#A9EBDD"/>
+      <stop offset=".5" stop-color="#54C8B0"/>
+      <stop offset="1" stop-color="#0D806D"/>
     </linearGradient>
     <linearGradient id="core" x1="224" y1="112" x2="315" y2="243" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#FFF7FF"/>
-      <stop offset="1" stop-color="#E982FF"/>
+      <stop stop-color="#FFFDF4"/>
+      <stop offset="1" stop-color="#BDEDE1"/>
     </linearGradient>
     <filter id="glow" x="0" y="0" width="520" height="640" filterUnits="userSpaceOnUse">
       <feGaussianBlur stdDeviation="12" result="blur"/>
       <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
-  <g opacity=".42" stroke="#FFD34D" stroke-linecap="round" stroke-linejoin="round">
+  <g opacity=".72" stroke="#F1C84B" stroke-linecap="round" stroke-linejoin="round">
     <path d="m67 153 46-38-17 56 49-5-68 75 20-51-45 9 36-46Z" stroke-width="8"/>
     <path d="m411 318 34-28-12 42 36-4-48 53 14-37-33 7 25-33Z" stroke-width="6"/>
   </g>
   <g filter="url(#glow)">
     <path d="M164 539c17-124 33-202 92-245 59 43 75 121 92 245H164Z" fill="url(#cloak)"/>
-    <path d="M190 518c14-79 30-128 66-164 36 36 52 85 66 164H190Z" fill="#180C2D" fill-opacity=".65"/>
-    <path d="M181 357c-33 31-56 75-68 135l68-40 17-89-17-6ZM339 357c33 31 56 75 68 135l-68-40-17-89 17-6Z" fill="#9B4ABF"/>
+    <path d="M190 518c14-79 30-128 66-164 36 36 52 85 66 164H190Z" fill="#16483E" fill-opacity=".74"/>
+    <path d="M181 357c-33 31-56 75-68 135l68-40 17-89-17-6ZM339 357c33 31 56 75 68 135l-68-40-17-89 17-6Z" fill="#2CA58E"/>
     <circle cx="256" cy="234" r="91" fill="url(#core)"/>
-    <path d="M197 204c9-62 56-99 101-91 26 5 46 22 59 46-41-21-79-8-111 24l-49 21Z" fill="#3B1B63"/>
-    <path d="M194 237c22 8 40 20 52 38-30 3-51-6-64-28l12-10ZM318 272c13-18 31-30 52-38l12 10c-13 22-34 31-64 28Z" fill="#562585"/>
-    <path d="M226 244c8 0 14 5 14 12s-6 12-14 12-14-5-14-12 6-12 14-12ZM286 244c8 0 14 5 14 12s-6 12-14 12-14-5-14-12 6-12 14-12Z" fill="#241039"/>
-    <path d="M232 294c15 11 41 11 56 0" stroke="#7A2AA6" stroke-width="8" stroke-linecap="round"/>
-    <path d="m256 371 23 39-23 41-23-41 23-39Z" fill="#FFD34D"/>
-    <path d="m256 380 12 30-12 24-12-24 12-30Z" fill="#FFF6C9"/>
+    <path d="M197 204c9-62 56-99 101-91 26 5 46 22 59 46-41-21-79-8-111 24l-49 21Z" fill="#145B50"/>
+    <path d="M194 237c22 8 40 20 52 38-30 3-51-6-64-28l12-10ZM318 272c13-18 31-30 52-38l12 10c-13 22-34 31-64 28Z" fill="#238B78"/>
+    <path d="M226 244c8 0 14 5 14 12s-6 12-14 12-14-5-14-12 6-12 14-12ZM286 244c8 0 14 5 14 12s-6 12-14 12-14-5-14-12 6-12 14-12Z" fill="#18322D"/>
+    <path d="M232 294c15 11 41 11 56 0" stroke="#0C806D" stroke-width="8" stroke-linecap="round"/>
+    <path d="m256 371 23 39-23 41-23-41 23-39Z" fill="#F1C84B"/>
+    <path d="m256 380 12 30-12 24-12-24 12-30Z" fill="#FFF8D6"/>
   </g>
-  <path d="M131 566h258" stroke="#E982FF" stroke-opacity=".7" stroke-width="4" stroke-linecap="round"/>
-  <path d="M171 586h178" stroke="#FFD34D" stroke-opacity=".55" stroke-width="4" stroke-linecap="round"/>
+  <path d="M131 566h258" stroke="#54C8B0" stroke-opacity=".76" stroke-width="4" stroke-linecap="round"/>
+  <path d="M171 586h178" stroke="#F1C84B" stroke-opacity=".7" stroke-width="4" stroke-linecap="round"/>
 </svg>

@@ -2,16 +2,29 @@ import { AlertTriangle, CheckCircle2, Database, HardDrive, RefreshCw, ServerCog,
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AuthStatus, OperationalHealth, StorageCleanupPreview } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
+import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
+import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
+import { Button } from "../../components/ui/button";
+import { Spinner } from "../../components/ui/spinner";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatBytes } from "../../utils/format";
 import { healthStateLabel, healthStateTone, healthTime } from "./operationalHealth";
 
-export function OperationalHealthPanel({ auth }: { auth: AuthStatus }) {
+export function OperationalHealthPanel({
+  auth,
+  refreshToken = 0,
+  onHealthChange,
+}: {
+  auth: AuthStatus;
+  refreshToken?: number;
+  onHealthChange?: (health: OperationalHealth) => void;
+}) {
   const [health, setHealth] = useState<OperationalHealth | null>(null);
   const [preview, setPreview] = useState<StorageCleanupPreview | null>(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cleanupConfirmationOpen, setCleanupConfirmationOpen] = useState(false);
   const nextRequestSignal = useAbortableRequest();
 
   const load = useCallback(async () => {
@@ -19,17 +32,18 @@ export function OperationalHealthPanel({ auth }: { auth: AuthStatus }) {
     try {
       const result = await requestJson<OperationalHealth>("/api/operations/health", { signal });
       setHealth(result);
+      onHealthChange?.(result);
       setError("");
     } catch (caught) {
       if (!isAbortError(caught)) setError(caught instanceof Error ? caught.message : "运维健康状态读取失败");
     }
-  }, [nextRequestSignal]);
+  }, [nextRequestSignal, onHealthChange]);
 
   useEffect(() => {
     void load();
     const timer = window.setInterval(() => void load(), 30_000);
     return () => window.clearInterval(timer);
-  }, [load]);
+  }, [load, refreshToken]);
 
   async function previewCleanup() {
     setBusy(true); setError(""); setMessage("");
@@ -46,7 +60,6 @@ export function OperationalHealthPanel({ auth }: { auth: AuthStatus }) {
 
   async function confirmCleanup() {
     if (!preview?.previewToken || !preview.candidateCount) return;
-    if (!window.confirm(`确认清理 ${preview.candidateCount} 个控制台生成的快照/缓存项（${formatBytes(preview.totalBytes)}）？不会删除游戏存档或官方备份。`)) return;
     setBusy(true); setError(""); setMessage("");
     try {
       const result = await requestJson<{ removedBytes: number }>("/api/world/storage/cleanup", {
@@ -67,13 +80,13 @@ export function OperationalHealthPanel({ auth }: { auth: AuthStatus }) {
   return <section className="operational-health" aria-labelledby="operational-health-title">
     <div className="section-heading operational-heading">
       <div><h2 id="operational-health-title">运维健康与容量</h2><p>显示控制台运行目录、官方备份、缓存和后台任务的只读巡检结果。</p></div>
-      <button className="quiet-button" type="button" onClick={() => void load()} disabled={busy}><RefreshCw size={17} />刷新</button>
+      <Button variant="outline" type="button" onClick={() => void load()} disabled={busy}>{busy ? <Spinner /> : <RefreshCw data-icon="inline-start" aria-hidden="true" />}刷新</Button>
     </div>
-    {error && <p className="form-error" role="alert">{error}</p>}
-    {message && <p className="form-success" role="status">{message}</p>}
-    {health?.alerts.length ? <div className="operational-alerts" role="status">{health.alerts.map((alert) => <p className={`operational-alert ${alert.severity}`} key={`${alert.code}-${alert.message}`}><AlertTriangle size={17} />{alert.message}</p>)}</div> : null}
+    {error && <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>运维巡检未完成</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+    {message && <Alert variant="success" role="status"><CheckCircle2 aria-hidden="true" /><AlertTitle>运维操作已更新</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
+    {health?.alerts.length ? <div className="operational-alerts" role="status">{health.alerts.map((alert) => <Alert variant={alert.severity === "critical" ? "destructive" : "warning"} key={`${alert.code}-${alert.message}`}><AlertTriangle aria-hidden="true" /><AlertDescription>{alert.message}</AlertDescription></Alert>)}</div> : null}
     <div className="operational-summary" aria-label="关键运维状态">
-      <HealthCard icon={<HardDrive size={19} />} label="下次快照空间" state={health?.capacity.state} value={health?.capacity.freeBytes === null || health?.capacity.freeBytes === undefined ? "不可用" : formatBytes(health.capacity.freeBytes)} detail={health?.capacity.requiredFreeBytes === null || health?.capacity.requiredFreeBytes === undefined ? "无法计算安全余量" : `至少需保留 ${formatBytes(health.capacity.requiredFreeBytes)}`} />
+      <HealthCard icon={<HardDrive size={19} />} label="下次快照空间" state={health?.capacity.state} value={!health ? "正在读取" : health.capacity.freeBytes === null ? "不可用" : formatBytes(health.capacity.freeBytes)} detail={!health ? "容量巡检" : health.capacity.requiredFreeBytes === null ? "无法计算安全余量" : `至少需保留 ${formatBytes(health.capacity.requiredFreeBytes)}`} />
       <HealthCard icon={<Database size={19} />} label="最后成功解析" state={health?.world.state} value={health ? healthTime(health.world.lastSuccessAt) : "正在读取"} detail={health ? `${healthStateLabel(health.world.state)}${health.world.errorCode ? ` · ${health.world.errorCode}` : health.world.parsing ? " · 正在解析" : ""}` : "保存数据缓存"} />
       <HealthCard icon={<CheckCircle2 size={19} />} label="最后有效备份" state={health?.backups.state} value={health ? healthTime(health.backups.lastSuccessAt) : "正在读取"} detail={health ? `${healthStateLabel(health.backups.state)} · ${health.backups.validCount}/${health.backups.itemCount} 个有效` : "官方 backup/world"} />
       <HealthCard icon={<ServerCog size={19} />} label="后台任务" state={backgroundState(health)} value={health ? `${health.background.filter((item) => item.state === "healthy").length}/${health.background.length} 正常` : "正在读取"} detail={health ? health.background.map((item) => `${item.name}: ${healthStateLabel(item.state)}`).join(" · ") : "监控、审计、解析"} />
@@ -95,11 +108,21 @@ export function OperationalHealthPanel({ auth }: { auth: AuthStatus }) {
     <div className="cleanup-preview">
       <div><h3>控制台缓存清理</h3><p>仅预览并清理控制台生成的过期快照和缓存；不会删除游戏存档或官方备份。</p></div>
       <div className="cleanup-actions">
-        <button className="quiet-button" type="button" onClick={() => void previewCleanup()} disabled={busy}><Trash2 size={17} />预览清理</button>
-        {preview?.candidateCount ? <button className="danger-button" type="button" onClick={() => void confirmCleanup()} disabled={busy || !preview.previewToken}>确认清理 {preview.candidateCount} 项</button> : null}
+        <Button variant="outline" type="button" onClick={() => void previewCleanup()} disabled={busy}>{busy ? <Spinner /> : <Trash2 data-icon="inline-start" aria-hidden="true" />}预览清理</Button>
+        {preview?.candidateCount ? <Button variant="destructive" type="button" onClick={() => setCleanupConfirmationOpen(true)} disabled={busy || !preview.previewToken}>确认清理 {preview.candidateCount} 项</Button> : null}
       </div>
       {preview?.state === "ready" ? <small>预计释放 {formatBytes(preview.totalBytes)}；预览在短时间内有效，目录变化后需重新预览。</small> : null}
     </div>
+    <ConfirmActionDialog
+      open={cleanupConfirmationOpen}
+      title="清理控制台生成数据？"
+      description={`将清理 ${preview?.candidateCount || 0} 个控制台生成的快照或缓存项（${formatBytes(preview?.totalBytes || 0)}）。不会删除游戏存档或官方备份。`}
+      confirmLabel="确认清理"
+      destructive
+      disabled={busy}
+      onOpenChange={setCleanupConfirmationOpen}
+      onConfirm={() => void confirmCleanup()}
+    />
   </section>;
 }
 

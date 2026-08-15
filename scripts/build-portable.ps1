@@ -82,8 +82,9 @@ $portableLauncherSource = Join-Path $PSScriptRoot "portable-launcher.cs"
 $licenseCollector = Join-Path $PSScriptRoot "collect-third-party-licenses.py"
 $projectLicense = Join-Path $projectRoot "LICENSE"
 $thirdPartyNotices = Join-Path $projectRoot "THIRD_PARTY_NOTICES.md"
+$appIcon = Join-Path $projectRoot "branding\PalServerConsole.ico"
 
-foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $licenseCollector, $projectLicense, $thirdPartyNotices)) {
+foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $licenseCollector, $projectLicense, $thirdPartyNotices, $appIcon)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required build input is missing: $required"
     }
@@ -187,6 +188,7 @@ try {
         --onedir `
         --name "PalServerConsole" `
         --console `
+        --icon $appIcon `
         --paths (Join-Path $projectRoot "backend") `
         --add-data "$frontendDist;frontend\dist" `
         --collect-all "palworld_save_tools" `
@@ -213,7 +215,7 @@ try {
     $portableLauncher = Join-Path $packageStage "PalServerConsole.exe"
     Write-Host "[PalServerConsole] 正在生成根目录 EXE 启动器..."
     $compilerParameters = New-Object System.CodeDom.Compiler.CompilerParameters
-    $compilerParameters.CompilerOptions = "/target:exe /platform:x64 /optimize+"
+    $compilerParameters.CompilerOptions = "/target:exe /platform:x64 /optimize+ /win32icon:`"$appIcon`""
     $compilerParameters.GenerateExecutable = $true
     $compilerParameters.GenerateInMemory = $false
     $compilerParameters.OutputAssembly = $portableLauncher
