@@ -47,6 +47,9 @@ Desktop.ini
 # Local development plans, handoffs, and generated review reports
 /plan.md
 /PalServerConsole_UI_UX_Refactor_Plan.md
+/DESIGN.md
+/PRODUCT.md
+/.impeccable/
 /docs/handoffs/
 /docs/reports/
 /docs/performance-baseline.md
