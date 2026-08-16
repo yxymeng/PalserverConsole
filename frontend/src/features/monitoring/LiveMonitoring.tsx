@@ -14,7 +14,7 @@ import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { liveConnectionLabel, useLiveEvents } from "../../hooks/useLiveEvents";
 import { displayValue, formatByteRate, formatBytes, formatPercent, liveStatus, playerId, playerText, sourceLabel } from "../../utils/format";
 import { serverStateLabel } from "../server/labels";
-import { liveTitleText, playerDataState, worldArchiveState, worldStatusAfterResponse } from "./livePresentation";
+import { liveTitleText, onlinePlayersSummary, playerDataState, worldStatusAfterResponse } from "./livePresentation";
 
 export function LiveMonitoring({
   auth,
@@ -123,6 +123,7 @@ export function LiveMonitoring({
 
   const players = playersFrom(snapshot?.players.data);
   const playerState = playerDataState(snapshot, dataError, players.length);
+  const onlinePlayers = onlinePlayersSummary(players, playerState, snapshot?.players.stale === true);
   const process = snapshot?.metrics.data.process;
   const liveTitle = liveTitleText(snapshot, dataError, connectionStatus);
   const liveDotClass = connectionStatus === "open" && snapshot && !snapshot.info.stale ? "status-dot" : "status-dot stale-dot";
@@ -146,10 +147,10 @@ export function LiveMonitoring({
       </div>
     </section>
     <section className="live-metric-group" aria-labelledby="world-runtime-title">
-      <div className="live-metric-group-heading"><h3 id="world-runtime-title">游戏世界</h3><span>{worldError ? "世界快照暂不可用" : "来自只读存档快照"}</span></div>
+      <div className="live-metric-group-heading"><h3 id="world-runtime-title">游戏世界</h3><span>{worldError ? "世界快照暂不可用" : "存档数据只读 · 在线玩家来自实时接口"}</span></div>
       <div className="metric-grid live-status-grid world-status-grid" aria-label="游戏世界状态">
         <WorldTimeMetric status={worldStatus} error={worldError} />
-        <article><span>世界存档</span><strong>{worldArchiveState(worldStatus, worldError)}</strong><small>{worldStatus ? `采集于 ${new Date(worldStatus.observedAt * 1_000).toLocaleString("zh-CN")}` : worldError || "正在读取存档状态"}</small></article>
+        <article><span>在线玩家</span><strong>{onlinePlayers.value}</strong><small>{onlinePlayers.detail}</small></article>
         <article><span>玩家 / 公会</span><strong>{worldCountsText(worldStatus, "players", "guilds")}</strong><small>存档实体数量</small></article>
         <article><span>帕鲁 / 据点</span><strong>{worldCountsText(worldStatus, "pals", "bases")}</strong><small>存档实体数量</small></article>
       </div>

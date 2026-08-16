@@ -302,6 +302,8 @@
 .live-status-summary small { grid-column: 2; min-width: 0; }
 .metric-grid.live-status-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--border); }
 .live-status-grid article { min-height: 122px; border: 0; background: var(--surface); }
+.world-status-grid article { min-width: 0; }
+.world-status-grid strong, .world-status-grid small { overflow-wrap: anywhere; }
 .live-info-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--border); box-shadow: var(--shadow); }
 .live-info-row > span { display: grid; min-width: 0; gap: 5px; padding: 15px 18px; background: var(--surface); }
 .live-info-row small { color: var(--muted); font-size: 12px; }

@@ -74,8 +74,13 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   await expect(hostStatus).toContainText("4.0 MB");
   await expect(hostStatus).toContainText("1.0 KB/秒");
   await expect(hostStatus).toContainText("2.0 KB/秒");
-  await expect(page.getByLabel("游戏世界状态")).toContainText("128 天 1 小时");
-  await expect(page.getByLabel("游戏世界状态")).toContainText("797 / 8");
+  const worldStatus = page.getByLabel("游戏世界状态");
+  await expect(worldStatus).not.toContainText("世界存档");
+  await expect(worldStatus).toContainText("在线玩家");
+  await expect(worldStatus).toContainText("1 人");
+  await expect(worldStatus).toContainText("测试玩家");
+  await expect(worldStatus).toContainText("128 天 1 小时");
+  await expect(worldStatus).toContainText("797 / 8");
   await expect(page.getByText("实时数据正在重连", { exact: true })).toBeVisible();
   if (testInfo.project.name === "mobile") {
     await expect(page.locator(".psc-player-card")).toBeVisible();
