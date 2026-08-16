@@ -1,4 +1,4 @@
-import type { LiveSnapshot } from "../../api/contracts";
+import type { LiveSnapshot, WorldStatus } from "../../api/contracts";
 import type { LiveConnectionStatus } from "../../hooks/useLiveEvents";
 
 export function liveTitleText(snapshot: LiveSnapshot | null, error: string, connectionStatus: LiveConnectionStatus): string {
@@ -16,4 +16,13 @@ export function liveTitleText(snapshot: LiveSnapshot | null, error: string, conn
 export function playerDataState(snapshot: LiveSnapshot | null, error: string, playerCount: number): "loading" | "error" | "empty" | "ready" {
   if (!snapshot) return error ? "error" : "loading";
   return playerCount ? "ready" : "empty";
+}
+
+export function worldStatusAfterResponse(status: WorldStatus | null, error: string): WorldStatus | null {
+  return error ? null : status;
+}
+
+export function worldArchiveState(status: WorldStatus | null, error: string): "最新" | "数据过期" | "不可用" | "读取中" {
+  if (status) return status.stale ? "数据过期" : "最新";
+  return error ? "不可用" : "读取中";
 }

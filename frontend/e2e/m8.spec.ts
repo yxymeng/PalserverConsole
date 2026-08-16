@@ -80,9 +80,20 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
   await expect(hero.locator(".hero-character")).toHaveAttribute("src", "/zoe-character.png");
   expect(await hero.locator(".hero-character").evaluate((image) => {
     const imageRect = image.getBoundingClientRect();
-    const stageRect = image.parentElement?.getBoundingClientRect();
-    return !!stageRect && imageRect.top >= stageRect.top && imageRect.bottom <= stageRect.bottom;
+    const cardRect = image.closest(".psc-home-command")?.getBoundingClientRect();
+    return !!cardRect && imageRect.top >= cardRect.top && imageRect.bottom <= cardRect.bottom;
   })).toBe(true);
+  const heroBox = await hero.boundingBox();
+  const characterStageBox = await hero.locator(".hero-character-stage").boundingBox();
+  const characterBox = await hero.locator(".hero-character").boundingBox();
+  if (!heroBox || !characterStageBox || !characterBox) throw new Error("首页角色图未渲染，无法校验控制模块构图。");
+  if (testInfo.project.name === "mobile") {
+    expect(characterBox.height).toBeGreaterThanOrEqual(characterStageBox.height - 10);
+  } else {
+    expect(characterBox.height).toBeGreaterThanOrEqual(heroBox.height - 24);
+    expect(characterBox.x).toBeGreaterThanOrEqual(heroBox.x + heroBox.width * .48);
+    expect(characterBox.x + characterBox.width / 2).toBeLessThanOrEqual(heroBox.x + heroBox.width * .78);
+  }
   await expect(page.getByRole("heading", { name: "服务器控制" })).toBeVisible();
   const liveStatus = page.getByLabel("实时服务器状态");
   await expect(page.getByLabel("PalServer 当前状态")).toHaveCount(0);

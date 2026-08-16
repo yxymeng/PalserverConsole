@@ -22,6 +22,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 ![服务器管理与实时监控页面](docs/images/live-monitoring.png)
 
 截图使用的是自动化测试中的合成数据，不是任何真实服务器、玩家或存档内容。
+当前 Zoe 风格品牌插图为项目方使用 OpenAI GPT Image 2 生成的项目素材，并非 Palworld 官方 UI 或 Pocketpair 官方发布素材。
 
 ## 双击启动
 
@@ -87,7 +88,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 首版已经覆盖本地控制台的核心闭环，但仍有明确限制：真实服务器的恢复、配置应用和破坏性操作需要维护窗口；真实 RCON 降级还需要实际服务器只读验证。项目现在提供受锁文件约束的 Windows 便携版构建与安全升级脚本；实际公开发布前仍需完成干净 Windows 验收和签名决策，未签名包不得宣称已签名。
 
-后续路线以 `plan.md` 为准，并按风险和用户收益排序：
+后续路线以公开的 [`CODEX_OPTIMIZATION_ROADMAP.md`](CODEX_OPTIMIZATION_ROADMAP.md) 为准，并按风险和用户收益排序：
 
 1. **P0 生产收口**：完成真实只读运行验证、干净环境发布复现和日志/事件数据源边界确认。
 2. **P1 便携交付**：构建机固定使用 64 位 CPython 3.13；交付内置 Python runtime 的 Windows 便携版，最终用户无需安装 Python/Node.js，并保证升级不覆盖 `data/`。

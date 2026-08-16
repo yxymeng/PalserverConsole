@@ -66,11 +66,13 @@
 .psc-instance-summary dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--foreground); font-size: 13px; font-weight: 650; }
 
 .psc-home-command { overflow: hidden; }
-.psc-home-command-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(230px, .65fr); min-height: 268px; }
+.psc-home-command-grid { display: grid; grid-template-columns: minmax(0, 1.38fr) minmax(312px, 1fr); min-height: 300px; }
 .psc-home-command-copy { position: relative; z-index: 3; display: grid; align-content: center; }
 .psc-home-command-copy [data-slot="card-header"] { padding-bottom: 8px; }
 .psc-home-command-copy [data-slot="card-title"] { font-size: clamp(25px, 3vw, 35px); letter-spacing: -.025em; }
-.psc-home-command-copy [data-slot="card-description"] { max-width: 670px; line-height: 1.65; }
+.psc-home-command-copy [data-slot="card-description"] { max-width: 470px; line-height: 1.65; }
+.psc-home-command .hero-character-stage { min-height: 300px; overflow: visible; }
+.psc-home-command .hero-character { right: 68%; bottom: -8px; width: auto; max-width: none; height: calc(100% + 16px); transform: translateX(50%); }
 .psc-control-actions { position: relative; z-index: 4; display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .psc-control-actions [data-slot="button"] { min-width: 96px; }
 .psc-control-actions [data-slot="button"]:last-child { min-width: 40px; }
@@ -106,6 +108,13 @@
 .health-directory.danger,
 .background-health-card.danger { border-color: color-mix(in srgb, var(--danger) 55%, var(--border)); }
 
+@media (max-width: 1080px) {
+  .psc-home-command-grid { grid-template-columns: 1fr; min-height: 0; }
+  .psc-home-command-copy { order: 2; }
+  .psc-home-command .hero-character-stage { min-height: 276px; overflow: hidden; order: 1; }
+  .psc-home-command .hero-character { right: 50%; bottom: 0; max-width: calc(100% - 24px); height: calc(100% - 6px); transform: translateX(50%); }
+}
+
 @media (max-width: 767px) {
   .psc-topbar-inner { min-height: 66px; padding: 10px 14px; }
   .psc-topbar h1 { font-size: 20px; }
@@ -114,14 +123,12 @@
   .psc-instance-trigger span { display: none; }
   .psc-logout-label { display: none; }
   .psc-main .page-stack { gap: 18px; padding: 18px 14px calc(26px + env(safe-area-inset-bottom)); }
-  .psc-home-command-grid { grid-template-columns: 1fr; min-height: 0; }
-  .psc-home-command-copy { order: 2; }
   .psc-home-command-copy [data-slot="card-header"],
   .psc-home-command-copy [data-slot="card-content"] { padding-inline: 18px; }
   .psc-home-command-copy [data-slot="card-content"] { padding-bottom: 20px; }
   .psc-home-command-copy [data-slot="card-title"] { font-size: 25px; }
-  .psc-home-command .hero-character-stage { min-height: 252px; order: 1; }
-  .psc-home-command .hero-character { right: 50%; bottom: 0; width: auto; height: 238px; transform: translateX(50%); }
+  .psc-home-command .hero-character-stage { min-height: 252px; }
+  .psc-home-command .hero-character { max-width: calc(100% - 18px); height: calc(100% - 6px); }
   .psc-control-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .psc-control-actions [data-slot="button"] { width: 100%; min-width: 0; }
   .psc-control-actions [data-slot="button"]:last-child { grid-column: 1 / -1; }

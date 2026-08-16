@@ -14,7 +14,7 @@ import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { liveConnectionLabel, useLiveEvents } from "../../hooks/useLiveEvents";
 import { displayValue, formatByteRate, formatBytes, formatPercent, liveStatus, playerId, playerText, sourceLabel } from "../../utils/format";
 import { serverStateLabel } from "../server/labels";
-import { liveTitleText, playerDataState } from "./livePresentation";
+import { liveTitleText, playerDataState, worldArchiveState, worldStatusAfterResponse } from "./livePresentation";
 
 export function LiveMonitoring({
   auth,
@@ -61,8 +61,10 @@ export function LiveMonitoring({
         worldRequest,
       ]);
       publishSnapshot({ info, players, metrics, settings });
-      if (world.value) setWorldStatus(world.value);
-      setWorldError(world.error);
+      if (world.value || world.error) {
+        setWorldStatus(worldStatusAfterResponse(world.value, world.error));
+        setWorldError(world.error);
+      }
       setDataError("");
     } catch (caught) {
       if (isAbortError(caught)) return;
@@ -81,7 +83,10 @@ export function LiveMonitoring({
           setWorldError("");
         }
       } catch (caught) {
-        if (active) setWorldError(caught instanceof Error ? caught.message : "世界状态读取失败");
+        if (active) {
+          setWorldStatus(null);
+          setWorldError(caught instanceof Error ? caught.message : "世界状态读取失败");
+        }
       }
     }, 30_000);
     return () => {
@@ -144,7 +149,7 @@ export function LiveMonitoring({
       <div className="live-metric-group-heading"><h3 id="world-runtime-title">游戏世界</h3><span>{worldError ? "世界快照暂不可用" : "来自只读存档快照"}</span></div>
       <div className="metric-grid live-status-grid world-status-grid" aria-label="游戏世界状态">
         <WorldTimeMetric status={worldStatus} error={worldError} />
-        <article><span>世界存档</span><strong>{worldStatus ? worldStatus.stale ? "数据过期" : "最新" : worldError ? "不可用" : "读取中"}</strong><small>{worldStatus ? `采集于 ${new Date(worldStatus.observedAt * 1_000).toLocaleString("zh-CN")}` : worldError || "正在读取存档状态"}</small></article>
+        <article><span>世界存档</span><strong>{worldArchiveState(worldStatus, worldError)}</strong><small>{worldStatus ? `采集于 ${new Date(worldStatus.observedAt * 1_000).toLocaleString("zh-CN")}` : worldError || "正在读取存档状态"}</small></article>
         <article><span>玩家 / 公会</span><strong>{worldCountsText(worldStatus, "players", "guilds")}</strong><small>存档实体数量</small></article>
         <article><span>帕鲁 / 据点</span><strong>{worldCountsText(worldStatus, "pals", "bases")}</strong><small>存档实体数量</small></article>
       </div>
