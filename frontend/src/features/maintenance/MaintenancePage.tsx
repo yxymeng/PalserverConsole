@@ -28,8 +28,10 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
   const [message, setMessage] = useState("");
   const [activeSection, setActiveSection] = useState<MaintenanceSection>(initialMaintenanceSection);
   const [health, setHealth] = useState<OperationalHealth | null>(null);
+  const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [healthRefreshToken, setHealthRefreshToken] = useState(0);
   const nextRequestSignal = useAbortableRequest();
+  const nextHealthRequestSignal = useAbortableRequest();
 
   const refresh = useCallback(async () => {
     const signal = nextRequestSignal();
@@ -41,7 +43,24 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
     }
   }, [nextRequestSignal]);
 
+  const refreshHealth = useCallback(async () => {
+    const signal = nextHealthRequestSignal();
+    try {
+      const next = await requestJson<OperationalHealth>("/api/operations/health", { signal });
+      setHealth(next);
+      setHealthUnavailable(false);
+    } catch (caught) {
+      if (!isAbortError(caught)) setHealthUnavailable(true);
+    }
+  }, [nextHealthRequestSignal]);
+
+  const handleHealthChange = useCallback((next: OperationalHealth) => {
+    setHealth(next);
+    setHealthUnavailable(false);
+  }, []);
+
   useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void refreshHealth(); }, [refreshHealth]);
   useEffect(() => {
     if (!operation || !["queued", "running"].includes(operation.state)) return;
     const timer = window.setInterval(async () => {
@@ -88,14 +107,14 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
     window.history.replaceState(null, "", `#maintenance-${section}`);
   }
 
-  const healthSummary = maintenanceHealthSummary(health);
+  const healthSummary = maintenanceHealthSummary(health, healthUnavailable);
 
   return <div className="page-stack maintenance-page">
     <section className="maintenance-intro">
       <div><h2>维护中心</h2><p>健康巡检、服务器更新、官方备份、审计和维护通知按任务分区显示。</p></div>
       <div className="maintenance-intro-actions">
         <Badge variant={healthSummary.variant}>{healthSummary.label}</Badge>
-        <Button variant="outline" size="icon" type="button" title="刷新维护状态" aria-label="刷新维护状态" onClick={() => { void refresh(); setHealthRefreshToken((value) => value + 1); }}><RefreshCw aria-hidden="true" /></Button>
+        <Button variant="outline" size="icon" type="button" title="刷新维护状态" aria-label="刷新维护状态" onClick={() => { void refresh(); void refreshHealth(); setHealthRefreshToken((value) => value + 1); }}><RefreshCw aria-hidden="true" /></Button>
       </div>
     </section>
     <div className="maintenance-section-nav" aria-label="维护分区" role="tablist">
@@ -112,7 +131,7 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="form-success" role="status">{message}</p>}
     <div className="maintenance-tab-panel" role="tabpanel" id={`maintenance-${activeSection}`}>
-      {activeSection === "health" && <OperationalHealthPanel auth={auth} refreshToken={healthRefreshToken} onHealthChange={setHealth} />}
+      {activeSection === "health" && <OperationalHealthPanel auth={auth} refreshToken={healthRefreshToken} onHealthChange={handleHealthChange} />}
       {activeSection === "update" && <MaintenancePanel auth={auth} status={status} onOperation={setOperation} />}
       {activeSection === "backups" && <BackupsPage auth={auth} />}
       {activeSection === "audit" && <AuditPage auth={auth} />}
@@ -127,7 +146,8 @@ function initialMaintenanceSection(): MaintenanceSection {
   return MAINTENANCE_SECTIONS.some((item) => item.key === section) ? section : "health";
 }
 
-function maintenanceHealthSummary(health: OperationalHealth | null): { label: string; variant: "success" | "warning" | "destructive" } {
+function maintenanceHealthSummary(health: OperationalHealth | null, healthUnavailable: boolean): { label: string; variant: "success" | "warning" | "destructive" } {
+  if (healthUnavailable) return { label: "需要关注", variant: "warning" };
   if (!health) return { label: "正在巡检", variant: "warning" };
   if (health.alerts.some((item) => item.severity === "critical") || health.capacity.state === "blocked") return { label: "需要处理", variant: "destructive" };
   if (health.alerts.length || health.capacity.state === "warning" || health.world.state !== "healthy" || health.backups.state !== "healthy") return { label: "需要关注", variant: "warning" };

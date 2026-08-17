@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -329,7 +330,7 @@ class WorldSnapshotService:
                         game_time_ticks = max(0, int(raw_game_time_ticks))
                     if not counts:
                         counts = validate_cache_file(cache_path)
-                except (OSError, ValueError, json.JSONDecodeError):
+                except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
                     error = ("CACHE_INVALID", "最后成功缓存无法读取。")
         observed_at = (
             int(str(current["source_observed_at"])) if current else int(time.time())

@@ -659,6 +659,11 @@ class ConfigService:
         draft_raw = str(draft["rawText"])
         row = self.database.get_config_draft()
         conflict = self._conflict(row)
+        current_fields: object = current["fields"]
+        draft_fields: object = draft["fields"]
+        if row is not None:
+            _, _, _, current_fields, _ = self._read()
+            _, _, _, draft_fields, _ = self._read(Path(str(row["draft_path"])))
         return {
             "hasDraft": True,
             "conflict": conflict,
@@ -670,7 +675,7 @@ class ConfigService:
                     tofile="草稿",
                 )
             ),
-            "fields": self._field_diff(current["fields"], draft["fields"]),
+            "fields": self._field_diff(current_fields, draft_fields),
         }
 
     def apply(self, *, force: bool = False) -> dict[str, object]:
@@ -862,11 +867,30 @@ class ConfigService:
     def _field_diff(current: object, draft: object) -> list[dict[str, str]]:
         a = current if isinstance(current, dict) else {}
         b = draft if isinstance(draft, dict) else {}
-        return [
-            {"key": key, "current": str(a.get(key, "")), "draft": str(b.get(key, ""))}
-            for key in sorted(set(a) | set(b))
-            if a.get(key) != b.get(key)
-        ]
+        fields: list[dict[str, str]] = []
+        for key in sorted(set(a) | set(b)):
+            if key == "AdminPassword":
+                changed = ConfigService._admin_password_changed(
+                    {key: str(a[key])} if key in a else {},
+                    {key: str(b[key])} if key in b else {},
+                )
+            else:
+                changed = a.get(key) != b.get(key)
+            if changed:
+                fields.append(
+                    {
+                        "key": key,
+                        "current": ConfigService._public_diff_value(key, a.get(key, "")),
+                        "draft": ConfigService._public_diff_value(key, b.get(key, "")),
+                    }
+                )
+        return fields
+
+    @staticmethod
+    def _public_diff_value(key: str, value: object) -> str:
+        if key in SECRET_FIELDS:
+            return "已配置" if value else "未配置"
+        return str(value)
 
     @staticmethod
     def _payload(

@@ -449,6 +449,32 @@ def test_cache_and_snapshot_keep_source_collection_and_parse_times(
     assert status["gameTimeTicks"] == 110_628_000_000_000
 
 
+def test_world_status_marks_cache_invalid_when_metadata_table_is_missing(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    cache = tmp_path / "data" / "cache" / "world-cache-invalid.sqlite"
+    cache.parent.mkdir(parents=True)
+    with sqlite3.connect(cache) as connection:
+        connection.execute("CREATE TABLE unrelated (value TEXT)")
+    database.record_snapshot_version(
+        "invalid",
+        str(cache),
+        123,
+        json.dumps({"durationMs": 3}),
+        make_current=True,
+    )
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    status = service.status()
+
+    assert status["errorCode"] == "CACHE_INVALID"
+    assert status["error"] == "最后成功缓存无法读取。"
+    assert status["stale"] is True
+    assert cache.is_file()
+
+
 def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
     database = Database(settings.database_path)
