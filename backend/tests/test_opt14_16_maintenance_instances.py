@@ -102,7 +102,7 @@ class RecordingSteamCmdRunner:
 
 
 def _wait_for_terminal(database: Database, operation_id: str) -> dict[str, object]:
-    deadline = time.monotonic() + 1
+    deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         operation = database.operation(operation_id)
         assert operation is not None

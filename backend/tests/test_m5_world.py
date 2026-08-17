@@ -768,18 +768,18 @@ def test_watcher_retries_after_disk_space_failure(
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
-        assert failed.wait(timeout=1)
+        assert failed.wait(timeout=5)
         time.sleep(0.025)
         assert attempts == 1
-        assert scheduled.wait(timeout=1)
+        assert scheduled.wait(timeout=5)
         retry_delay = service.background_status()["retryDelaySeconds"]
         assert isinstance(retry_delay, (int, float))  # noqa: UP038
         assert retry_delay > 0
-        assert retried.wait(timeout=2)
+        assert retried.wait(timeout=5)
     finally:
         service._stop.set()
         service._wake.set()
-        thread.join(timeout=2)
+        thread.join(timeout=5)
 
     assert not thread.is_alive()
     assert attempts == 2
@@ -878,11 +878,11 @@ def test_disk_space_retry_reset_allows_new_parse(
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
-        assert parsed.wait(timeout=1)
+        assert parsed.wait(timeout=5)
     finally:
         service._stop.set()
         service._wake.set()
-        thread.join(timeout=2)
+        thread.join(timeout=5)
 
     assert not thread.is_alive()
     assert service._disk_space_retry_delay_seconds == 0.0

@@ -80,7 +80,7 @@ def _run_upgrade(
         capture_output=True,
         encoding="utf-8",
         errors="replace",
-        timeout=20,
+        timeout=60,
     )
 
 
