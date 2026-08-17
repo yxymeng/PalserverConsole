@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import shutil
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -18,7 +19,13 @@ from typing import Any
 from ..config import ProfileError, ServerProfile
 from ..persistence import Database
 from ..steam import is_reparse_point
-from .cache import entity_detail, inspect_storage, query_cache, validate_cache_file
+from .cache import (
+    entity_detail,
+    inspect_storage,
+    query_cache,
+    read_cache_metadata,
+    validate_cache_file,
+)
 
 DEFAULT_SNAPSHOT_RETENTION_COUNT = 8
 DEFAULT_SNAPSHOT_RETENTION_BYTES = 4 * 1024 * 1024 * 1024
@@ -301,6 +308,7 @@ class WorldSnapshotService:
             counts = dict(self._last_counts)
         collected_at: int | None = None
         parsed_at: int | None = None
+        game_time_ticks: int | None = None
         if current:
             try:
                 persisted = json.loads(str(current["parse_result"]))
@@ -312,12 +320,17 @@ class WorldSnapshotService:
                     parsed_at = int(persisted.get("parsedAt", 0)) or None
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
-        if current and not counts:
+        if current:
             cache_path = Path(str(current["cache_path"]))
             if cache_path.is_file():
                 try:
-                    counts = validate_cache_file(cache_path)
-                except (OSError, ValueError, json.JSONDecodeError):
+                    metadata = read_cache_metadata(cache_path)
+                    raw_game_time_ticks = metadata.get("game_time_ticks")
+                    if raw_game_time_ticks is not None:
+                        game_time_ticks = max(0, int(raw_game_time_ticks))
+                    if not counts:
+                        counts = validate_cache_file(cache_path)
+                except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
                     error = ("CACHE_INVALID", "最后成功缓存无法读取。")
         observed_at = (
             int(str(current["source_observed_at"])) if current else int(time.time())
@@ -336,6 +349,7 @@ class WorldSnapshotService:
             "parseDurationMs": duration,
             "peakMemoryBytes": peak_memory,
             "cacheSizeBytes": cache_size,
+            "gameTimeTicks": game_time_ticks,
             "counts": counts,
         }
 

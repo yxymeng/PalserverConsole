@@ -35,18 +35,26 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   await page.getByRole("button", { name: "维护" }).click();
 
-  const sections = page.getByRole("navigation", { name: "维护分区" });
-  await expect(sections.getByRole("link")).toHaveCount(4);
+  const sections = page.getByRole("tablist", { name: "维护分区" });
+  await expect(sections.getByRole("tab")).toHaveCount(5);
+  await expect(sections.getByRole("tab", { name: "健康与容量" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("heading", { name: "运维健康与容量" })).toBeVisible();
+  await sections.getByRole("tab", { name: "服务器更新" }).click();
   await expect(page.getByRole("heading", { name: "服务器更新" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "官方备份" })).toBeHidden();
+  await sections.getByRole("tab", { name: "官方备份" }).click();
   await expect(page.getByRole("heading", { name: "官方备份" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "运营审计" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "维护通知" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "服务器更新" })).toBeHidden();
   await expect(page.getByRole("button", { name: "恢复" })).toBeVisible();
   page.once("dialog", async (dialog) => {
     expect(dialog.message()).toContain("确认删除历史备份 backup-1？");
     await dialog.dismiss();
   });
   await page.getByRole("button", { name: "删除" }).click();
+  await sections.getByRole("tab", { name: "运营审计" }).click();
+  await expect(page.getByRole("heading", { name: "运营审计" })).toBeVisible();
+  await sections.getByRole("tab", { name: "维护通知" }).click();
+  await expect(page.getByRole("heading", { name: "维护通知" })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: testInfo.outputPath(`ux08-${testInfo.project.name}.png`), fullPage: true });
 });

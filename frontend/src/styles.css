@@ -1,3 +1,71 @@
+@import "tailwindcss";
 @import "./styles/base.css";
 @import "./styles/features.css";
 @import "./styles/config.css";
+@import "./styles/shell-home.css";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+    --color-sidebar-ring: var(--focus-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-foreground);
+    --color-sidebar-accent: var(--sidebar-selected);
+    --color-sidebar-primary-foreground: var(--primary-foreground);
+    --color-sidebar-primary: var(--primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--danger);
+    --color-chart-4: var(--warning);
+    --color-chart-3: var(--success);
+    --color-chart-2: var(--electric);
+    --color-chart-1: var(--primary);
+    --color-ring: var(--primary);
+    --color-input: var(--border-strong);
+    --color-border: var(--border);
+    --color-destructive: var(--danger);
+    --color-accent-foreground: var(--foreground);
+    --color-accent: var(--surface-hover);
+    --color-muted-foreground: var(--muted);
+    --color-muted: var(--surface-muted);
+    --color-secondary-foreground: var(--foreground);
+    --color-secondary: var(--surface-muted);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary-hover: var(--primary-hover);
+    --color-primary-surface: var(--primary-surface);
+    --color-primary: var(--primary);
+    --color-success-surface: var(--success-surface);
+    --color-success: var(--success);
+    --color-warning-surface: var(--warning-surface);
+    --color-warning: var(--warning);
+    --color-danger-surface: var(--danger-surface);
+    --color-popover-foreground: var(--foreground);
+    --color-popover: var(--surface);
+    --color-card-foreground: var(--foreground);
+    --color-card: var(--surface);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: 7px;
+    --radius-md: 7px;
+    --radius-lg: 12px;
+    --radius-xl: 14px;
+    --radius-2xl: 18px;
+    --radius-3xl: 22px;
+    --radius-4xl: 28px;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground;
+    }
+  html {
+    @apply font-sans;
+    }
+}

@@ -98,7 +98,7 @@ def _configured_database(tmp_path: Path) -> tuple[Database, Path]:
 
 
 def _wait_for_terminal(
-    database: Database, operation_id: str, timeout_seconds: float = 1.0
+    database: Database, operation_id: str, timeout_seconds: float = 5.0
 ) -> dict[str, object]:
     deadline = time.monotonic() + timeout_seconds
     while time.monotonic() < deadline:

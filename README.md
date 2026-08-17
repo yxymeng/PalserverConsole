@@ -22,6 +22,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 ![服务器管理与实时监控页面](docs/images/live-monitoring.png)
 
 截图使用的是自动化测试中的合成数据，不是任何真实服务器、玩家或存档内容。
+当前 Zoe 风格品牌插图为项目方使用 OpenAI GPT Image 2 生成的项目素材，并非 Palworld 官方 UI 或 Pocketpair 官方发布素材。
 
 ## 双击启动
 
@@ -87,7 +88,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 首版已经覆盖本地控制台的核心闭环，但仍有明确限制：真实服务器的恢复、配置应用和破坏性操作需要维护窗口；真实 RCON 降级还需要实际服务器只读验证。项目现在提供受锁文件约束的 Windows 便携版构建与安全升级脚本；实际公开发布前仍需完成干净 Windows 验收和签名决策，未签名包不得宣称已签名。
 
-后续路线以 `plan.md` 为准，并按风险和用户收益排序：
+后续路线以公开的 [`CODEX_OPTIMIZATION_ROADMAP.md`](CODEX_OPTIMIZATION_ROADMAP.md) 为准，并按风险和用户收益排序：
 
 1. **P0 生产收口**：完成真实只读运行验证、干净环境发布复现和日志/事件数据源边界确认。
 2. **P1 便携交付**：构建机固定使用 64 位 CPython 3.13；交付内置 Python runtime 的 Windows 便携版，最终用户无需安装 Python/Node.js，并保证升级不覆盖 `data/`。
@@ -132,6 +133,10 @@ npm.cmd run test:e2e
 - 感谢 [zaigie/palworld-server-tool](https://github.com/zaigie/palworld-server-tool) 整理 Character ID 的简体中文映射。本项目固定使用提交 `f45a48ef25ce08a5311a27e55b17062ba0bb4362`，并保留 Apache License 2.0。
 
 两份资料由 `scripts\sync-pal-catalog.ps1` 固定版本生成；完整来源、许可文件和 Pocketpair 权利声明见 `frontend/public/assets/pals/NOTICE.md` 与 `THIRD_PARTY_NOTICES.md`。
+
+## 许可证
+
+本项目自有源代码、脚本和文档采用 MIT License，完整文本见 [`LICENSE`](LICENSE)。该许可不改变 `THIRD_PARTY_NOTICES.md` 与 `frontend/public/assets/pals/` 中第三方代码、资料、头像、Palworld 角色名称和游戏数据的各自权利与许可证。
 
 ## 数据与公开发布
 

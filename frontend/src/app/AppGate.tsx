@@ -1,21 +1,24 @@
-import { AlertTriangle, MonitorCog, RefreshCw, ShieldCheck } from "lucide-react";
+import { AlertTriangle, RefreshCw, ShieldCheck } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { isAbortError, requestJson } from "../api/client";
 import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { ConsoleShell } from "./ConsoleShell";
+import { BrandMark } from "./BrandMark";
 import { text } from "./text";
 import { ThemeToggle } from "./ThemeToggle";
 
 const THEME_STORAGE_KEY = "palserver-console-theme";
+const LEGACY_PALETTE_STORAGE_KEY = "palserver-console-palette";
+const THEME_COLORS: Record<Theme, string> = { light: "#fafaf8", dark: "#1e2222" };
 
 function initialTheme(): Theme {
-  if (typeof window === "undefined") return "dark";
+  if (typeof window === "undefined") return "light";
   try {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return saved === "dark" || saved === "light" ? saved : "dark";
+    return saved === "dark" || saved === "light" ? saved : "light";
   } catch {
-    return "dark";
+    return "light";
   }
 }
 
@@ -50,11 +53,26 @@ export function AppGate() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle("dark", theme === "dark");
     try {
       window.localStorage.setItem(THEME_STORAGE_KEY, theme);
     } catch {
       // Theme persistence is optional when browser storage is unavailable.
     }
+  }, [theme]);
+
+  useEffect(() => {
+    delete document.documentElement.dataset.palette;
+    try {
+      window.localStorage.removeItem(LEGACY_PALETTE_STORAGE_KEY);
+    } catch {
+      // Removing the retired palette preview setting is optional when storage is unavailable.
+    }
+  }, []);
+
+  useEffect(() => {
+    document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+      ?.setAttribute("content", THEME_COLORS[theme]);
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
@@ -77,7 +95,7 @@ function LoadingScreen({ theme, onThemeToggle }: { theme: Theme; onThemeToggle: 
   return (
     <main className="centered-page" aria-live="polite">
       <ThemeToggle theme={theme} onToggle={onThemeToggle} className="screen-theme-toggle" />
-      <div className="brand-mark"><MonitorCog size={24} /></div>
+      <BrandMark />
       <p className="product-name">{text.product}</p>
       <RefreshCw className="spin" size={20} />
       <p className="muted">{text.loading}</p>
@@ -126,7 +144,7 @@ function LoginScreen({ warning, onSuccess, theme, onThemeToggle }: { warning: st
       <ThemeToggle theme={theme} onToggle={onThemeToggle} className="screen-theme-toggle" />
       <section className="login-panel">
         <div className="brand-row">
-          <div className="brand-mark"><MonitorCog size={24} /></div>
+          <BrandMark />
           <span>{text.product}</span>
         </div>
         <ShieldCheck className="login-icon" size={34} />

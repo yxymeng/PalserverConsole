@@ -4,7 +4,8 @@ import { expect, test } from "vitest";
 
 test("帕鲁名称排序使用当前展示名称而非原始字段", () => {
   const pagePath = fileURLToPath(new URL("./WorldDataPage.tsx", import.meta.url));
-  const source = readFileSync(pagePath, "utf8");
+  const source = readFileSync(pagePath, "utf8").replace(/\r\n/g, "\n");
 
   expect(source).toContain('sortKey === "name" && resource === "pals" ? resolvePal(item).displayName');
+  expect(source).toContain("setResource(next);\n    setResult(null);");
 });

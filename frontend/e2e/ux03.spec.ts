@@ -40,9 +40,17 @@ test("UX-03：常用配置保持精简，高级配置可搜索全部低频字段
   await page.route("**/api/config/diff", (route) => route.fulfill({ json: { hasDraft: false, conflict: null, text: "", fields: [] } }));
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
-  await page.getByRole("button", { name: "配置" }).click();
+  await page.getByRole("button", { name: "查看实例与控制台" }).click();
+  const instancePanel = page.getByRole("dialog");
+  await expect(instancePanel).toContainText("test-world");
+  await expect(instancePanel).toContainText("8223");
+  await instancePanel.getByRole("button", { name: "进入实例设置" }).click();
+  await expect(page.getByRole("tab", { name: "实例与控制台" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "游戏配置" }).click();
 
+  await expect(page.getByRole("tab", { name: "游戏配置" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByText("编辑 → 保存草稿 → 应用到服务器")).toBeVisible();
+  await expect(page.getByRole("button", { name: "保存草稿" })).toBeDisabled();
   await expect(page.getByRole("tab", { name: "常用配置" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByRole("heading", { name: "日常服务器规则" })).toBeVisible();
   await expect(page.getByText("服务器名称")).toBeVisible();
@@ -54,5 +62,12 @@ test("UX-03：常用配置保持精简，高级配置可搜索全部低频字段
   await expect(page.getByText("服务器名称")).not.toBeVisible();
   await page.getByLabel("搜索名称或配置键").fill("CustomLowFrequency");
   await expect(page.locator(".config-field-row")).toContainText("CustomLowFrequency");
+  await page.getByRole("textbox", { name: "CustomLowFrequency" }).fill("changed");
+  await expect(page.getByText("1 项未保存修改")).toBeVisible();
+  await expect(page.locator('[data-config-key="CustomLowFrequency"]')).toContainText("已修改");
+  await expect(page.getByRole("button", { name: "保存 1 项草稿" })).toBeEnabled();
+  await page.screenshot({ path: testInfo.outputPath(`ux03-game-${testInfo.project.name}.png`), fullPage: true });
+  await page.getByRole("tab", { name: "实例与控制台" }).click();
+  await expect(page.getByRole("heading", { name: "控制台与实例设置" })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath(`ux03-${testInfo.project.name}.png`), fullPage: true });
 });

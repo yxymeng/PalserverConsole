@@ -80,7 +80,7 @@ def _run_upgrade(
         capture_output=True,
         encoding="utf-8",
         errors="replace",
-        timeout=20,
+        timeout=60,
     )
 
 
@@ -327,6 +327,8 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "checksums.sha256" in build_script
     assert "build-info.json" in build_script
     assert "THIRD_PARTY_LICENSES.md" in build_script
+    assert 'Join-Path $projectRoot "LICENSE"' in build_script
+    assert 'Copy-Item -LiteralPath $projectLicense -Destination $packageStage' in build_script
     assert '"status": "unsigned"' in build_script
     assert "SOURCE_TREE_DIRTY" in build_script
     assert "sourceTreeState" in build_script

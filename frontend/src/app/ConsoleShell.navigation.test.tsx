@@ -25,7 +25,13 @@ const shell: ShellStatus = {
 
 test("UX-01：一级导航只保留首页、世界数据、配置和维护", () => {
   const markup = renderToStaticMarkup(
-    <ConsoleShell auth={auth} shell={shell} onAuthChanged={() => undefined} theme="light" onThemeToggle={() => undefined} />,
+    <ConsoleShell
+      auth={auth}
+      shell={shell}
+      onAuthChanged={() => undefined}
+      theme="light"
+      onThemeToggle={() => undefined}
+    />,
   );
   const navigation = markup.match(/<nav[^>]*>[\s\S]*?<\/nav>/)?.[0] || "";
 

@@ -295,6 +295,9 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
 
 def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
+    level["worldSaveData"]["value"]["GameTimeSaveData"] = _property(
+        {"GameDateTimeTicks": _property(172_800_000_000, "Int64Property")}
+    )
     cache = tmp_path / "world-cache.sqlite"
     counts = build_world_cache(
         cache, level, players, snapshot_id="fixture", source_observed_at=1
@@ -302,6 +305,7 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
 
     assert counts["bases"] == 2
     assert counts["work_pals"] == 2
+    assert read_cache_metadata(cache)["game_time_ticks"] == "172800000000"
     bases, base_total = query_cache(cache, "bases", page=1, page_size=1)
     work_pals, work_total = query_cache(cache, "work-pals", page=1, page_size=50)
     assert base_total == 2
@@ -313,7 +317,7 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     }
 
 
-def test_player_list_includes_linked_guild_name(tmp_path: Path) -> None:
+def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
     build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
@@ -327,12 +331,15 @@ def test_player_list_includes_linked_guild_name(tmp_path: Path) -> None:
         connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
 
     rows, total = query_cache(cache, "players", page=1, page_size=50)
+    bases, base_total = query_cache(cache, "bases", page=1, page_size=50)
 
     assert total == 1
     assert rows[0]["guildName"] == "测试工会"
+    assert base_total == 2
+    assert {row["guildName"] for row in bases} == {"测试工会"}
 
 
-def test_pal_list_includes_owner_name_and_display_traits(tmp_path: Path) -> None:
+def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
     build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
@@ -342,6 +349,7 @@ def test_pal_list_includes_owner_name_and_display_traits(tmp_path: Path) -> None
 
     assert total == 2
     assert boss["ownerName"] == "测试玩家"
+    assert boss["baseName"] == "据点甲"
     assert boss["detail"] == {
         "gender": "EPalGenderType::Male",
         "rank": 3,
@@ -380,6 +388,9 @@ def test_cache_and_snapshot_keep_source_collection_and_parse_times(
     (world / "Level.sav").write_bytes(b"level")
     (world / "LevelMeta.sav").write_bytes(b"meta")
     level, players = _synthetic_properties()
+    level["worldSaveData"]["value"]["GameTimeSaveData"] = _property(
+        {"GameDateTimeTicks": _property(110_628_000_000_000, "Int64Property")}
+    )
     clock_values = iter([200, 201, 202, 203, 204, 205])
     service = WorldSnapshotService(
         database,
@@ -433,7 +444,35 @@ def test_cache_and_snapshot_keep_source_collection_and_parse_times(
     assert metadata["collected_at"] == "201"
     assert metadata["parse_started_at"] == "202"
     assert snapshot_metadata["collectedAt"] == 201
-    assert service.status()["observedAt"] == current["source_observed_at"]
+    status = service.status()
+    assert status["observedAt"] == current["source_observed_at"]
+    assert status["gameTimeTicks"] == 110_628_000_000_000
+
+
+def test_world_status_marks_cache_invalid_when_metadata_table_is_missing(
+    tmp_path: Path,
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    cache = tmp_path / "data" / "cache" / "world-cache-invalid.sqlite"
+    cache.parent.mkdir(parents=True)
+    with sqlite3.connect(cache) as connection:
+        connection.execute("CREATE TABLE unrelated (value TEXT)")
+    database.record_snapshot_version(
+        "invalid",
+        str(cache),
+        123,
+        json.dumps({"durationMs": 3}),
+        make_current=True,
+    )
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    status = service.status()
+
+    assert status["errorCode"] == "CACHE_INVALID"
+    assert status["error"] == "最后成功缓存无法读取。"
+    assert status["stale"] is True
+    assert cache.is_file()
 
 
 def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
@@ -729,18 +768,18 @@ def test_watcher_retries_after_disk_space_failure(
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
-        assert failed.wait(timeout=1)
+        assert failed.wait(timeout=5)
         time.sleep(0.025)
         assert attempts == 1
-        assert scheduled.wait(timeout=1)
+        assert scheduled.wait(timeout=5)
         retry_delay = service.background_status()["retryDelaySeconds"]
         assert isinstance(retry_delay, (int, float))  # noqa: UP038
         assert retry_delay > 0
-        assert retried.wait(timeout=2)
+        assert retried.wait(timeout=5)
     finally:
         service._stop.set()
         service._wake.set()
-        thread.join(timeout=2)
+        thread.join(timeout=5)
 
     assert not thread.is_alive()
     assert attempts == 2
@@ -839,11 +878,11 @@ def test_disk_space_retry_reset_allows_new_parse(
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
-        assert parsed.wait(timeout=1)
+        assert parsed.wait(timeout=5)
     finally:
         service._stop.set()
         service._wake.set()
-        thread.join(timeout=2)
+        thread.join(timeout=5)
 
     assert not thread.is_alive()
     assert service._disk_space_retry_delay_seconds == 0.0

@@ -370,6 +370,49 @@ def test_admin_password_is_preserved_when_omitted_and_can_be_changed_safely(
     assert running_error.value.code == "SERVER_RUNNING"
 
 
+def test_diff_counts_admin_password_changes_without_exposing_secret(
+    tmp_path: Path,
+) -> None:
+    service, _, config = make_service(tmp_path)
+    old_password = "old-test-password"
+    new_password = "new-test-password"
+    rotated_password = "rotated-test-password"
+    config.write_text(
+        config.read_text(encoding="utf-8").replace("secret-value", old_password),
+        encoding="utf-8",
+    )
+
+    service.save_draft({"AdminPassword": new_password})
+    password_diff = service.diff()
+    password_fields = cast(list[dict[str, str]], password_diff["fields"])
+    assert password_diff["hasDraft"] is True
+    assert [field["key"] for field in password_fields] == ["AdminPassword"]
+    assert password_fields[0]["current"] == "已配置"
+    assert password_fields[0]["draft"] == "已配置"
+    password_payload = json.dumps(password_diff, ensure_ascii=False)
+    assert old_password not in password_payload
+    assert new_password not in password_payload
+    service.apply()
+
+    service.save_draft({"AutoSaveSpan": "900"})
+    normal_fields = cast(list[dict[str, str]], service.diff()["fields"])
+    assert [field["key"] for field in normal_fields] == ["AutoSaveSpan"]
+    service.apply()
+
+    service.save_draft({"AdminPassword": rotated_password, "ServerName": "Updated"})
+    combined_diff = service.diff()
+    combined_fields = cast(list[dict[str, str]], combined_diff["fields"])
+    assert {field["key"] for field in combined_fields} == {"AdminPassword", "ServerName"}
+    assert len(combined_fields) == 2
+    combined_payload = json.dumps(combined_diff, ensure_ascii=False)
+    assert rotated_password not in combined_payload
+    service.apply()
+
+    service.save_draft({"AdminPassword": "已配置"})
+    unchanged_fields = cast(list[dict[str, str]], service.diff()["fields"])
+    assert unchanged_fields == []
+
+
 def test_save_draft_preserves_pending_admin_password_when_omitted(tmp_path: Path) -> None:
     service, _, _ = make_service(tmp_path)
     new_password = "pending-admin-password"

@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, FolderSearch, RotateCcw, RotateCw, Save, Search } from "lucide-react";
+import { AlertTriangle, ChevronDown, FileCog, FolderSearch, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { AuthStatus, ConfigDocument } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
@@ -7,6 +7,7 @@ import { ConsolePortSettings } from "../server/ConsolePortSettings";
 import { ServerSettingsPanel } from "../server/ServerSettingsPanel";
 
 type ConfigEditorTab = "common" | "advanced";
+export type ConfigWorkspace = "game" | "instance";
 type ConfigCategoryId =
   | "server"
   | "runtime"
@@ -446,12 +447,14 @@ function ConfigFieldEditor({
   meta,
   value,
   sourceValue,
+  modified,
   onChange,
   onReset,
 }: {
   meta: ConfigFieldMeta;
   value: string;
   sourceValue: string;
+  modified: boolean;
   onChange: (value: string) => void;
   onReset: () => void;
 }) {
@@ -473,6 +476,7 @@ function ConfigFieldEditor({
         <div className="config-field-title">
           <strong>{meta.label}</strong>
           <code>{meta.key}</code>
+          {modified && <span className="config-changed-badge">已修改</span>}
         </div>
         <p>{meta.description}</p>
       </div>
@@ -506,14 +510,14 @@ function ConfigFieldEditor({
           </div>
         )}
         {meta.kind === "boolean" && (
-          <button
-            className={`config-switch ${/^true$/i.test(value.trim()) ? "is-on" : ""}`}
-            type="button"
-            role="switch"
-            aria-checked={/^true$/i.test(value.trim())}
-            aria-label={meta.label}
-            onClick={() => onChange(/^true$/i.test(value.trim()) ? "False" : "True")}
-          ><span className="config-switch-thumb" /></button>
+          <div className="config-boolean-control"><span>{/^true$/i.test(value.trim()) ? "已开启" : "已关闭"}</span><button
+              className={`config-switch ${/^true$/i.test(value.trim()) ? "is-on" : ""}`}
+              type="button"
+              role="switch"
+              aria-checked={/^true$/i.test(value.trim())}
+              aria-label={meta.label}
+              onClick={() => onChange(/^true$/i.test(value.trim()) ? "False" : "True")}
+            ><span className="config-switch-thumb" /></button></div>
         )}
         {meta.kind === "select" && (
           <div className="config-select-control">
@@ -556,7 +560,17 @@ function ConfigFieldEditor({
   );
 }
 
-export function ConfigPage({ auth, onAuthChanged }: { auth: AuthStatus; onAuthChanged: () => void }) {
+export function ConfigPage({
+  auth,
+  onAuthChanged,
+  workspace,
+  onWorkspaceChange,
+}: {
+  auth: AuthStatus;
+  onAuthChanged: () => void;
+  workspace: ConfigWorkspace;
+  onWorkspaceChange: (workspace: ConfigWorkspace) => void;
+}) {
   const [document, setDocument] = useState<ConfigDocument | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const [diff, setDiff] = useState<{ hasDraft: boolean; conflict: Record<string, unknown> | null; text: string; fields: { key: string; current: string; draft: string }[] } | null>(null);
@@ -594,16 +608,22 @@ export function ConfigPage({ auth, onAuthChanged }: { auth: AuthStatus; onAuthCh
   }
   async function restartApply() {
     if (!window.confirm("确认停止并重启 PalServer 后应用草稿吗？将先发送维护通知并保存世界。")) return;
+    setBusy(true); setError("");
     try { await requestJson("/api/config/apply-with-restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启并应用操作。"); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : "重启应用失败"); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "重启应用失败"); } finally { setBusy(false); }
   }
   async function openFolder() { try { await requestJson("/api/config/open-folder", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
+  const workspaceTabs = <div className="config-workspace-tabs" role="tablist" aria-label="配置工作区">
+    <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />游戏配置</button>
+    <button className={workspace === "instance" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "instance"} onClick={() => onWorkspaceChange("instance")}><ServerCog size={18} />实例与控制台</button>
+  </div>;
   const consoleAndInstanceSettings = <section className="config-console-settings">
     <div className="section-heading"><div><h2>控制台与实例设置</h2><p>安装路径、World 绑定、启动参数和控制台端口集中在这里。</p></div></div>
     <ServerSettingsPanel auth={auth} />
     <ConsolePortSettings auth={auth} onAuthChanged={onAuthChanged} />
   </section>;
-  if (!document) return <div className="page-stack config-page">{consoleAndInstanceSettings}{error ? <p className="form-error" role="alert">{error}</p> : <p className="muted">正在读取 PalWorldSettings.ini...</p>}</div>;
+  if (workspace === "instance") return <div className="page-stack config-page">{workspaceTabs}{consoleAndInstanceSettings}</div>;
+  if (!document) return <div className="page-stack config-page">{workspaceTabs}<section className="config-loading" aria-live="polite">{error ? <p className="form-error" role="alert">{error}</p> : <><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></>}</section></div>;
 
   const allKeys = [
     ...document.schema.filter((key) => key === "AdminPassword" || key in fields),
@@ -624,16 +644,33 @@ export function ConfigPage({ auth, onAuthChanged }: { auth: AuthStatus; onAuthCh
   });
   const selectedGroup = activeGroups.find((group) => group.id === selectedCategory) || activeGroups[0] || CONFIG_CATEGORY_GROUPS[0];
   const tabTotal = editorTab === "common" ? commonKeys.length : advancedKeys.length;
+  const baselineFields = document.draft?.fields || document.fields;
+  const modifiedKeys = allKeys.filter((key) => key === "AdminPassword" ? Boolean(fields[key]) : (fields[key] || "") !== (baselineFields[key] || ""));
+  const modifiedKeySet = new Set(modifiedKeys);
+  const draftFieldCount = diff?.fields.length || 0;
   function switchEditorTab(tab: ConfigEditorTab) {
     setEditorTab(tab);
     setQuery("");
     if (tab === "advanced") setSelectedCategory(activeGroups[0]?.id || "advanced");
   }
+  function discardWorkingChanges() {
+    const nextFields = { ...baselineFields };
+    delete nextFields.AdminPassword;
+    setFields(nextFields);
+  }
 
   return <div className="page-stack config-page">
-    {consoleAndInstanceSettings}
-    <section className="config-status"><div><h2>PalWorldSettings.ini</h2><p>{document.path}</p></div><div className="config-actions">{auth.local && <button className="quiet-button" type="button" onClick={() => void openFolder()}><FolderSearch size={17} />打开配置目录</button>}<span className={document.adminPasswordConfigured ? "badge success" : "badge warning"}>AdminPassword：{document.adminPasswordConfigured ? "已配置" : "未配置"}</span></div></section>
-    <div className="notice-band"><AlertTriangle size={20} /><span>运行中的 PalServer 不会被实时写入；保存草稿后可停服应用，或提交“重启并应用”。</span></div>
+    {workspaceTabs}
+    <section className="config-summary" aria-label="游戏配置状态">
+      <div className="config-file-summary"><div><h2>PalWorldSettings.ini</h2><p>{document.path}</p></div>{auth.local && <button className="quiet-button" type="button" onClick={() => void openFolder()}><FolderSearch size={17} />打开配置目录</button>}</div>
+      <div className="config-summary-items">
+        <span><small>管理员密码</small><strong className={document.adminPasswordConfigured ? "is-success" : "is-warning"}>{document.adminPasswordConfigured ? "已配置" : "未配置"}</strong></span>
+        <span><small>WorldOption.sav</small><strong className={document.worldOptionPresent ? "is-warning" : ""}>{document.worldOptionPresent ? "可能覆盖 INI" : "未检测到覆盖"}</strong></span>
+        <span><small>已保存草稿</small><strong>{diff?.hasDraft ? `${draftFieldCount} 项修改` : "无"}</strong></span>
+        <span><small>外部冲突</small><strong className={diff?.conflict ? "is-danger" : "is-success"}>{diff?.conflict ? "需要确认" : "未检测到"}</strong></span>
+      </div>
+    </section>
+    <div className="config-workflow" role="note"><strong>编辑 → 保存草稿 → 应用到服务器</strong><span>运行中的 PalServer 不会被实时写入；应用前必须停服，或使用“重启并应用”。</span></div>
     {document.worldOptionPresent && <div className="warning-strip"><AlertTriangle size={19} /><span>检测到当前世界存在 WorldOption.sav，游戏内设置可能覆盖此 INI。仍可继续应用。</span></div>}
     <form className="config-form" onSubmit={saveDraft}>
       <section className="config-editor-shell">
@@ -653,18 +690,18 @@ export function ConfigPage({ auth, onAuthChanged }: { auth: AuthStatus; onAuthCh
             })}
           </nav>}
           <div className="config-editor-main">
-            <header className="config-section-header"><div><p className="config-section-kicker">{normalizedQuery ? "搜索结果" : editorTab === "common" ? "常用配置" : "高级配置"}</p><h2>{normalizedQuery ? "匹配的配置" : editorTab === "common" ? "日常服务器规则" : selectedGroup.label}</h2><p>{normalizedQuery ? `共找到 ${visibleKeys.length} 项配置。` : editorTab === "common" ? "仅展示日常会调整的服务器规则；完整字段可从高级配置进入。" : selectedGroup.description}</p></div><span className="config-section-total">{visibleKeys.length} 项</span></header>
+            <header className="config-section-header"><div><h2>{normalizedQuery ? "匹配的配置" : editorTab === "common" ? "日常服务器规则" : selectedGroup.label}</h2><p>{normalizedQuery ? `共找到 ${visibleKeys.length} 项配置。` : editorTab === "common" ? "仅展示日常会调整的服务器规则；完整字段可从高级配置进入。" : selectedGroup.description}</p></div><span className="config-section-total">{visibleKeys.length} 项</span></header>
             <div className="config-field-list">
               {visibleKeys.map((key) => {
                 const meta = configMetaFor(key, fields[key] || "");
-                const sourceValue = key === "AdminPassword" ? (document.adminPasswordConfigured ? "已配置" : "未配置") : document.fields[key] || "";
-                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => {
+                const sourceValue = key === "AdminPassword" ? (document.adminPasswordConfigured ? "已配置" : "未配置") : baselineFields[key] || "";
+                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} modified={modifiedKeySet.has(key)} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => {
                   if (meta.kind === "password") {
                     const next = { ...current };
                     delete next[key];
                     return next;
                   }
-                  return { ...current, [key]: document.fields[key] || "" };
+                  return { ...current, [key]: baselineFields[key] || "" };
                 })} />;
               })}
               {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>{editorTab === "common" ? "当前配置中没有可显示的常用字段。" : "没有找到匹配的配置。"}</p>{editorTab === "advanced" && <button className="quiet-button" type="button" onClick={() => { setQuery(""); setSelectedCategory(activeGroups[0]?.id || "advanced"); }}>清除搜索</button>}</div>}
@@ -672,9 +709,14 @@ export function ConfigPage({ auth, onAuthChanged }: { auth: AuthStatus; onAuthCh
           </div>
         </div>
       </section>
-      <div className="config-toolbar"><button className="primary-button" disabled={busy} type="submit"><Save size={18} />保存待应用草稿</button>{document.draft && <><button className="quiet-button" type="button" disabled={busy} onClick={() => void apply(false)}>停服应用</button><button className="quiet-button" type="button" disabled={busy} onClick={() => void restartApply()}><RotateCw size={17} />重启并应用</button></>}</div>
+      {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}
+      <div className="config-action-bar"><div className="config-action-state"><strong>{modifiedKeys.length ? `${modifiedKeys.length} 项未保存修改` : document.draft ? "草稿已保存，等待应用" : "配置与已保存内容一致"}</strong><span>{modifiedKeys.length ? "先保存为草稿，不会立即写入真实 INI。" : document.draft ? `${draftFieldCount} 项草稿修改尚未应用到服务器。` : "修改字段后可保存为待应用草稿。"}</span></div><div className="config-toolbar">{modifiedKeys.length > 0 && <button className="quiet-button" type="button" disabled={busy} onClick={discardWorkingChanges}>放弃本次修改</button>}<button className="primary-button" disabled={busy || modifiedKeys.length === 0} type="submit"><Save size={18} />{busy ? "正在保存…" : modifiedKeys.length ? `保存 ${modifiedKeys.length} 项草稿` : "保存草稿"}</button>{document.draft && <><button className="quiet-button" type="button" disabled={busy || Boolean(diff?.conflict)} onClick={() => void apply(false)}>停服应用</button><button className="quiet-button" type="button" disabled={busy || Boolean(diff?.conflict)} onClick={() => void restartApply()}><RotateCw size={17} />{busy ? "正在提交…" : "重启并应用"}</button></>}</div></div>
     </form>
-    {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}
-    {diff?.hasDraft && <section className={diff.conflict ? "config-diff conflict" : "config-diff"}><div className="section-heading"><div><h2>草稿差异</h2><p>{diff.conflict ? "检测到外部修改，应用前必须确认覆盖。" : "当前草稿尚未写入真实 INI。"}</p></div>{diff.conflict && <button className="danger-button" type="button" onClick={() => void apply(true)}>确认覆盖外部修改</button>}</div><pre>{diff.text || "字段值有变化，但文本差异为空。"}</pre></section>}
+    {diff?.hasDraft && <section className={diff.conflict ? "config-diff conflict" : "config-diff"}><div className="section-heading"><div><h2>草稿差异</h2><p>{diff.conflict ? "检测到外部修改，应用前必须确认覆盖。" : "以下草稿尚未写入真实 INI。"}</p></div>{diff.conflict && <button className="danger-button" type="button" disabled={busy} onClick={() => void apply(true)}>确认覆盖外部修改</button>}</div>{diff.fields.length ? <div className="config-diff-table"><div className="config-diff-head"><span>配置项</span><span>当前值</span><span>草稿值</span></div>{diff.fields.map((item) => <div className="config-diff-row" key={item.key}><strong>{configLabelFor(item.key)}<small>{item.key}</small></strong><span>{displayDiffValue(item.key, item.current)}</span><span>{displayDiffValue(item.key, item.draft)}</span></div>)}</div> : <p className="muted">字段值有变化，但没有可显示的字段摘要。</p>}<details className="config-raw-diff"><summary>查看原始差异</summary><pre>{diff.text || "文本差异为空。"}</pre></details></section>}
   </div>;
+}
+
+function displayDiffValue(key: string, value: string): string {
+  if (key === "AdminPassword") return "••••••";
+  return value || "（空）";
 }

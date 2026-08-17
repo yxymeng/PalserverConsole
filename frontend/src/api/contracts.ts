@@ -84,6 +84,9 @@ export type AuditResponse = { items: AuditItem[]; page: number; pageSize: number
 export type WorldStatus = {
   source: string;
   observedAt: number;
+  sourceObservedAt?: number;
+  collectedAt?: number | null;
+  parsedAt?: number | null;
   stale: boolean;
   errorCode: string | null;
   error: string | null;
@@ -92,6 +95,7 @@ export type WorldStatus = {
   parseDurationMs: number | null;
   peakMemoryBytes?: number | null;
   cacheSizeBytes?: number | null;
+  gameTimeTicks?: number | null;
   counts: Record<string, number>;
 };
 export type WorldRow = Record<string, unknown> & { id?: string; name?: string };

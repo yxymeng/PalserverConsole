@@ -1,6 +1,8 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 const backendInit = readFileSync(
   new URL("../backend/palserver_console/__init__.py", import.meta.url),
@@ -25,8 +27,13 @@ const versionInfoPlugin: Plugin = {
 };
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   define: {
     __PALSERVER_CONSOLE_VERSION__: JSON.stringify(appVersion),
   },
-  plugins: [react(), versionInfoPlugin],
+  plugins: [react(), tailwindcss(), versionInfoPlugin],
 });

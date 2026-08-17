@@ -182,6 +182,7 @@ def build_world_cache(
     character_containers = _list_property(world.get("CharacterContainerSaveData"))
     groups = _list_property(world.get("GroupSaveDataMap"))
     base_camps = _list_property(world.get("BaseCampSaveData"))
+    game_time_ticks = _game_time_ticks(world)
 
     group_rows, player_group = _groups(groups)
     base_rows, worker_container_to_base = _bases(base_camps)
@@ -216,6 +217,8 @@ def build_world_cache(
             "created_at": str(int(time.time())),
             "counts": json.dumps(counts, separators=(",", ":")),
         }
+        if game_time_ticks is not None:
+            metadata["game_time_ticks"] = str(game_time_ticks)
         if collected_at is not None:
             metadata["collected_at"] = str(collected_at)
         if parse_started_at is not None:
@@ -251,6 +254,18 @@ def build_world_cache(
         with suppress(Exception):
             connection.close()
     return counts
+
+
+def _game_time_ticks(world: Mapping[str, Any]) -> int | None:
+    game_time = _mapping(world.get("GameTimeSaveData"))
+    value = _scalar(game_time.get("GameDateTimeTicks"))
+    if isinstance(value, bool):
+        return None
+    try:
+        ticks = int(value)
+    except (TypeError, ValueError):
+        return None
+    return ticks if ticks >= 0 else None
 
 
 def read_cache_metadata(path: Path) -> dict[str, str]:
@@ -334,9 +349,36 @@ def query_cache(
         ).fetchall()
         public_rows = [_public_row(dict(row)) for row in rows]
         if resource == "players":
-            _add_player_guild_names(connection, public_rows)
+            _add_relation_names(
+                connection,
+                public_rows,
+                id_field="guildId",
+                name_field="guildName",
+                table="guilds",
+            )
         elif resource in {"pals", "work-pals"}:
-            _add_pal_owner_names(connection, public_rows)
+            _add_relation_names(
+                connection,
+                public_rows,
+                id_field="ownerPlayerId",
+                name_field="ownerName",
+                table="players",
+            )
+            _add_relation_names(
+                connection,
+                public_rows,
+                id_field="baseId",
+                name_field="baseName",
+                table="bases",
+            )
+        elif resource == "bases":
+            _add_relation_names(
+                connection,
+                public_rows,
+                id_field="guildId",
+                name_field="guildName",
+                table="guilds",
+            )
         return public_rows, total
     finally:
         connection.close()
@@ -444,54 +486,36 @@ def _rows(
     return [_public_row(dict(item)) for item in connection.execute(query, parameters).fetchall()]
 
 
-def _add_player_guild_names(
-    connection: sqlite3.Connection, rows: list[dict[str, object]]
+def _add_relation_names(
+    connection: sqlite3.Connection,
+    rows: list[dict[str, object]],
+    *,
+    id_field: str,
+    name_field: str,
+    table: str,
 ) -> None:
-    guild_ids = sorted(
+    if table not in {"players", "guilds", "bases"}:
+        raise ValueError("Unknown relation table.")
+    entity_ids = sorted(
         {
-            guild_id
+            entity_id
             for row in rows
-            if isinstance(guild_id := row.get("guildId"), str) and guild_id
+            if isinstance(entity_id := row.get(id_field), str) and entity_id
         }
     )
-    if not guild_ids:
+    if not entity_ids:
         return
-    placeholders = ", ".join("?" for _ in guild_ids)
+    placeholders = ", ".join("?" for _ in entity_ids)
     names = {
-        str(guild_id): str(name)
-        for guild_id, name in connection.execute(
-            f"SELECT id, name FROM guilds WHERE id IN ({placeholders})", guild_ids
+        str(entity_id): str(name)
+        for entity_id, name in connection.execute(
+            f"SELECT id, name FROM {table} WHERE id IN ({placeholders})", entity_ids
         ).fetchall()
     }
     for row in rows:
-        guild_id = row.get("guildId")
-        if isinstance(guild_id, str) and guild_id in names:
-            row["guildName"] = names[guild_id]
-
-
-def _add_pal_owner_names(
-    connection: sqlite3.Connection, rows: list[dict[str, object]]
-) -> None:
-    owner_ids = sorted(
-        {
-            owner_id
-            for row in rows
-            if isinstance(owner_id := row.get("ownerPlayerId"), str) and owner_id
-        }
-    )
-    if not owner_ids:
-        return
-    placeholders = ", ".join("?" for _ in owner_ids)
-    names = {
-        str(player_id): str(name)
-        for player_id, name in connection.execute(
-            f"SELECT id, name FROM players WHERE id IN ({placeholders})", owner_ids
-        ).fetchall()
-    }
-    for row in rows:
-        owner_id = row.get("ownerPlayerId")
-        if isinstance(owner_id, str) and owner_id in names:
-            row["ownerName"] = names[owner_id]
+        entity_id = row.get(id_field)
+        if isinstance(entity_id, str) and entity_id in names:
+            row[name_field] = names[entity_id]
 
 
 def _reference(
