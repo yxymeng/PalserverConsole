@@ -1,7 +1,7 @@
 import { AlertTriangle, ChevronDown, FileCog, FolderSearch, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { AuthStatus, ConfigDocument } from "../../api/contracts";
-import { isAbortError, requestJson } from "../../api/client";
+import { createIdempotencyKey, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { ConsolePortSettings } from "../server/ConsolePortSettings";
 import { ServerSettingsPanel } from "../server/ServerSettingsPanel";
@@ -609,7 +609,7 @@ export function ConfigPage({
   async function restartApply() {
     if (!window.confirm("确认停止并重启 PalServer 后应用草稿吗？将先发送维护通知并保存世界。")) return;
     setBusy(true); setError("");
-    try { await requestJson("/api/config/apply-with-restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启并应用操作。"); }
+    try { await requestJson("/api/config/apply-with-restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启并应用操作。"); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "重启应用失败"); } finally { setBusy(false); }
   }
   async function openFolder() { try { await requestJson("/api/config/open-folder", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }

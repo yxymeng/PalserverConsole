@@ -45,14 +45,17 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   await sections.getByRole("tab", { name: "官方备份" }).click();
   await expect(page.getByRole("heading", { name: "官方备份" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "服务器更新" })).toBeHidden();
+  await expect(page.getByRole("combobox", { name: "保留数量" })).toBeVisible();
+  await expect(page.getByText("infinite", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "恢复" })).toBeVisible();
-  page.once("dialog", async (dialog) => {
-    expect(dialog.message()).toContain("确认删除历史备份 backup-1？");
-    await dialog.dismiss();
-  });
   await page.getByRole("button", { name: "删除" }).click();
+  const deleteDialog = page.getByRole("alertdialog");
+  await expect(deleteDialog).toContainText("删除历史备份 backup-1");
+  await deleteDialog.getByRole("button", { name: "取消" }).click();
   await sections.getByRole("tab", { name: "运营审计" }).click();
   await expect(page.getByRole("heading", { name: "运营审计" })).toBeVisible();
+  await expect(page.locator(".audit-table-row")).toBeVisible();
+  expect(await page.locator(".audit-table-row").evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
   await sections.getByRole("tab", { name: "维护通知" }).click();
   await expect(page.getByRole("heading", { name: "维护通知" })).toBeVisible();
   await page.evaluate(() => window.scrollTo(0, 0));

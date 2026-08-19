@@ -1,8 +1,11 @@
-import { Activity, ArchiveRestore, BellRing, CircleStop, Download, FileClock, RefreshCw } from "lucide-react";
+import { Activity, ArchiveRestore, BellRing, Download, FileClock, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 import type { AuthStatus, Operation, OperationalHealth, ShellStatus } from "../../api/contracts";
-import { isAbortError, requestJson } from "../../api/client";
+import { createIdempotencyKey, isAbortError, requestJson } from "../../api/client";
+import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
+import { OperationStatusIsland } from "../../components/OperationStatusIsland";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
@@ -30,6 +33,7 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
   const [health, setHealth] = useState<OperationalHealth | null>(null);
   const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [healthRefreshToken, setHealthRefreshToken] = useState(0);
+  const [confirmForceStop, setConfirmForceStop] = useState(false);
   const nextRequestSignal = useAbortableRequest();
   const nextHealthRequestSignal = useAbortableRequest();
 
@@ -90,11 +94,11 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
   }
 
   async function forceStop() {
-    if (!operation || !window.confirm(`PalServer 未能优雅退出。确认强制结束 PID ${status?.pids.join(", ") || "未知"}？`)) return;
+    if (!operation) return;
     try {
       setOperation(await requestJson<Operation>(`/api/server/operations/${operation.operationId}/force-stop`, {
         method: "POST",
-        headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": crypto.randomUUID() },
+        headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": createIdempotencyKey() },
         body: "{}",
       }));
     } catch (caught) {
@@ -123,11 +127,7 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
         return <button key={item.key} type="button" role="tab" aria-selected={activeSection === item.key} aria-controls={`maintenance-${item.key}`} className={activeSection === item.key ? "is-active" : ""} onClick={() => selectSection(item.key)}><Icon size={17} aria-hidden="true" />{item.label}</button>;
       })}
     </div>
-    {operation && <section className="operation-band" aria-live="polite">
-      <div><span>当前维护操作</span><strong>{operation.kind} · {operation.stage}</strong><small>{operation.errorCode ? `${operation.errorCode}: ${operation.detail || ""}` : operation.state}</small></div>
-      {operation.stage === "countdown" && <button className="quiet-button" type="button" onClick={() => void cancel()}>取消</button>}
-      {operation.state === "awaiting_force_confirmation" && <button className="danger-button" type="button" onClick={() => void forceStop()}><CircleStop size={18} />确认强制停止</button>}
-    </section>}
+    {operation && createPortal(<OperationStatusIsland operation={operation} onCancel={() => void cancel()} onForceStop={() => setConfirmForceStop(true)} />, document.body)}
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="form-success" role="status">{message}</p>}
     <div className="maintenance-tab-panel" role="tabpanel" id={`maintenance-${activeSection}`}>
@@ -137,6 +137,7 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
       {activeSection === "audit" && <AuditPage auth={auth} />}
       {activeSection === "notifications" && <MaintenanceNotificationsPanel auth={auth} />}
     </div>
+    <ConfirmActionDialog open={confirmForceStop} title="强制结束 PalServer？" description={`PalServer 未能优雅退出。确认后将强制结束 PID ${status?.pids.join(", ") || "未知"}。`} confirmLabel="确认强制停止" destructive onOpenChange={setConfirmForceStop} onConfirm={() => void forceStop()} />
   </div>;
 }
 

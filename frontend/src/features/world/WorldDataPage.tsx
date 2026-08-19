@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Database, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 import type { AuthStatus, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
@@ -8,8 +8,8 @@ import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } f
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 
 type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
-type SortKey = "name" | "level" | "id";
-type RelationFilter = "all" | "linked" | "unlinked";
+type SortKey = "name" | "level-desc" | "count-desc" | "id";
+type StatusFilter = "all" | "guilded" | "unguilded" | "player" | "base" | "unassigned" | "active" | "empty";
 
 const PRIMARY_RESOURCES: { key: PrimaryWorldResource; label: string; icon: typeof Users }[] = [
   { key: "players", label: "玩家", icon: Users },
@@ -25,6 +25,20 @@ const RESOURCE_LABELS: Record<PrimaryWorldResource, string> = {
   bases: "据点",
 };
 
+const STATUS_OPTIONS: Record<PrimaryWorldResource, { value: StatusFilter; label: string }[]> = {
+  players: [{ value: "all", label: "全部玩家" }, { value: "guilded", label: "已加入工会" }, { value: "unguilded", label: "未加入工会" }],
+  pals: [{ value: "all", label: "全部帕鲁" }, { value: "player", label: "玩家持有" }, { value: "base", label: "据点工作" }, { value: "unassigned", label: "未分配" }],
+  guilds: [{ value: "all", label: "全部工会" }, { value: "active", label: "有成员或据点" }, { value: "empty", label: "空工会" }],
+  bases: [{ value: "all", label: "全部据点" }, { value: "guilded", label: "已归属工会" }, { value: "unguilded", label: "未归属工会" }],
+};
+
+const SORT_OPTIONS: Record<PrimaryWorldResource, { value: SortKey; label: string }[]> = {
+  players: [{ value: "name", label: "名称" }, { value: "level-desc", label: "等级（高到低）" }, { value: "id", label: "稳定 ID" }],
+  pals: [{ value: "name", label: "名称" }, { value: "level-desc", label: "等级（高到低）" }, { value: "id", label: "稳定 ID" }],
+  guilds: [{ value: "name", label: "名称" }, { value: "count-desc", label: "成员数量（多到少）" }, { value: "id", label: "稳定 ID" }],
+  bases: [{ value: "name", label: "名称" }, { value: "id", label: "稳定 ID" }],
+};
+
 export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<WorldStatus | null>(null);
   const [resource, setResource] = useState<PrimaryWorldResource>("players");
@@ -33,7 +47,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
-  const [relationFilter, setRelationFilter] = useState<RelationFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selected, setSelected] = useState<EntityDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [listLoading, setListLoading] = useState(true);
@@ -52,6 +66,8 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     try {
       const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
       if (appliedSearch) query.set("search", appliedSearch);
+      if (statusFilter !== "all") query.set("status", statusFilter);
+      query.set("sort", sortKey);
       const [nextStatus, nextResult] = await Promise.all([
         requestJson<WorldStatus>("/api/world/snapshots/current", { signal }),
         requestJson<WorldResponse>(`/api/world/${resource}?${query}`, { signal }),
@@ -63,7 +79,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     } finally {
       if (sequence === loadSequence.current) setListLoading(false);
     }
-  }, [appliedSearch, nextRequestSignal, page, resource]);
+  }, [appliedSearch, nextRequestSignal, page, resource, sortKey, statusFilter]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -79,7 +95,8 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setResource(next);
     setResult(null);
     setPage(1);
-    setRelationFilter("all");
+    setStatusFilter("all");
+    setSortKey("name");
     setSelected(null);
   }
 
@@ -92,7 +109,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   function clearFilters() {
     setSearch("");
     setAppliedSearch("");
-    setRelationFilter("all");
+    setStatusFilter("all");
     setSortKey("name");
     setPage(1);
   }
@@ -128,17 +145,10 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     }
   }, []);
 
-  const displayedItems = useMemo(
-    () => sortRows(
-      (result?.items || []).filter((item) => matchesRelationFilter(item, resource, relationFilter)),
-      resource,
-      sortKey,
-    ),
-    [relationFilter, resource, result?.items, sortKey],
-  );
+  const displayedItems = result?.items || [];
   const columns = worldColumns(resource);
   const totalPages = result?.total ? Math.ceil(result.total / pageSize) : 1;
-  const hasFilters = Boolean(appliedSearch) || relationFilter !== "all" || sortKey !== "name";
+  const hasFilters = Boolean(appliedSearch) || statusFilter !== "all" || sortKey !== "name";
 
   return <div className="page-stack world-page">
     <section className={`world-status ${status?.stale ? "stale" : ""}`}>
@@ -154,10 +164,10 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
         <form className="world-toolbar" onSubmit={submitSearch}>
           <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
           <button className="primary-button world-search-button" type="submit">搜索</button>
-          <label className="world-control"><SlidersHorizontal size={16} aria-hidden="true" /><span>关联</span><select aria-label="关联筛选" value={relationFilter} onChange={(event) => { setPage(1); setRelationFilter(event.target.value as RelationFilter); }}><option value="all">全部</option><option value="linked">已关联</option><option value="unlinked">未关联</option></select></label>
-          <label className="world-control"><span>排序</span><select aria-label="排序方式" value={sortKey} onChange={(event) => setSortKey(event.target.value as SortKey)}><option value="name">名称</option><option value="level">等级 / 数量</option><option value="id">稳定 ID</option></select></label>
+          <label className="world-control"><SlidersHorizontal size={16} aria-hidden="true" /><span>状态</span><select aria-label="状态筛选" value={statusFilter} onChange={(event) => { setPage(1); setStatusFilter(event.target.value as StatusFilter); }}>{STATUS_OPTIONS[resource].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
+          <label className="world-control"><span>排序</span><select aria-label="排序方式" value={sortKey} onChange={(event) => { setPage(1); setSortKey(event.target.value as SortKey); }}>{SORT_OPTIONS[resource].map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
           {hasFilters && <button className="world-clear-button" type="button" aria-label="清除筛选条件" onClick={clearFilters}><X size={15} />清除</button>}
-          <span className="world-result-count">当前 {displayedItems.length} 条</span>
+          <span className="world-result-count">本页 {displayedItems.length} / 共 {result?.total || 0} 条</span>
         </form>
         {error && <p className="form-error" role="alert">{error}</p>}
         {message && <p className="form-success" role="status">{message}</p>}
@@ -283,19 +293,6 @@ function DataList({ title, rows }: { title: string; rows: WorldRow[] }) {
 function RawDetail({ value }: { value: unknown }) {
   if (!value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length) return null;
   return <details className="world-relation-section world-raw-detail"><summary>其他解析数据</summary><pre className="world-detail-json">{JSON.stringify(value, null, 2)}</pre></details>;
-}
-
-function sortRows(items: WorldRow[], resource: PrimaryWorldResource, sortKey: SortKey): WorldRow[] {
-  const keyBySort: Record<SortKey, string> = { name: "name", level: "level", id: "id" };
-  const key = keyBySort[sortKey];
-  const sortValue = (item: WorldRow) => sortKey === "name" && resource === "pals" ? resolvePal(item).displayName : valueOf(item, key);
-  return [...items].sort((left, right) => sortValue(left).localeCompare(sortValue(right), "zh-CN", { numeric: true }));
-}
-
-function matchesRelationFilter(item: WorldRow, resource: PrimaryWorldResource, filter: RelationFilter): boolean {
-  if (filter === "all") return true;
-  const linked = resource === "pals" ? Boolean(item.ownerPlayerId || item.baseId) : resource === "guilds" ? Number(item.memberCount || 0) > 0 || Number(item.baseCount || 0) > 0 : Boolean(item.guildId);
-  return filter === "linked" ? linked : !linked;
 }
 
 function rowsOf(data: WorldRow, key: string): WorldRow[] {

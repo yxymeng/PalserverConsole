@@ -69,13 +69,19 @@ export function InstanceQuickPanel({
             {!settings && !error ? <div className="psc-instance-loading"><Spinner />正在读取实例设置</div> : null}
             {error ? <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>实例信息不可用</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
             {settings ? (
+              <>
+              <section className="psc-instance-overview">
+                <span className={`psc-instance-state ${shell?.serverState || "not_configured"}`} aria-hidden="true" />
+                <div><small>当前目标</small><strong>{shell?.instanceId || "default"}</strong><p>{shell?.serverState === "running" ? "PalServer 正在运行" : shell?.serverState === "stopped" ? "PalServer 已停止" : "尚未完成实例配置"}</p></div>
+                <Badge variant={shell?.serverState === "running" ? "success" : shell?.configured ? "secondary" : "warning"}>{shell?.serverState === "running" ? "运行中" : shell?.configured ? "已停止" : "待配置"}</Badge>
+              </section>
               <dl>
-                <div><dt><ServerCog aria-hidden="true" />当前实例</dt><dd>{shell?.instanceId || "default"}</dd></div>
                 <div><dt><HardDrive aria-hidden="true" />World ID</dt><dd>{settings.worldId || "尚未绑定"}</dd></div>
-                <div><dt>PalServer 路径</dt><dd>{settings.executablePath || "尚未选择 PalServer.exe"}</dd></div>
-                <div><dt>启动参数</dt><dd>{settings.launchArguments || "未设置"}</dd></div>
+                <div><dt><HardDrive aria-hidden="true" />PalServer 路径</dt><dd className="psc-instance-code">{settings.executablePath || "尚未选择 PalServer.exe"}</dd></div>
+                <div><dt><ServerCog aria-hidden="true" />启动参数</dt><dd className="psc-instance-code">{settings.launchArguments || "未设置"}</dd></div>
                 <div><dt><Network aria-hidden="true" />控制台端口</dt><dd>{auth.port}</dd></div>
               </dl>
+              </>
             ) : null}
             {settings?.bindingErrorCode ? <Alert variant="warning"><AlertTriangle aria-hidden="true" /><AlertTitle>世界绑定需要处理</AlertTitle><AlertDescription>{settings.bindingErrorCode}</AlertDescription></Alert> : null}
           </div>

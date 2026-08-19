@@ -2,7 +2,8 @@ import { BellRing, Download, Save, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import type { AuthStatus, NotificationStatus, Operation, ShellStatus } from "../../api/contracts";
-import { requestJson } from "../../api/client";
+import { createIdempotencyKey, requestJson } from "../../api/client";
+import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
 
 type UpdateProps = {
   auth: AuthStatus;
@@ -15,15 +16,11 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [confirmUpdate, setConfirmUpdate] = useState(false);
 
   async function startUpdate() {
     if (!steamcmdPath.trim()) {
       setError("请填写 steamcmd.exe 路径。");
-      return;
-    }
-    if (!window.confirm("更新会检查在线玩家、保存世界并关闭服务器。确认继续吗？")) return;
-    if (window.prompt("请输入 UPDATE 确认 SteamCMD 更新：", "") !== "UPDATE") {
-      setMessage("未输入 UPDATE，更新未开始。");
       return;
     }
     setBusy(true); setError(""); setMessage("");
@@ -32,7 +29,7 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
         method: "POST",
         headers: {
           "X-CSRF-Token": auth.csrfToken || "",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createIdempotencyKey(),
         },
         body: JSON.stringify({
           steamCmdPath: steamcmdPath.trim(),
@@ -63,8 +60,9 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
       <label htmlFor="steamcmd-path">steamcmd.exe 路径</label>
       <input id="steamcmd-path" value={steamcmdPath} onChange={(event) => setSteamcmdPath(event.target.value)} placeholder="例如 C:\\SteamCMD\\steamcmd.exe" />
       <p>只允许正在运行且在线玩家为零的服务器进入更新流程；停服超时不会自动强制结束进程。</p>
-      <button className="primary-button" type="button" disabled={busy || !canCheckUpdate} onClick={() => void startUpdate()}><Download size={18} />检查并执行 SteamCMD 更新</button>
+      <button className="primary-button" type="button" disabled={busy || !canCheckUpdate} onClick={() => { if (!steamcmdPath.trim()) setError("请填写 steamcmd.exe 路径。"); else setConfirmUpdate(true); }}><Download size={18} />检查并执行 SteamCMD 更新</button>
     </div>}
+    <ConfirmActionDialog open={confirmUpdate} title="执行 SteamCMD 更新？" description="更新会检查在线玩家、保存世界并关闭服务器；停服超时不会自动强制结束进程。" confirmLabel="确认更新" destructive confirmationText="UPDATE" confirmationLabel="高风险操作" disabled={busy} onOpenChange={setConfirmUpdate} onConfirm={() => void startUpdate()} />
   </section>;
 }
 
