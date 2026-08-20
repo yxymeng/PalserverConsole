@@ -1,7 +1,7 @@
-import { AlertTriangle, ChevronDown, FileCog, FolderSearch, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
+import { AlertTriangle, ChevronDown, FileCog, FolderSearch, HardDrive, Network, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { AuthStatus, ConfigDocument } from "../../api/contracts";
-import { isAbortError, requestJson } from "../../api/client";
+import { createIdempotencyKey, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { ConsolePortSettings } from "../server/ConsolePortSettings";
 import { ServerSettingsPanel } from "../server/ServerSettingsPanel";
@@ -609,7 +609,7 @@ export function ConfigPage({
   async function restartApply() {
     if (!window.confirm("确认停止并重启 PalServer 后应用草稿吗？将先发送维护通知并保存世界。")) return;
     setBusy(true); setError("");
-    try { await requestJson("/api/config/apply-with-restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启并应用操作。"); }
+    try { await requestJson("/api/config/apply-with-restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启并应用操作。"); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "重启应用失败"); } finally { setBusy(false); }
   }
   async function openFolder() { try { await requestJson("/api/config/open-folder", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
@@ -617,10 +617,19 @@ export function ConfigPage({
     <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />游戏配置</button>
     <button className={workspace === "instance" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "instance"} onClick={() => onWorkspaceChange("instance")}><ServerCog size={18} />实例与控制台</button>
   </div>;
-  const consoleAndInstanceSettings = <section className="config-console-settings">
-    <div className="section-heading"><div><h2>控制台与实例设置</h2><p>安装路径、World 绑定、启动参数和控制台端口集中在这里。</p></div></div>
-    <ServerSettingsPanel auth={auth} />
-    <ConsolePortSettings auth={auth} onAuthChanged={onAuthChanged} />
+  const consoleAndInstanceSettings = <section className="config-instance-workspace">
+    <header className="config-instance-heading">
+      <div><span className="config-instance-heading-icon"><ServerCog aria-hidden="true" /></span><div><h2>实例运行环境</h2><p>明确 PalServer 启动目标、世界绑定与控制台入口；这里的修改不会写入游戏规则配置。</p></div></div>
+      <span className="config-locality-badge" data-local={auth.local || undefined}>{auth.local ? "服务器本机 · 可编辑" : "局域网访问 · 只读"}</span>
+    </header>
+    <div className="config-instance-map" aria-label="实例设置范围">
+      <span><HardDrive aria-hidden="true" /><strong>运行实例</strong><small>可执行文件、World 与启动参数</small></span>
+      <span><Network aria-hidden="true" /><strong>控制台入口</strong><small>Web 管理端口，重启控制台后生效</small></span>
+    </div>
+    <div className="config-instance-grid">
+      <ServerSettingsPanel auth={auth} />
+      <ConsolePortSettings auth={auth} onAuthChanged={onAuthChanged} />
+    </div>
   </section>;
   if (workspace === "instance") return <div className="page-stack config-page">{workspaceTabs}{consoleAndInstanceSettings}</div>;
   if (!document) return <div className="page-stack config-page">{workspaceTabs}<section className="config-loading" aria-live="polite">{error ? <p className="form-error" role="alert">{error}</p> : <><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></>}</section></div>;

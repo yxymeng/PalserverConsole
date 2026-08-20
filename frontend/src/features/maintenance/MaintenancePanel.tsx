@@ -1,8 +1,9 @@
-import { BellRing, Download, Save, ShieldCheck } from "lucide-react";
+import { BellRing, CalendarClock, CheckCircle2, CircleX, Download, KeyRound, Play, Save, ShieldCheck, TriangleAlert, Webhook } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import type { AuthStatus, NotificationStatus, Operation, ShellStatus } from "../../api/contracts";
-import { requestJson } from "../../api/client";
+import { createIdempotencyKey, requestJson } from "../../api/client";
+import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
 
 type UpdateProps = {
   auth: AuthStatus;
@@ -15,15 +16,11 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [confirmUpdate, setConfirmUpdate] = useState(false);
 
   async function startUpdate() {
     if (!steamcmdPath.trim()) {
       setError("请填写 steamcmd.exe 路径。");
-      return;
-    }
-    if (!window.confirm("更新会检查在线玩家、保存世界并关闭服务器。确认继续吗？")) return;
-    if (window.prompt("请输入 UPDATE 确认 SteamCMD 更新：", "") !== "UPDATE") {
-      setMessage("未输入 UPDATE，更新未开始。");
       return;
     }
     setBusy(true); setError(""); setMessage("");
@@ -32,7 +29,7 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
         method: "POST",
         headers: {
           "X-CSRF-Token": auth.csrfToken || "",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createIdempotencyKey(),
         },
         body: JSON.stringify({
           steamCmdPath: steamcmdPath.trim(),
@@ -63,8 +60,9 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
       <label htmlFor="steamcmd-path">steamcmd.exe 路径</label>
       <input id="steamcmd-path" value={steamcmdPath} onChange={(event) => setSteamcmdPath(event.target.value)} placeholder="例如 C:\\SteamCMD\\steamcmd.exe" />
       <p>只允许正在运行且在线玩家为零的服务器进入更新流程；停服超时不会自动强制结束进程。</p>
-      <button className="primary-button" type="button" disabled={busy || !canCheckUpdate} onClick={() => void startUpdate()}><Download size={18} />检查并执行 SteamCMD 更新</button>
+      <button className="primary-button" type="button" disabled={busy || !canCheckUpdate} onClick={() => { if (!steamcmdPath.trim()) setError("请填写 steamcmd.exe 路径。"); else setConfirmUpdate(true); }}><Download size={18} />检查并执行 SteamCMD 更新</button>
     </div>}
+    <ConfirmActionDialog open={confirmUpdate} title="执行 SteamCMD 更新？" description="更新会检查在线玩家、保存世界并关闭服务器；停服超时不会自动强制结束进程。" confirmLabel="确认更新" destructive confirmationText="UPDATE" confirmationLabel="高风险操作" disabled={busy} onOpenChange={setConfirmUpdate} onConfirm={() => void startUpdate()} />
   </section>;
 }
 
@@ -105,20 +103,26 @@ export function MaintenanceNotificationsPanel({ auth }: { auth: AuthStatus }) {
   }
 
   return <section className="maintenance-section maintenance-notifications" id="maintenance-notifications" aria-labelledby="maintenance-notifications-title">
-    <div className="section-heading">
-      <div><h2 id="maintenance-notifications-title">维护通知</h2><p>现有 Webhook 设置仅发送维护计划、开始、完成、取消和失败事件；密钥不会再次显示。</p></div>
-    </div>
+    <section className="notification-heading"><div><span className="notification-heading-icon"><BellRing aria-hidden="true" /></span><div><h2 id="maintenance-notifications-title">维护通知</h2><p>将关键维护节点发送到团队 Webhook，密钥写入后不会再次显示。</p></div></div><div className="notification-status" aria-label="通知状态" data-enabled={notification.enabled || undefined}><span aria-hidden="true" /><div><small>当前状态</small><strong>{notification.enabled ? "已启用" : notification.configured ? "已配置，等待启用" : "尚未配置"}</strong></div></div></section>
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="form-success" role="status">{message}</p>}
     {!auth.local && <div className="notice-band"><ShieldCheck size={20} /><span>通知密钥只能在控制台本机修改。</span></div>}
-    {auth.local && <form className="settings-form server-form" onSubmit={saveNotifications}>
-      <label className="maintenance-toggle"><input type="checkbox" checked={notification.enabled} onChange={(event) => setNotification({ ...notification, enabled: event.target.checked })} /><span>启用维护 Webhook 通知</span></label>
-      <label htmlFor="notification-webhook">HTTPS Webhook 地址</label>
-      <input id="notification-webhook" type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={notification.configured ? "已配置；留空可保持不变" : "https://..."} />
-      <label htmlFor="notification-secret">Webhook 密钥</label>
-      <input id="notification-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={notification.configured ? "已配置；留空可保持不变" : "首次启用时必填"} />
-      <button className="primary-button" type="submit" disabled={busy}><Save size={18} />保存通知设置</button>
-    </form>}
-    <div className="notice-band"><BellRing size={20} /><span>通知状态：{notification.enabled ? "已启用" : notification.configured ? "已配置但未启用" : "未配置"}</span></div>
+    <div className="notification-layout">
+      <section className="notification-events" aria-label="通知覆盖事件"><header><div><span>发送范围</span><h3>维护生命周期</h3></div><small>5 类事件</small></header><div>
+        <article><CalendarClock aria-hidden="true" /><span><strong>计划</strong><small>维护任务进入倒计时</small></span></article>
+        <article><Play aria-hidden="true" /><span><strong>开始</strong><small>服务器进入维护流程</small></span></article>
+        <article><CheckCircle2 aria-hidden="true" /><span><strong>完成</strong><small>维护操作成功结束</small></span></article>
+        <article><CircleX aria-hidden="true" /><span><strong>取消</strong><small>维护在执行前被取消</small></span></article>
+        <article><TriangleAlert aria-hidden="true" /><span><strong>失败</strong><small>附带可诊断错误信息</small></span></article>
+      </div><p><ShieldCheck aria-hidden="true" />只发送维护事件，不包含玩家数据、配置内容或密钥。</p></section>
+      {auth.local && <form className="notification-form" onSubmit={saveNotifications}>
+        <div className="notification-form-title"><div><h3>Webhook 连接</h3><p>留空已配置字段，可保持现有值不变。</p></div><label className="notification-switch"><input type="checkbox" checked={notification.enabled} onChange={(event) => setNotification({ ...notification, enabled: event.target.checked })} /><span aria-hidden="true" /><strong>{notification.enabled ? "启用" : "停用"}</strong></label></div>
+        <label htmlFor="notification-webhook"><Webhook aria-hidden="true" /><span>HTTPS Webhook 地址</span></label>
+        <input id="notification-webhook" type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={notification.configured ? "已配置；留空可保持不变" : "https://..."} />
+        <label htmlFor="notification-secret"><KeyRound aria-hidden="true" /><span>Webhook 密钥</span></label>
+        <input id="notification-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={notification.configured ? "已配置；留空可保持不变" : "首次启用时必填"} />
+        <button className="primary-button" type="submit" disabled={busy}><Save size={18} />保存通知设置</button>
+      </form>}
+    </div>
   </section>;
 }

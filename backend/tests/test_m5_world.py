@@ -339,6 +339,42 @@ def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
     assert {row["guildName"] for row in bases} == {"测试工会"}
 
 
+def test_player_status_filter_and_sort_apply_before_pagination(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    player_id = str(uuid.UUID(int=1))
+    guild_id = str(uuid.UUID(int=500))
+    second_player_id = str(uuid.UUID(int=301))
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
+            (guild_id, "测试工会", 1, 0, "{}"),
+        )
+        connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
+        connection.execute(
+            "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (second_player_id, "instance-2", "高级玩家", 50, None, "[]", None, None, "{}"),
+        )
+
+    guilded, guilded_total = query_cache(
+        cache, "players", page=1, page_size=1, status="guilded", sort="name"
+    )
+    unguilded, unguilded_total = query_cache(
+        cache, "players", page=1, page_size=1, status="unguilded", sort="name"
+    )
+    sorted_rows, sorted_total = query_cache(
+        cache, "players", page=1, page_size=1, sort="level-desc"
+    )
+
+    assert guilded_total == 1
+    assert guilded[0]["id"] == player_id
+    assert unguilded_total == 1
+    assert unguilded[0]["id"] == second_player_id
+    assert sorted_total == 2
+    assert sorted_rows[0]["id"] == second_player_id
+
+
 def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
