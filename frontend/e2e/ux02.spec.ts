@@ -141,6 +141,7 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   await expect(operationIsland).toContainText("关闭服务器");
   await expect(operationIsland).toContainText("维护倒计时中，仍可取消。", { timeout: 2_500 });
   await expect(operationIsland.getByRole("progressbar")).toBeVisible();
+  await expect(operationIsland.locator(".operation-liquid-fill")).toBeVisible();
   await expect(operationIsland).toContainText(/剩余 \d+ 秒/);
   await expect(operationIsland.getByRole("button", { name: "取消" })).toBeVisible();
   await expect(operationIsland).not.toContainText("countdown");

@@ -46,8 +46,12 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   await expect(page.getByRole("heading", { name: "官方备份" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "服务器更新" })).toBeHidden();
   await expect(page.getByRole("combobox", { name: "保留数量" })).toBeVisible();
+  await expect(page.getByLabel("备份概览")).toContainText("1");
+  await expect(page.locator(".backup-ledger-item")).toContainText("backup-1");
   await expect(page.getByText("infinite", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "恢复" })).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: testInfo.outputPath(`ux08-backups-${testInfo.project.name}.png`), fullPage: true });
   await page.getByRole("button", { name: "删除" }).click();
   const deleteDialog = page.getByRole("alertdialog");
   await expect(deleteDialog).toContainText("删除历史备份 backup-1");
@@ -58,6 +62,9 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   expect(await page.locator(".audit-table-row").evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
   await sections.getByRole("tab", { name: "维护通知" }).click();
   await expect(page.getByRole("heading", { name: "维护通知" })).toBeVisible();
+  await expect(page.getByLabel("通知覆盖事件")).toContainText("计划");
+  await expect(page.getByLabel("通知状态")).toContainText("已启用");
+  await page.waitForTimeout(250);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: testInfo.outputPath(`ux08-${testInfo.project.name}.png`), fullPage: true });
 });

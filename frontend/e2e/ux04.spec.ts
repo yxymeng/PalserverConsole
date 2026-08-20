@@ -55,6 +55,9 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   await page.getByRole("button", { name: "世界数据" }).click();
 
+  await expect(page.locator(".world-command-deck")).toContainText("存档缓存可用");
+  await expect(page.locator(".world-command-counts")).toContainText("3");
+
   const tabs = page.getByRole("tablist", { name: "世界实体分类" });
   await expect(tabs.getByRole("tab")).toHaveCount(4);
   await expect(tabs).toContainText("玩家");
@@ -64,6 +67,8 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(tabs).not.toContainText("库存");
   await expect(tabs).not.toContainText("工作帕鲁");
   await expect(page.locator(".world-player-avatar")).toHaveText("A");
+  await expect(page.locator(".world-list-heading")).toContainText("玩家名册");
+  await expect(page.locator(".world-entity-list")).toBeVisible();
   await expect(page.locator(".world-list-panel")).toContainText("测试工会");
   await expect(page.locator(".world-list-panel")).toContainText("已加入工会");
 
@@ -80,6 +85,10 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
 
   await page.getByRole("tab", { name: "帕鲁" }).click();
+  await expect(page.locator('.world-browser[data-resource="pals"]')).toBeVisible();
+  await expect(page.locator(".pal-collection-summary")).toContainText("帕鲁总数");
+  await expect(page.getByRole("group", { name: "归属" })).toContainText("玩家持有");
+  await expect(page.locator(".pal-roster-head")).toContainText("主人");
   await expect(page.locator(".world-list-panel")).toContainText("FuturePal");
   await expect(page.locator(".world-list-panel")).toContainText("Alice");
   const palRow = page.locator(".world-table-row").filter({ hasText: "小羊" });
@@ -89,15 +98,17 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(palRow.locator('[data-label="据点"]')).toHaveText("据点一号");
   await expect(palRow).not.toContainText("base-1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
-  await page.getByLabel("排序方式").selectOption("name");
+  await page.locator(".pal-sort-segments").getByRole("button", { name: "名称", exact: true }).click();
   await expect.poll(() => worldListUrls.at(-1)?.searchParams.get("sort")).toBe("name");
   await page.getByRole("button", { name: "小羊" }).click();
+  await expect(drawer).toHaveAttribute("data-resource", "pals");
+  await expect(drawer.locator(".world-pal-detail-hero")).toContainText("Lv.18");
   await expect(drawer).toContainText("种族");
   await expect(drawer).toContainText("棉悠悠");
   await expect(drawer.locator(".world-pal-gender")).toHaveText("♀");
   await expect(drawer).toContainText("闪光 · 浓缩等级 1");
   await page.screenshot({ path: testInfo.outputPath(`ux05-${testInfo.project.name}.png`), fullPage: true });
-  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
+  await drawer.getByRole("button", { name: "关闭详情" }).click();
 
   await page.getByRole("tab", { name: "工会" }).click();
   await page.getByRole("button", { name: "测试工会" }).click();
@@ -115,5 +126,6 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect.poll(() => worldListUrls.at(-1)?.searchParams.get("status")).toBe("guilded");
   await expect.poll(() => worldListUrls.at(-1)?.searchParams.get("sort")).toBe("id");
   await expect(page.getByRole("button", { name: "清除筛选条件" })).toBeVisible();
+  await expect(page.locator(".world-active-filters")).toContainText("已归属工会");
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });

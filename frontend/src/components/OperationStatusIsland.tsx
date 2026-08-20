@@ -1,9 +1,9 @@
 import { AlertTriangle, CheckCircle2, CircleStop } from "lucide-react";
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 import type { Operation } from "../api/contracts";
 import { Button } from "./ui/button";
-import { Progress } from "./ui/progress";
 import { Spinner } from "./ui/spinner";
 
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
@@ -68,7 +68,11 @@ export function OperationStatusIsland({
     </div>
     <div className="operation-island-progress">
       <div><span>{countdown ? "维护倒计时" : completed ? "执行结果" : "阶段进度"}</span><strong>{countdown ? `剩余 ${remainingSeconds} 秒` : operationStageLabel(operation)}</strong></div>
-      <Progress value={progress} aria-label={countdown ? "维护倒计时进度" : "服务器操作进度"} />
+      <div className="operation-liquid-progress" role="progressbar" aria-label={countdown ? "维护倒计时进度" : "服务器操作进度"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
+        <motion.div className="operation-liquid-fill" initial={false} animate={{ width: `${progress}%` }} transition={{ type: "spring", stiffness: 80, damping: 22, mass: 0.7 }}>
+          <span className="operation-liquid-surface" aria-hidden="true" />
+        </motion.div>
+      </div>
     </div>
   </section>;
 }

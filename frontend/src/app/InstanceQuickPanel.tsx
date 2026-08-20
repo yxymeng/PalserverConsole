@@ -1,4 +1,5 @@
-import { AlertTriangle, ArrowRight, HardDrive, Network, ServerCog } from "lucide-react";
+import { AlertTriangle, ArrowRight, Database, HardDrive, Network, ServerCog, Terminal } from "lucide-react";
+import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 
 import type { AuthStatus, ServerSettings, ShellStatus } from "../api/contracts";
@@ -69,19 +70,22 @@ export function InstanceQuickPanel({
             {!settings && !error ? <div className="psc-instance-loading"><Spinner />正在读取实例设置</div> : null}
             {error ? <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>实例信息不可用</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
             {settings ? (
-              <>
-              <section className="psc-instance-overview">
-                <span className={`psc-instance-state ${shell?.serverState || "not_configured"}`} aria-hidden="true" />
-                <div><small>当前目标</small><strong>{shell?.instanceId || "default"}</strong><p>{shell?.serverState === "running" ? "PalServer 正在运行" : shell?.serverState === "stopped" ? "PalServer 已停止" : "尚未完成实例配置"}</p></div>
-                <Badge variant={shell?.serverState === "running" ? "success" : shell?.configured ? "secondary" : "warning"}>{shell?.serverState === "running" ? "运行中" : shell?.configured ? "已停止" : "待配置"}</Badge>
-              </section>
-              <dl>
-                <div><dt><HardDrive aria-hidden="true" />World ID</dt><dd>{settings.worldId || "尚未绑定"}</dd></div>
-                <div><dt><HardDrive aria-hidden="true" />PalServer 路径</dt><dd className="psc-instance-code">{settings.executablePath || "尚未选择 PalServer.exe"}</dd></div>
-                <div><dt><ServerCog aria-hidden="true" />启动参数</dt><dd className="psc-instance-code">{settings.launchArguments || "未设置"}</dd></div>
-                <div><dt><Network aria-hidden="true" />控制台端口</dt><dd>{auth.port}</dd></div>
-              </dl>
-              </>
+              <motion.div className="psc-instance-content" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}>
+                <section className="psc-instance-overview">
+                  <div className="psc-instance-orb" data-state={shell?.serverState || "not_configured"}><span aria-hidden="true" /></div>
+                  <div><small>运行目标</small><strong>{shell?.instanceId || "default"}</strong><p>{shell?.serverState === "running" ? "PalServer 正在运行，控制台正在监测此实例。" : shell?.serverState === "stopped" ? "实例已绑定，PalServer 当前处于停止状态。" : "尚未完成实例与世界绑定。"}</p></div>
+                  <Badge variant={shell?.serverState === "running" ? "success" : shell?.configured ? "secondary" : "warning"}>{shell?.serverState === "running" ? "运行中" : shell?.configured ? "已停止" : "待配置"}</Badge>
+                </section>
+                <section className="psc-instance-endpoints" aria-label="实例端点">
+                  <article><Database aria-hidden="true" /><span>World ID</span><strong>{settings.worldId || "尚未绑定"}</strong></article>
+                  <article><Network aria-hidden="true" /><span>控制台端口</span><strong>{auth.port}</strong></article>
+                </section>
+                <section className="psc-instance-runtime" aria-label="启动目标">
+                  <header><HardDrive aria-hidden="true" /><div><span>PalServer 可执行文件</span><small>启动、关闭和健康检查均以此路径为目标</small></div></header>
+                  <code>{settings.executablePath || "尚未选择 PalServer.exe"}</code>
+                  <div className="psc-instance-arguments"><Terminal aria-hidden="true" /><div><span>启动参数</span><code>{settings.launchArguments || "未设置额外参数"}</code></div></div>
+                </section>
+              </motion.div>
             ) : null}
             {settings?.bindingErrorCode ? <Alert variant="warning"><AlertTriangle aria-hidden="true" /><AlertTitle>世界绑定需要处理</AlertTitle><AlertDescription>{settings.bindingErrorCode}</AlertDescription></Alert> : null}
           </div>

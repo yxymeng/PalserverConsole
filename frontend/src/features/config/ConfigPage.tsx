@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, FileCog, FolderSearch, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
+import { AlertTriangle, ChevronDown, FileCog, FolderSearch, HardDrive, Network, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { AuthStatus, ConfigDocument } from "../../api/contracts";
 import { createIdempotencyKey, isAbortError, requestJson } from "../../api/client";
@@ -617,10 +617,19 @@ export function ConfigPage({
     <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />游戏配置</button>
     <button className={workspace === "instance" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "instance"} onClick={() => onWorkspaceChange("instance")}><ServerCog size={18} />实例与控制台</button>
   </div>;
-  const consoleAndInstanceSettings = <section className="config-console-settings">
-    <div className="section-heading"><div><h2>控制台与实例设置</h2><p>安装路径、World 绑定、启动参数和控制台端口集中在这里。</p></div></div>
-    <ServerSettingsPanel auth={auth} />
-    <ConsolePortSettings auth={auth} onAuthChanged={onAuthChanged} />
+  const consoleAndInstanceSettings = <section className="config-instance-workspace">
+    <header className="config-instance-heading">
+      <div><span className="config-instance-heading-icon"><ServerCog aria-hidden="true" /></span><div><h2>实例运行环境</h2><p>明确 PalServer 启动目标、世界绑定与控制台入口；这里的修改不会写入游戏规则配置。</p></div></div>
+      <span className="config-locality-badge" data-local={auth.local || undefined}>{auth.local ? "服务器本机 · 可编辑" : "局域网访问 · 只读"}</span>
+    </header>
+    <div className="config-instance-map" aria-label="实例设置范围">
+      <span><HardDrive aria-hidden="true" /><strong>运行实例</strong><small>可执行文件、World 与启动参数</small></span>
+      <span><Network aria-hidden="true" /><strong>控制台入口</strong><small>Web 管理端口，重启控制台后生效</small></span>
+    </div>
+    <div className="config-instance-grid">
+      <ServerSettingsPanel auth={auth} />
+      <ConsolePortSettings auth={auth} onAuthChanged={onAuthChanged} />
+    </div>
   </section>;
   if (workspace === "instance") return <div className="page-stack config-page">{workspaceTabs}{consoleAndInstanceSettings}</div>;
   if (!document) return <div className="page-stack config-page">{workspaceTabs}<section className="config-loading" aria-live="polite">{error ? <p className="form-error" role="alert">{error}</p> : <><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></>}</section></div>;
