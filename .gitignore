@@ -56,6 +56,10 @@ Desktop.ini
 /docs/portable-packaging.md
 /docs/development-roadmap.md
 
+# Local agent tracker and setup configuration
+/.scratch/
+/docs/agents/
+
 # Local Codex instructions and optimization roadmap
 /AGENTS.md
 /CODEX_OPTIMIZATION_ROADMAP.md
