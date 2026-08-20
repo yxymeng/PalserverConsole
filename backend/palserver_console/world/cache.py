@@ -12,8 +12,13 @@ from typing import Any
 
 from ..steam import is_reparse_point
 
-CACHE_SCHEMA_VERSION = 1
+CACHE_SCHEMA_NAME = "world-asset-cache"
+CACHE_SCHEMA_VERSION = 2
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+
+
+class WorldCacheSchemaError(ValueError):
+    """The derived cache belongs to a different immutable cache schema."""
 
 CACHE_SCHEMA = """
 CREATE TABLE cache_info (
@@ -211,6 +216,7 @@ def build_world_cache(
         connection.execute("PRAGMA journal_mode = DELETE")
         connection.executescript(CACHE_SCHEMA)
         metadata = {
+            "schema": CACHE_SCHEMA_NAME,
             "schema_version": str(CACHE_SCHEMA_VERSION),
             "snapshot_id": snapshot_id,
             "source_observed_at": str(source_observed_at),
@@ -286,6 +292,17 @@ def validate_cache_file(path: Path) -> dict[str, int]:
         raise ValueError("World cache must be a regular .sqlite file.")
     connection = sqlite3.connect(f"file:{resolved.as_posix()}?mode=ro", uri=True)
     try:
+        metadata = {
+            str(key): str(value)
+            for key, value in connection.execute("SELECT key, value FROM cache_info").fetchall()
+        }
+        if metadata.get("schema") != CACHE_SCHEMA_NAME or metadata.get(
+            "schema_version"
+        ) != str(CACHE_SCHEMA_VERSION):
+            raise WorldCacheSchemaError("World cache schema is incompatible.")
+        user_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if user_version != CACHE_SCHEMA_VERSION:
+            raise WorldCacheSchemaError("World cache schema is incompatible.")
         row = connection.execute("SELECT value FROM cache_info WHERE key='counts'").fetchone()
         if row is None:
             raise ValueError("World cache is missing counts metadata.")

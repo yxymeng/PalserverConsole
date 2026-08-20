@@ -20,6 +20,7 @@ from ..config import ProfileError, ServerProfile
 from ..persistence import Database
 from ..steam import is_reparse_point
 from .cache import (
+    WorldCacheSchemaError,
     entity_detail,
     inspect_storage,
     query_cache,
@@ -298,7 +299,9 @@ class WorldSnapshotService:
             return report
 
     def status(self) -> dict[str, object]:
-        current = self.database.current_snapshot_version()
+        return self._status_for_snapshot(self.database.current_snapshot_version())
+
+    def _status_for_snapshot(self, current: dict[str, object] | None) -> dict[str, object]:
         with self._lock:
             error = self._last_error
             parsing = self._parsing
@@ -320,21 +323,53 @@ class WorldSnapshotService:
                     parsed_at = int(persisted.get("parsedAt", 0)) or None
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
+        cache_available = False
         if current:
-            cache_path = Path(str(current["cache_path"]))
-            if cache_path.is_file():
-                try:
-                    metadata = read_cache_metadata(cache_path)
-                    raw_game_time_ticks = metadata.get("game_time_ticks")
-                    if raw_game_time_ticks is not None:
-                        game_time_ticks = max(0, int(raw_game_time_ticks))
-                    if not counts:
-                        counts = validate_cache_file(cache_path)
-                except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
-                    error = ("CACHE_INVALID", "最后成功缓存无法读取。")
+            try:
+                cache_path = self._validated_cache_path(current)
+                metadata = read_cache_metadata(cache_path)
+                raw_game_time_ticks = metadata.get("game_time_ticks")
+                if raw_game_time_ticks is not None:
+                    game_time_ticks = max(0, int(raw_game_time_ticks))
+                counts = validate_cache_file(cache_path)
+                cache_available = True
+            except WorldDataError as cache_error:
+                error = (cache_error.code, str(cache_error))
+            except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error):
+                error = ("CACHE_INVALID", "最后成功缓存无法读取。")
         observed_at = (
             int(str(current["source_observed_at"])) if current else int(time.time())
         )
+        if cache_available:
+            coverage_state = "complete"
+            coverage_resources = {
+                "players": True,
+                "pals": True,
+                "guilds": True,
+                "bases": True,
+                "inventories": True,
+                "workPals": True,
+            }
+        else:
+            coverage_state = "unavailable"
+            coverage_resources = {
+                "players": False,
+                "pals": False,
+                "guilds": False,
+                "bases": False,
+                "inventories": False,
+                "workPals": False,
+            }
+        if error is not None and error[0] == "CACHE_SCHEMA_INCOMPATIBLE":
+            parse_status = "incompatible"
+        elif parsing:
+            parse_status = "parsing"
+        elif error is not None:
+            parse_status = "failed"
+        elif current is not None:
+            parse_status = "ready"
+        else:
+            parse_status = "unavailable"
         return {
             "source": "save-snapshot",
             "observedAt": observed_at,
@@ -346,6 +381,11 @@ class WorldSnapshotService:
             "error": error[1] if error else None,
             "snapshotId": current["id"] if current else None,
             "parsing": parsing,
+            "parseStatus": parse_status,
+            "dataCoverage": {
+                "state": coverage_state,
+                "resources": coverage_resources,
+            },
             "parseDurationMs": duration,
             "peakMemoryBytes": peak_memory,
             "cacheSizeBytes": cache_size,
@@ -362,8 +402,9 @@ class WorldSnapshotService:
         search: str | None,
         owner_id: str | None,
         base_id: str | None,
+        snapshot_id: str | None = None,
     ) -> dict[str, object]:
-        cache = self._current_cache()
+        current, cache = self._current_snapshot_cache(snapshot_id)
         items, total = query_cache(
             cache,
             resource,
@@ -373,7 +414,7 @@ class WorldSnapshotService:
             owner_id=owner_id,
             base_id=base_id,
         )
-        state = self.status()
+        state = self._status_for_snapshot(current)
         return {
             "items": items,
             "page": page,
@@ -381,42 +422,76 @@ class WorldSnapshotService:
             "total": total,
             "source": state["source"],
             "observedAt": state["observedAt"],
+            "sourceObservedAt": state["sourceObservedAt"],
+            "collectedAt": state["collectedAt"],
+            "parsedAt": state["parsedAt"],
+            "snapshotId": state["snapshotId"],
             "stale": state["stale"],
+            "parseStatus": state["parseStatus"],
             "errorCode": state["errorCode"],
+            "dataCoverage": state["dataCoverage"],
         }
 
-    def get_player(self, player_id: str) -> dict[str, object]:
-        result = entity_detail(self._current_cache(), "players", player_id)
+    def get_player(
+        self, player_id: str, *, snapshot_id: str | None = None
+    ) -> dict[str, object]:
+        current, cache = self._current_snapshot_cache(snapshot_id)
+        result = entity_detail(cache, "players", player_id)
         if result is None:
             raise WorldDataError("PLAYER_NOT_FOUND", "玩家不存在于当前存档缓存。")
-        state = self.status()
+        state = self._status_for_snapshot(current)
         return {
             **result,
             "source": state["source"],
             "observedAt": state["observedAt"],
+            "sourceObservedAt": state["sourceObservedAt"],
+            "collectedAt": state["collectedAt"],
+            "parsedAt": state["parsedAt"],
+            "snapshotId": state["snapshotId"],
             "stale": state["stale"],
+            "parseStatus": state["parseStatus"],
             "errorCode": state["errorCode"],
+            "dataCoverage": state["dataCoverage"],
         }
 
-    def get_entity(self, resource: str, entity_id: str) -> dict[str, object]:
+    def get_entity(
+        self, resource: str, entity_id: str, *, snapshot_id: str | None = None
+    ) -> dict[str, object]:
         if resource not in {"players", "pals", "guilds", "bases"}:
             raise WorldDataError("WORLD_RESOURCE_NOT_FOUND", "世界数据类型不存在。")
-        result = entity_detail(self._current_cache(), resource, entity_id)
+        current, cache = self._current_snapshot_cache(snapshot_id)
+        result = entity_detail(cache, resource, entity_id)
         if result is None:
             raise WorldDataError("WORLD_ENTITY_NOT_FOUND", "实体不存在于当前存档缓存。")
-        state = self.status()
+        state = self._status_for_snapshot(current)
         return {
             **result,
             "source": state["source"],
             "observedAt": state["observedAt"],
+            "sourceObservedAt": state["sourceObservedAt"],
+            "collectedAt": state["collectedAt"],
+            "parsedAt": state["parsedAt"],
+            "snapshotId": state["snapshotId"],
             "stale": state["stale"],
+            "parseStatus": state["parseStatus"],
             "errorCode": state["errorCode"],
+            "dataCoverage": state["dataCoverage"],
         }
 
     def _current_cache(self) -> Path:
+        return self._current_snapshot_cache()[1]
+
+    def _current_snapshot_cache(
+        self, snapshot_id: str | None = None
+    ) -> tuple[dict[str, object], Path]:
         current = self.database.current_snapshot_version()
         if current is None:
             raise WorldDataError("WORLD_CACHE_UNAVAILABLE", "尚无成功的存档解析缓存。")
+        if snapshot_id is not None and snapshot_id != str(current["id"]):
+            raise WorldDataError("SNAPSHOT_REPLACED", "请求的存档快照已被新的成功缓存替换。")
+        return current, self._validated_cache_path(current)
+
+    def _validated_cache_path(self, current: dict[str, object]) -> Path:
         path = Path(str(current["cache_path"])).resolve(strict=False)
         root = self.cache_root.resolve(strict=False)
         try:
@@ -425,6 +500,14 @@ class WorldSnapshotService:
             raise WorldDataError("CACHE_PATH_INVALID", "当前缓存路径越界。") from error
         if not path.is_file() or path.suffix.casefold() != ".sqlite":
             raise WorldDataError("WORLD_CACHE_UNAVAILABLE", "最后成功缓存文件不存在。")
+        try:
+            validate_cache_file(path)
+        except WorldCacheSchemaError as error:
+            raise WorldDataError(
+                "CACHE_SCHEMA_INCOMPATIBLE", "当前缓存版本不兼容，正在重新解析。"
+            ) from error
+        except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error) as error:
+            raise WorldDataError("CACHE_INVALID", "最后成功缓存无法读取。") from error
         return path
 
     def _watch_loop(self) -> None:

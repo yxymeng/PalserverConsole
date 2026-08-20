@@ -46,29 +46,39 @@ def router(deps: AppDependencies) -> APIRouter:
         return result
 
     @api.get("/api/world/players/{player_id}", tags=["world"], response_model=None)
-    def world_player(player_id: str, request: Request) -> dict[str, object] | JSONResponse:
-        denied = require_authenticated_request(request, deps.auth)
-        if denied:
-            return denied
-        try:
-            return deps.world.get_player(player_id)
-        except WorldDataError as error:
-            status = 404 if error.code == "PLAYER_NOT_FOUND" else 503
-            return error_response(status, error.code, str(error))
-
-    @api.get("/api/world/{resource}/{entity_id}", tags=["world"], response_model=None)
-    def world_entity(
-        resource: str, entity_id: str, request: Request
+    def world_player(
+        player_id: str, request: Request, snapshotId: str | None = None
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
         if denied:
             return denied
         try:
-            return deps.world.get_entity(resource, entity_id)
+            return deps.world.get_player(player_id, snapshot_id=snapshotId)
+        except WorldDataError as error:
+            status = (
+                404
+                if error.code == "PLAYER_NOT_FOUND"
+                else 409
+                if error.code == "SNAPSHOT_REPLACED"
+                else 503
+            )
+            return error_response(status, error.code, str(error))
+
+    @api.get("/api/world/{resource}/{entity_id}", tags=["world"], response_model=None)
+    def world_entity(
+        resource: str, entity_id: str, request: Request, snapshotId: str | None = None
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            return deps.world.get_entity(resource, entity_id, snapshot_id=snapshotId)
         except WorldDataError as error:
             status = (
                 404
                 if error.code in {"WORLD_ENTITY_NOT_FOUND", "WORLD_RESOURCE_NOT_FOUND"}
+                else 409
+                if error.code == "SNAPSHOT_REPLACED"
                 else 503
             )
             return error_response(status, error.code, str(error))
@@ -82,6 +92,7 @@ def router(deps: AppDependencies) -> APIRouter:
         search: str | None = None,
         ownerId: str | None = None,
         baseId: str | None = None,
+        snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
         if denied:
@@ -100,9 +111,11 @@ def router(deps: AppDependencies) -> APIRouter:
                 search=search,
                 owner_id=ownerId,
                 base_id=baseId,
+                snapshot_id=snapshotId,
             )
         except WorldDataError as error:
-            return error_response(503, error.code, str(error))
+            status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
+            return error_response(status, error.code, str(error))
 
     @api.post("/api/world/reparse", tags=["world"], response_model=MessageResponse)
     def world_reparse(request: Request) -> MessageResponse | JSONResponse:

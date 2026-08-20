@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight, Database, PawPrint, RefreshCw, Search, Slide
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 import type { AuthStatus, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
-import { isAbortError, requestJson } from "../../api/client";
+import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
@@ -43,6 +43,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const pageSize = 50;
   const nextRequestSignal = useAbortableRequest();
   const loadSequence = useRef(0);
+  const snapshotId = status?.snapshotId;
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -50,14 +51,22 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setListLoading(true);
     setError("");
     try {
-      const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
-      if (appliedSearch) query.set("search", appliedSearch);
-      const [nextStatus, nextResult] = await Promise.all([
-        requestJson<WorldStatus>("/api/world/snapshots/current", { signal }),
-        requestJson<WorldResponse>(`/api/world/${resource}?${query}`, { signal }),
-      ]);
-      setStatus(nextStatus);
-      setResult(nextResult);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current", { signal });
+        const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+        if (appliedSearch) query.set("search", appliedSearch);
+        if (nextStatus.snapshotId) query.set("snapshotId", nextStatus.snapshotId);
+        try {
+          const nextResult = await requestJson<WorldResponse>(`/api/world/${resource}?${query}`, { signal });
+          if (nextResult.snapshotId !== nextStatus.snapshotId) continue;
+          setStatus(nextStatus);
+          setResult(nextResult);
+          break;
+        } catch (caught) {
+          if (caught instanceof ApiRequestError && caught.code === "SNAPSHOT_REPLACED" && attempt === 0) continue;
+          throw caught;
+        }
+      }
     } catch (caught) {
       if (!isAbortError(caught)) setError(caught instanceof Error ? caught.message : "世界数据读取失败");
     } finally {
@@ -119,14 +128,16 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     try {
       setSelected({
         resource: nextResource,
-        data: await requestJson<WorldRow>(`/api/world/${nextResource}/${encodeURIComponent(id)}`),
+        data: await requestJson<WorldRow>(
+          `/api/world/${nextResource}/${encodeURIComponent(id)}${snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : ""}`,
+        ),
       });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "实体详情读取失败");
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [snapshotId]);
 
   const displayedItems = useMemo(
     () => sortRows(

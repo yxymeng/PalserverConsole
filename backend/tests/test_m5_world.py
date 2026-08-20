@@ -21,10 +21,12 @@ from palserver_console.main import create_app
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import verify_stable_parse
 from palserver_console.world.cache import (
+    WorldCacheSchemaError,
     build_world_cache,
     entity_detail,
     query_cache,
     read_cache_metadata,
+    validate_cache_file,
 )
 from palserver_console.world.service import WorldDataError, WorldSnapshotService
 
@@ -494,13 +496,19 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     ) as client:
         response = client.get("/api/world/bases?page=1&pageSize=1")
         rejected = client.get("/api/world/pals?pageSize=201")
+        replaced = client.get("/api/world/pals?snapshotId=superseded")
         pal_detail = client.get(f"/api/world/pals/{uuid.UUID(int=401)}")
 
     assert response.status_code == 200
     assert response.json()["total"] == 2
     assert len(response.json()["items"]) == 1
+    assert response.json()["snapshotId"] == "fixture"
+    assert response.json()["parseStatus"] == "failed"
+    assert response.json()["dataCoverage"]["state"] == "complete"
     assert rejected.status_code == 422
     assert rejected.json()["errorCode"] == "INVALID_WORLD_PAGE"
+    assert replaced.status_code == 409
+    assert replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
     assert pal_detail.status_code == 200
     assert pal_detail.json()["owner"]["name"] == "测试玩家"
 
@@ -903,6 +911,149 @@ def test_ooz_discovery_result_is_cached_until_reparse(
     assert service._find_ooz_dll() == dll.resolve()
     service.request_reparse()
     assert service._find_ooz_dll() is None
+
+
+def test_typed_world_contract_pins_list_and_detail_to_one_snapshot(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    level, players = _synthetic_properties()
+    cache = tmp_path / "data" / "cache" / "world-cache-fixture.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=10)
+    database.record_snapshot_version(
+        "fixture",
+        str(cache),
+        10,
+        json.dumps({"status": "success", "collectedAt": 11, "parsedAt": 12}),
+        make_current=True,
+    )
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    summary = service.status()
+    listing = service.list_resource(
+        "players",
+        page=1,
+        page_size=50,
+        search=None,
+        owner_id=None,
+        base_id=None,
+        snapshot_id="fixture",
+    )
+    items = listing["items"]
+    assert isinstance(items, list) and items
+    first_item = items[0]
+    assert isinstance(first_item, dict)
+    detail = service.get_entity("players", str(first_item["id"]), snapshot_id="fixture")
+
+    assert summary["parseStatus"] == "ready"
+    assert summary["dataCoverage"] == {"state": "complete", "resources": {
+        "players": True, "pals": True, "guilds": True, "bases": True,
+        "inventories": True, "workPals": True,
+    }}
+    assert listing["snapshotId"] == "fixture"
+    assert listing["collectedAt"] == 11
+    assert listing["parsedAt"] == 12
+    assert detail["snapshotId"] == "fixture"
+
+
+def test_incompatible_world_cache_is_not_used_and_requests_reparse(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    level, players = _synthetic_properties()
+    cache = tmp_path / "data" / "cache" / "world-cache-legacy.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="legacy", source_observed_at=10)
+    with sqlite3.connect(cache) as connection:
+        connection.execute("UPDATE cache_info SET value = '1' WHERE key = 'schema_version'")
+    database.record_snapshot_version("legacy", str(cache), 10, "success", make_current=True)
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    with pytest.raises(WorldCacheSchemaError):
+        validate_cache_file(cache)
+    status = service.status()
+    with pytest.raises(WorldDataError) as raised:
+        service.list_resource(
+            "players", page=1, page_size=50, search=None, owner_id=None, base_id=None
+        )
+
+    assert status["errorCode"] == "CACHE_SCHEMA_INCOMPATIBLE"
+    assert status["parseStatus"] == "incompatible"
+    coverage = status["dataCoverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["state"] == "unavailable"
+    assert raised.value.code == "CACHE_SCHEMA_INCOMPATIBLE"
+
+
+def test_failed_parse_keeps_last_compatible_cache_readable(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    data_dir = tmp_path / "data"
+    service = WorldSnapshotService(database, lambda: None, data_dir, minimum_free_bytes=0)
+    level, players = _synthetic_properties()
+    old_cache = service.cache_root / "world-cache-old.sqlite"
+    old_cache.parent.mkdir(parents=True)
+    build_world_cache(old_cache, level, players, snapshot_id="old", source_observed_at=1)
+    database.record_snapshot_version("old", str(old_cache), 1, "success", make_current=True)
+    world = tmp_path / "world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    service.snapshots_root.mkdir(parents=True)
+    expected = service._fingerprint(world)
+
+    def failed_worker(*_: object, **__: object) -> dict[str, object]:
+        raise WorldDataError("PARSER_FAILED", "synthetic parser failure")
+
+    service._run_worker = failed_worker  # type: ignore[method-assign]
+    service._capture_and_parse(world, expected)
+    listing = service.list_resource(
+        "players", page=1, page_size=50, search=None, owner_id=None, base_id=None
+    )
+
+    assert database.current_snapshot_version()["id"] == "old"  # type: ignore[index]
+    assert listing["snapshotId"] == "old"
+    assert listing["stale"] is True
+    assert listing["parseStatus"] == "failed"
+
+
+def test_world_contract_reports_unavailable_without_a_successful_cache(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    status = service.status()
+    with pytest.raises(WorldDataError) as raised:
+        service.list_resource(
+            "players", page=1, page_size=50, search=None, owner_id=None, base_id=None
+        )
+
+    assert status["snapshotId"] is None
+    assert status["parseStatus"] == "unavailable"
+    coverage = status["dataCoverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["state"] == "unavailable"
+    assert raised.value.code == "WORLD_CACHE_UNAVAILABLE"
+
+
+def test_world_contract_rejects_results_for_a_replaced_snapshot(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    level, players = _synthetic_properties()
+    cache = tmp_path / "data" / "cache" / "world-cache-current.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="current", source_observed_at=10)
+    database.record_snapshot_version("current", str(cache), 10, "success", make_current=True)
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+
+    with pytest.raises(WorldDataError) as raised:
+        service.list_resource(
+            "players",
+            page=1,
+            page_size=50,
+            search=None,
+            owner_id=None,
+            base_id=None,
+            snapshot_id="superseded",
+        )
+
+    assert raised.value.code == "SNAPSHOT_REPLACED"
 
 
 @pytest.mark.integration

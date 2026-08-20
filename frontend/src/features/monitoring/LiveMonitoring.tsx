@@ -232,7 +232,11 @@ function formatWorldGameTime(ticks: number | null | undefined): { value: string;
   };
 }
 
-function worldCountsText(status: WorldStatus | null, left: string, right: string): string {
+function worldCountsText(
+  status: WorldStatus | null,
+  left: keyof WorldStatus["counts"],
+  right: keyof WorldStatus["counts"],
+): string {
   if (!status) return "读取中";
   return `${status.counts[left] ?? "-"} / ${status.counts[right] ?? "-"}`;
 }

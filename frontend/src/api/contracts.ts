@@ -81,35 +81,116 @@ export type AuditItem = {
   parserVersion: string | null;
 };
 export type AuditResponse = { items: AuditItem[]; page: number; pageSize: number; total: number; observedAt: number };
-export type WorldStatus = {
+export type WorldResource = "players" | "pals" | "guilds" | "bases" | "inventories" | "work-pals";
+export type WorldParseStatus = "ready" | "parsing" | "failed" | "unavailable" | "incompatible";
+export type WorldDataCoverage = {
+  state: "complete" | "unavailable";
+  resources: Record<WorldResource, boolean>;
+};
+export type WorldSnapshotContext = {
   source: string;
   observedAt: number;
-  sourceObservedAt?: number;
-  collectedAt?: number | null;
-  parsedAt?: number | null;
+  sourceObservedAt: number;
+  collectedAt: number | null;
+  parsedAt: number | null;
+  snapshotId: string | null;
   stale: boolean;
   errorCode: string | null;
-  error: string | null;
-  snapshotId: string | null;
   parsing: boolean;
-  parseDurationMs: number | null;
-  peakMemoryBytes?: number | null;
-  cacheSizeBytes?: number | null;
-  gameTimeTicks?: number | null;
-  counts: Record<string, number>;
+  parseStatus: WorldParseStatus;
+  dataCoverage: WorldDataCoverage;
 };
+export type WorldSnapshotSummary = WorldSnapshotContext & {
+  error: string | null;
+  parseDurationMs: number | null;
+  peakMemoryBytes: number | null;
+  cacheSizeBytes: number | null;
+  gameTimeTicks: number | null;
+  counts: {
+    players: number;
+    pals: number;
+    guilds: number;
+    bases: number;
+    containers: number;
+    inventory_items: number;
+    work_pals: number;
+  };
+};
+export type WorldStatus = WorldSnapshotSummary;
+
+export type WorldPlayerListItem = {
+  id: string; instanceId: string; name: string; level: number | null; guildId: string | null;
+  guildName?: string; inventoryIds: string[]; partyContainerId: string | null; storageContainerId: string | null;
+};
+export type WorldPalListItem = {
+  id: string; ownerPlayerId: string | null; characterId: string; nickname: string | null; level: number | null;
+  containerId: string | null; slotIndex: number | null; baseId: string | null; assignment: string;
+  ownerName?: string; baseName?: string;
+};
+export type WorldGuildListItem = {
+  id: string; name: string; memberCount: number; baseCount: number;
+};
+export type WorldBaseListItem = {
+  id: string; name: string; guildId: string | null; workerContainerId: string | null;
+  x: number | null; y: number | null; z: number | null; guildName?: string;
+};
+export type WorldInventoryListItem = {
+  id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;
+  ownerId: string | null; guildId: string | null; baseId: string | null;
+};
+export type WorldContainerReference = {
+  id: string; kind: string; ownerId: string | null; guildId: string | null;
+  baseId: string | null; slotCount: number;
+};
+export type WorldPlayerDetail = WorldPlayerListItem & {
+  pals: WorldPalListItem[];
+  partyPals: WorldPalListItem[];
+  storagePals: WorldPalListItem[];
+  inventory: WorldInventoryListItem[];
+  guild: WorldGuildListItem | null;
+};
+export type WorldPalDetail = WorldPalListItem & {
+  owner: WorldPlayerListItem | null;
+  base: WorldBaseListItem | null;
+  container: WorldContainerReference | null;
+};
+export type WorldGuildDetail = WorldGuildListItem & {
+  members: WorldPlayerListItem[];
+  bases: WorldBaseListItem[];
+};
+export type WorldBaseDetail = WorldBaseListItem & {
+  guild: WorldGuildListItem | null;
+  workers: WorldPalListItem[];
+  inventory: WorldInventoryListItem[];
+};
+export type WorldTypedListItem =
+  | WorldPlayerListItem
+  | WorldPalListItem
+  | WorldGuildListItem
+  | WorldBaseListItem
+  | WorldInventoryListItem;
+export type WorldTypedListResponse = WorldSnapshotContext & {
+  items: WorldTypedListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
+export type WorldTypedDetailResponse = WorldSnapshotContext & (
+  | WorldPlayerDetail
+  | WorldPalDetail
+  | WorldGuildDetail
+  | WorldBaseDetail
+);
+
+/** @deprecated Existing entity-browser compatibility type. New asset queries use WorldTyped* types. */
 export type WorldRow = Record<string, unknown> & { id?: string; name?: string };
-export type WorldResponse = {
+/** @deprecated Existing entity-browser compatibility response. */
+export type WorldResponse = WorldSnapshotContext & {
   items: WorldRow[];
   page: number;
   pageSize: number;
   total: number;
-  source: string;
-  observedAt: number;
-  stale: boolean;
-  errorCode: string | null;
 };
-export type WorldResource = "players" | "pals" | "guilds" | "bases" | "inventories" | "work-pals";
 export type Theme = "light" | "dark";
 
 export type BackupItem = { id: string; observedAt: number; sizeBytes: number; valid: boolean; missing: string[] };
