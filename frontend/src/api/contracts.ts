@@ -133,12 +133,34 @@ export type WorldPalRosterItem = WorldPalListItem & {
   isBoss: boolean;
   isLucky: boolean;
   locationType: "player" | "party" | "storage" | "base" | "unassigned";
+  care: WorldPalCare;
+};
+export type WorldPalCare = {
+  currentHp: number | null;
+  hunger: number | null;
+  sanity: number | null;
+  disease: string | null;
+  activity: string | null;
+  diseaseRecorded: boolean;
+  activityRecorded: boolean;
+  reasons: ("zero_hp" | "disease" | "hunger_low" | "san_low")[];
+  unavailable: ("currentHp" | "hunger" | "sanity")[];
+  severity: "critical" | "warning" | "info" | "healthy";
+  attention: boolean;
+};
+export type WorldPalCareSummary = {
+  total: number;
+  critical: number;
+  warning: number;
+  attention: number;
+  unavailable: number;
 };
 export type WorldPalRosterResponse = WorldSnapshotContext & {
   items: WorldPalRosterItem[];
   page: number;
   pageSize: number;
   total: number;
+  careSummary: WorldPalCareSummary;
 };
 export type WorldGuildListItem = {
   id: string; name: string; memberCount: number; baseCount: number;
@@ -166,6 +188,7 @@ export type WorldPalDetail = WorldPalListItem & {
   owner: WorldPlayerListItem | null;
   base: WorldBaseListItem | null;
   container: WorldContainerReference | null;
+  care: WorldPalCare;
 };
 export type WorldGuildDetail = WorldGuildListItem & {
   members: WorldPlayerListItem[];

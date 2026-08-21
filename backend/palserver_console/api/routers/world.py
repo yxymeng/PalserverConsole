@@ -72,6 +72,7 @@ def router(deps: AppDependencies) -> APIRouter:
         search: str | None = None,
         marker: str = "all",
         sort: str = "balanced",
+        care: str = "all",
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
@@ -85,6 +86,8 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_PAL_ROSTER_MARKER", "帕鲁快捷筛选条件不正确。")
         if sort not in {"balanced", "name", "level"}:
             return error_response(422, "INVALID_PAL_ROSTER_SORT", "帕鲁排序方式不正确。")
+        if care not in {"all", "attention"}:
+            return error_response(422, "INVALID_PAL_ROSTER_CARE", "帕鲁照护筛选条件不正确。")
         try:
             return deps.world.list_pal_roster(
                 page=page,
@@ -92,6 +95,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 search=search,
                 marker=marker,
                 sort=sort,
+                care=care,
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:

@@ -8,11 +8,13 @@ function response(snapshotId: string, count: number, start = 0): WorldPalRosterR
     id: `pal-${start + index}`, ownerPlayerId: null, characterId: "FuturePal", nickname: null,
     level: 1, containerId: null, slotIndex: null, baseId: null, assignment: "unassigned",
     gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned",
+    care: { currentHp: null, hunger: null, sanity: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity"], severity: "healthy", attention: false },
   }));
   return {
     items, page: 1, pageSize: 60, total: count, snapshotId, source: "fixture", observedAt: 1,
     sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, stale: false, errorCode: null,
     parsing: false, parseStatus: "ready", dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
+    careSummary: { total: count, critical: 0, warning: 0, attention: 0, unavailable: count },
   };
 }
 

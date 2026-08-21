@@ -24,6 +24,7 @@ from .cache import (
     entity_detail,
     inspect_storage,
     query_cache,
+    query_pal_care_summary,
     query_pal_roster,
     read_cache_metadata,
     validate_cache_file,
@@ -441,6 +442,7 @@ class WorldSnapshotService:
         search: str | None,
         marker: str,
         sort: str,
+        care: str = "all",
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -451,6 +453,7 @@ class WorldSnapshotService:
             search=search,
             marker=marker,
             sort=sort,
+            care=care,
         )
         state = self._status_for_snapshot(current)
         return {
@@ -458,6 +461,7 @@ class WorldSnapshotService:
             "page": page,
             "pageSize": page_size,
             "total": total,
+            "careSummary": query_pal_care_summary(cache),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],

@@ -236,12 +236,21 @@
 .pal-roster-heading p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
 .pal-roster-heading > span { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .pal-roster-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto auto; gap: 8px; align-items: center; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-subtle); }
+.pal-care-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--border); }
+.pal-care-summary > span { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 9px; padding: 10px 13px; background: var(--surface); }
+.pal-care-summary strong, .pal-care-summary small { color: var(--muted); font-size: 11px; font-weight: 650; }
+.pal-care-summary b { color: var(--foreground); font-size: 18px; font-variant-numeric: tabular-nums; }
+.pal-care-summary .critical { background: color-mix(in srgb, var(--danger-surface) 56%, var(--surface)); }
+.pal-care-summary .critical b { color: var(--danger); }
+.pal-care-summary .warning { background: color-mix(in srgb, var(--warning-surface) 56%, var(--surface)); }
+.pal-care-summary .warning b { color: var(--warning); }
+.pal-care-summary > small { grid-column: 1 / -1; padding: 8px 13px; background: var(--surface-subtle); }
 .pal-roster-markers { display: inline-flex; min-height: 40px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .pal-roster-markers button { display: inline-flex; min-height: 32px; align-items: center; gap: 4px; padding: 0 9px; border: 0; border-radius: 5px; color: var(--muted-strong); background: transparent; font: inherit; font-size: 12px; cursor: pointer; }
 .pal-roster-markers button:hover { background: var(--surface-hover); }
 .pal-roster-markers button.active { color: var(--primary); background: var(--primary-surface); }
 .pal-roster-table { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-.pal-roster-head, .pal-roster-row { display: grid; grid-template-columns: minmax(260px, 1.6fr) 72px 72px minmax(100px, .8fr) minmax(150px, 1fr); align-items: center; gap: 12px; padding: 12px 16px; }
+.pal-roster-head, .pal-roster-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) 62px 62px minmax(92px, .8fr) minmax(112px, .9fr) minmax(130px, 1fr); align-items: center; gap: 12px; padding: 12px 16px; }
 .pal-roster-head { color: var(--muted); background: var(--surface-muted); font-size: 12px; font-weight: 650; }
 .pal-roster-row { min-height: 64px; border-top: 1px solid var(--border); color: var(--foreground); font-size: 13px; transition: background-color .16s ease; }
 .pal-roster-row:hover { background: color-mix(in srgb, var(--primary) 7%, var(--surface)); }
@@ -254,6 +263,17 @@
 .pal-roster-row > span[data-label="星级"] { display: inline-flex; align-items: center; gap: 3px; color: var(--electric); font-variant-numeric: tabular-nums; }
 .pal-roster-traits { display: flex; flex-wrap: wrap; gap: 4px; color: var(--muted); font-size: 12px; }
 .pal-roster-traits em { padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border)); border-radius: 999px; color: var(--primary); background: var(--primary-surface); font-style: normal; font-weight: 650; }
+.pal-care-badge { display: inline-flex; width: fit-content; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 12px; font-weight: 650; }
+.pal-care-badge.critical { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); color: var(--danger); background: var(--danger-surface); }
+.pal-care-badge.warning { border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); color: var(--warning); background: var(--warning-surface); }
+.pal-care-badge.info { color: var(--primary); background: var(--primary-surface); }
+.pal-care-detail-content { display: grid; gap: 10px; }
+.pal-care-detail-content > ul { display: grid; gap: 5px; margin: 0; padding-left: 18px; color: var(--muted-strong); font-size: 13px; }
+.pal-care-detail-content > dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; border: 1px solid var(--border); background: var(--border); }
+.pal-care-detail-content > dl > div { display: grid; gap: 3px; min-width: 0; padding: 9px; background: var(--surface-subtle); }
+.pal-care-detail-content dt { color: var(--muted); font-size: 11px; }
+.pal-care-detail-content dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--foreground); font-size: 12px; font-weight: 650; }
+.pal-care-unavailable { color: var(--muted) !important; }
 .pal-roster-location { display: grid; gap: 2px; }
 .pal-roster-location strong { font-size: 12px; }
 .pal-roster-more { justify-self: center; margin: 2px 0 0; }
@@ -496,6 +516,7 @@
   .world-result-count { grid-column: 1 / -1; margin-left: 0; }
   .world-browser { grid-template-columns: minmax(0, 1fr); }
   .pal-roster-heading { align-items: flex-start; flex-direction: column; }
+  .pal-care-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pal-roster-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
   .pal-roster-markers { grid-column: 1 / -1; width: 100%; }
   .pal-roster-markers button { flex: 1; justify-content: center; }
@@ -507,6 +528,7 @@
   .pal-roster-row > span::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 650; }
   .pal-roster-name { grid-column: 1 / -1; }
   .pal-roster-name > span:nth-child(2) { max-width: calc(100vw - 108px); }
+  .pal-care-detail-content > dl { grid-template-columns: 1fr; }
   .pal-roster-drawer { width: 100vw; border-left: 0; }
   .world-entity-drawer.empty { display: none; }
   .world-entity-drawer:not(.empty) { position: fixed; z-index: 42; inset: 12px; top: 12px; max-height: calc(100dvh - 24px); border-color: var(--border-strong); border-radius: var(--radius); background: var(--background); box-shadow: 0 22px 60px rgb(0 0 0 / 42%); }

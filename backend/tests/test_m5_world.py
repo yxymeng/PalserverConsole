@@ -25,6 +25,7 @@ from palserver_console.world.cache import (
     build_world_cache,
     entity_detail,
     query_cache,
+    query_pal_care_summary,
     query_pal_roster,
     read_cache_metadata,
     validate_cache_file,
@@ -119,6 +120,11 @@ def _character(
     is_rare: bool = False,
     is_awakened: bool = False,
     is_imported: bool = False,
+    current_hp: float | None = None,
+    hunger: float | None = None,
+    sanity: float | None = None,
+    disease: str | None = None,
+    activity: str | None = None,
 ) -> dict[str, Any]:
     parameter: dict[str, Any] = {
         "Level": _property(20, "IntProperty"),
@@ -139,6 +145,16 @@ def _character(
             parameter["bIsAwakening"] = _property(True, "BoolProperty")
         if is_imported:
             parameter["bImportedCharacter"] = _property(True, "BoolProperty")
+        if current_hp is not None:
+            parameter["HP"] = _property(current_hp, "FloatProperty")
+        if hunger is not None:
+            parameter["Hunger"] = _property(hunger, "FloatProperty")
+        if sanity is not None:
+            parameter["SanityValue"] = _property(sanity, "FloatProperty")
+        if disease is not None:
+            parameter["PalStatus"] = _property(disease, "EnumProperty")
+        if activity is not None:
+            parameter["Activity"] = _property(activity, "EnumProperty")
     return {
         "key": {
             "PlayerUId": _property(player_id),
@@ -237,6 +253,11 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
                             is_rare=True,
                             is_awakened=True,
                             is_imported=True,
+                            current_hp=0,
+                            hunger=19.99,
+                            sanity=49.99,
+                            disease="EPalStatus::Cold",
+                            activity="EPalActivity::Working",
                         ),
                         _character(
                             player_id,
@@ -244,6 +265,11 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
                             character_id="CatMage",
                             nickname="工作帕鲁乙",
                             is_player=False,
+                            current_hp=100,
+                            hunger=20,
+                            sanity=50,
+                            disease="EPalStatus::UnknownArchiveFever",
+                            activity="EPalActivity::Resting",
                         ),
                     ],
                     "MapProperty",
@@ -361,6 +387,15 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
         "isLucky": True,
         "isAwakened": True,
         "isImported": True,
+        "care": {
+            "current_hp": 0.0,
+            "hunger": 19.99,
+            "sanity": 49.99,
+            "disease": "EPalStatus::Cold",
+            "activity": "EPalActivity::Working",
+            "disease_recorded": True,
+            "activity_recorded": True,
+        },
     }
 
 
@@ -382,14 +417,16 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
             (
                 f"pal-{index:05d}", None, "FuturePal" if index == 1_599 else "SheepBall",
                 f"名册-{index:05d}", index % 50, None, None, None, "unassigned",
-                "EPalGenderType::Male", index % 5, int(index % 97 == 0), int(index % 89 == 0), "{}",
+                    "EPalGenderType::Male", index % 5, int(index % 97 == 0), int(index % 89 == 0),
+                    None, None, None, None, None, "{}",
             )
             for index in range(start, stop)
         ]
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows(0, 1_600)
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows(0, 1_600),
         )
     first_1600, total_1600 = query_pal_roster(
         cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
@@ -408,7 +445,8 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows(1_600, 5_000)
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            rows(1_600, 5_000),
         )
     level_page, total_5000 = query_pal_roster(
         cache, page=2, page_size=60, search=None, marker="all", sort="level"
@@ -420,6 +458,48 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
     assert len(level_page) == 60
     assert all(item["isLucky"] for item in lucky)
     assert lucky_total > 0
+
+
+def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fields(
+    tmp_path: Path,
+) -> None:
+    level, players = _synthetic_properties()
+    characters = level["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    characters.append(
+        _character(
+            uuid.UUID(int=1),
+            uuid.UUID(int=404),
+            character_id="SheepBall",
+            nickname="字段缺失帕鲁",
+            is_player=False,
+        )
+    )
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    items, total = query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )
+    by_name = {str(item["nickname"]): item["care"] for item in items}
+    critical = by_name["工作帕鲁甲"]
+    boundary = by_name["工作帕鲁乙"]
+    missing = by_name["字段缺失帕鲁"]
+    assert total == 3
+    assert critical["reasons"] == ["zero_hp", "disease", "hunger_low", "san_low"]
+    assert critical["activity"] == "EPalActivity::Working"
+    assert boundary["reasons"] == ["disease"]
+    assert boundary["hunger"] == 20.0 and boundary["sanity"] == 50.0
+    assert boundary["disease"] == "EPalStatus::UnknownArchiveFever"
+    assert missing["unavailable"] == ["currentHp", "hunger", "sanity"]
+
+    attention, attention_total = query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="all", sort="balanced", care="attention"
+    )
+    assert attention_total == 2
+    assert {item["nickname"] for item in attention} == {"工作帕鲁甲", "工作帕鲁乙"}
+    assert query_pal_care_summary(cache) == {
+        "total": 3, "critical": 2, "warning": 0, "attention": 2, "unavailable": 1,
+    }
 
 
 def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) -> None:

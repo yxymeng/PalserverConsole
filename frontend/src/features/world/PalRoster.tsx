@@ -1,13 +1,15 @@
-import { AlertCircle, Crown, LoaderCircle, Search, Sparkles, Star, X } from "lucide-react";
+import { AlertCircle, CircleAlert, Crown, HeartPulse, LoaderCircle, Search, Sparkles, Star, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
-import type { WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldRow } from "../../api/contracts";
+import type { WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldRow } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { mergePalRosterPage } from "./palRosterState";
+import { activityLabel, careReasonLabels, careSummaryLabel, diseaseLabel } from "./palCare";
 
 type Marker = "all" | "lucky" | "boss";
+type CareFilter = "all" | "attention";
 type Sort = "balanced" | "name" | "level";
 
 const PAGE_SIZE = 60;
@@ -23,9 +25,11 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [marker, setMarker] = useState<Marker>("all");
+  const [care, setCare] = useState<CareFilter>("all");
   const [sort, setSort] = useState<Sort>("balanced");
   const [items, setItems] = useState<WorldPalRosterItem[]>([]);
   const [total, setTotal] = useState(0);
+  const [careSummary, setCareSummary] = useState<WorldPalRosterResponse["careSummary"] | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
@@ -49,12 +53,13 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
         return;
       }
       const query = new URLSearchParams({
-        page: String(page), pageSize: String(PAGE_SIZE), marker, sort, snapshotId: requestedSnapshotId,
+        page: String(page), pageSize: String(PAGE_SIZE), marker, care, sort, snapshotId: requestedSnapshotId,
       });
       if (appliedSearch) query.set("search", appliedSearch);
       const result = await requestJson<WorldPalRosterResponse>(`/api/world/pals/roster?${query}`, { signal: controller.signal });
       if (sequence !== requestSequence.current || result.snapshotId !== requestedSnapshotId) return;
       setTotal(result.total);
+      setCareSummary(result.careSummary);
       setItems((current) => mergePalRosterPage(current, result, requestedSnapshotId, append));
     } catch (caught) {
       if (caught instanceof ApiRequestError && caught.code === "SNAPSHOT_REPLACED" && !retried) {
@@ -80,11 +85,12 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
         setLoadingMore(false);
       }
     }
-  }, [appliedSearch, marker, onSnapshotReplaced, snapshotId, sort]);
+  }, [appliedSearch, care, marker, onSnapshotReplaced, snapshotId, sort]);
 
   useEffect(() => {
     setItems([]);
     setTotal(0);
+    setCareSummary(null);
     setDrawer(null);
     void loadPage(1, false);
     return () => requestRef.current?.abort();
@@ -120,27 +126,30 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
     setSearch("");
     setAppliedSearch("");
     setMarker("all");
+    setCare("all");
     setSort("balanced");
   }
 
-  const hasFilters = Boolean(appliedSearch) || marker !== "all" || sort !== "balanced";
+  const hasFilters = Boolean(appliedSearch) || marker !== "all" || care !== "all" || sort !== "balanced";
   const canLoadMore = items.length < total;
   return <section className="pal-roster" aria-label="帕鲁名册">
-    <header className="pal-roster-heading"><div><h2>帕鲁名册</h2><p>按稳定快照分批读取，临时照护状态不会改变默认名册顺序。</p></div><span>{total ? `已载入 ${items.length} / ${total}` : "等待快照"}</span></header>
+    <header className="pal-roster-heading"><div><h2>帕鲁名册</h2><p>按稳定快照分批读取；照护信息来自存档快照，不是实时监控。</p></div><span>{total ? `已载入 ${items.length} / ${total}` : "等待快照"}</span></header>
+    {careSummary && <PalCareSummary summary={careSummary} />}
     <form className="pal-roster-toolbar" onSubmit={submitSearch}>
       <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索帕鲁名册" placeholder="名称、Character ID 或内部 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
       <button className="primary-button world-search-button" type="submit">搜索</button>
-      <div className="pal-roster-markers" aria-label="个体标记筛选">
+      <div className="pal-roster-markers" aria-label="个体标记与照护筛选">
         <button type="button" className={marker === "all" ? "active" : ""} aria-pressed={marker === "all"} onClick={() => setMarker("all")}>全部</button>
         <button type="button" className={marker === "lucky" ? "active" : ""} aria-pressed={marker === "lucky"} onClick={() => setMarker("lucky")}><Sparkles size={15} />闪光</button>
         <button type="button" className={marker === "boss" ? "active" : ""} aria-pressed={marker === "boss"} onClick={() => setMarker("boss")}><Crown size={15} />头目</button>
+        <button type="button" className={care === "attention" ? "active" : ""} aria-pressed={care === "attention"} onClick={() => setCare((value) => value === "attention" ? "all" : "attention")}><HeartPulse size={15} />需要关注</button>
       </div>
       <label className="world-control"><span>排序</span><select aria-label="帕鲁名册排序" value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="balanced">均衡</option><option value="name">名称</option><option value="level">等级</option></select></label>
       {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除已应用筛选</button>}
     </form>
     {error && <p className="form-error" role="alert">名册读取失败；已保留当前结果。<code>{error}</code></p>}
     <div className="pal-roster-table" aria-busy={loading} aria-live="polite">
-      <div className="pal-roster-head"><span>帕鲁</span><span>等级</span><span>星级</span><span>个体标记</span><span>归属</span></div>
+      <div className="pal-roster-head"><span>帕鲁</span><span>等级</span><span>星级</span><span>个体标记</span><span>照护状态</span><span>归属</span></div>
       {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "没有符合条件的帕鲁" : "当前没有可用世界快照"}</strong><p>{snapshotId ? "尝试清除已应用筛选，或使用其他名称和 ID 搜索。" : "完成只读解析后可浏览名册。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除已应用筛选</button>}</div>}
     </div>
     {canLoadMore && <button className="quiet-button pal-roster-more" type="button" disabled={loadingMore} onClick={() => void loadPage(Math.floor(items.length / PAGE_SIZE) + 1, true)}>{loadingMore ? <><LoaderCircle className="spin" size={17} />正在加载</> : `加载更多（还有 ${total - items.length} 条）`}</button>}
@@ -156,8 +165,26 @@ function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (ite
     <span data-label="等级">{item.level ?? "—"}</span>
     <span data-label="星级">{pal.rank && pal.rank > 0 ? <><Star size={14} fill="currentColor" />{pal.rank}</> : "—"}</span>
     <PalRosterTraits item={item} />
+    <PalCareBadge care={item.care} />
     <span className="pal-roster-location" data-label="归属"><strong>{locationLabels[item.locationType]}</strong><small>{location}</small></span>
   </div>;
+}
+
+function PalCareSummary({ summary }: { summary: WorldPalRosterResponse["careSummary"] }) {
+  return <section className="pal-care-summary" aria-label="照护状态摘要">
+    <span><strong>需要关注</strong><b>{summary.attention}</b></span>
+    <span className="critical"><strong>Critical</strong><b>{summary.critical}</b></span>
+    <span className="warning"><strong>Warning</strong><b>{summary.warning}</b></span>
+    <span><strong>数据不可用</strong><b>{summary.unavailable}</b></span>
+    <small>统计来自当前存档快照；活动不计入需要关注。</small>
+  </section>;
+}
+
+function PalCareBadge({ care }: { care: WorldPalCare }) {
+  const label = careSummaryLabel(care);
+  return <span className={`pal-care-badge ${care.severity}`} data-label="照护状态" title={care.attention ? careReasonLabels(care).join("；") : undefined}>
+    {care.attention && <CircleAlert size={15} aria-hidden="true" />}{label}
+  </span>;
 }
 
 function PalRosterTraits({ item }: { item: WorldPalRosterItem }) {
@@ -212,7 +239,19 @@ function PalRosterDrawer({ state, onClose }: { state: DrawerState | null; onClos
 function PalRosterDetail({ data, pal }: { data: WorldPalDetail | WorldPalRosterItem; pal: ReturnType<typeof resolvePal> }) {
   const record = data as unknown as WorldRow;
   const location = "locationType" in data ? locationLabels[data.locationType] : value(record.locationType) || value(record.assignment);
-  return <div className="pal-roster-detail"><dl className="world-detail-grid"><div><dt>等级</dt><dd>{value(record.level)}</dd></div><div><dt>星级</dt><dd>{pal.rank ?? "—"}</dd></div><div><dt>归属</dt><dd>{location}</dd></div><div><dt>主人</dt><dd>{value(record.ownerName) || value((record.owner as WorldRow | undefined)?.name)}</dd></div><div><dt>据点</dt><dd>{value(record.baseName) || value((record.base as WorldRow | undefined)?.name)}</dd></div><div><dt>Character ID</dt><dd><code>{pal.characterId}</code></dd></div><div><dt>内部 ID</dt><dd><code>{value(record.id)}</code></dd></div></dl><section className="world-relation-section"><h3>个体标记</h3><p>{palTraitLabels(record).join(" · ") || "普通"}</p></section><details className="world-relation-section world-raw-detail"><summary>原始记录</summary><pre className="world-detail-json">{JSON.stringify(record.detail || record, null, 2)}</pre></details></div>;
+  const care = (data as WorldPalDetail | WorldPalRosterItem).care;
+  return <div className="pal-roster-detail"><section className="world-relation-section pal-care-detail"><h3>照护状态 <small>来自存档快照</small></h3><PalCareDetail care={care} /></section><dl className="world-detail-grid"><div><dt>等级</dt><dd>{value(record.level)}</dd></div><div><dt>星级</dt><dd>{pal.rank ?? "—"}</dd></div><div><dt>归属</dt><dd>{location}</dd></div><div><dt>主人</dt><dd>{value(record.ownerName) || value((record.owner as WorldRow | undefined)?.name)}</dd></div><div><dt>据点</dt><dd>{value(record.baseName) || value((record.base as WorldRow | undefined)?.name)}</dd></div><div><dt>Character ID</dt><dd><code>{pal.characterId}</code></dd></div><div><dt>内部 ID</dt><dd><code>{value(record.id)}</code></dd></div></dl><section className="world-relation-section"><h3>个体标记</h3><p>{palTraitLabels(record).join(" · ") || "普通"}</p></section><details className="world-relation-section world-raw-detail"><summary>原始记录</summary><pre className="world-detail-json">{JSON.stringify(record.detail || record, null, 2)}</pre></details></div>;
+}
+
+function PalCareDetail({ care }: { care: WorldPalCare }) {
+  const disease = diseaseLabel(care.disease);
+  const activity = activityLabel(care.activity);
+  return <div className="pal-care-detail-content">
+    <p className={`pal-care-badge ${care.severity}`}>{care.attention && <CircleAlert size={15} aria-hidden="true" />}{careSummaryLabel(care)}</p>
+    {care.attention && <ul>{careReasonLabels(care).map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+    <dl><div><dt>生命</dt><dd>{care.currentHp ?? "数据不可用"}</dd></div><div><dt>饱食度</dt><dd>{care.hunger === null ? "数据不可用" : `${care.hunger}%`}</dd></div><div><dt>SAN</dt><dd>{care.sanity === null ? "数据不可用" : `${care.sanity}%`}</dd></div><div><dt>疾病</dt><dd>{care.disease ? disease || <><code>{care.disease}</code>（资料未收录）</> : care.diseaseRecorded ? "未见疾病" : "数据不可用"}</dd></div><div><dt>活动</dt><dd>{care.activity ? activity || <code>{care.activity}</code> : care.activityRecorded ? "未见活动" : "数据不可用"}</dd></div></dl>
+    {care.unavailable.length > 0 && <p className="pal-care-unavailable">部分照护字段数据不可用，未按健康状态处理。</p>}
+  </div>;
 }
 
 function PalRosterSkeleton() {

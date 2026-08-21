@@ -13,7 +13,7 @@ from typing import Any
 from ..steam import is_reparse_point
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 3
+CACHE_SCHEMA_VERSION = 4
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
 
@@ -51,6 +51,11 @@ CREATE TABLE pals (
     rank INTEGER,
     is_boss INTEGER NOT NULL DEFAULT 0,
     is_lucky INTEGER NOT NULL DEFAULT 0,
+    current_hp REAL,
+    hunger REAL,
+    sanity REAL,
+    disease TEXT,
+    activity TEXT,
     detail_json TEXT NOT NULL
 );
 CREATE INDEX pals_character_idx ON pals(character_id);
@@ -59,6 +64,7 @@ CREATE INDEX pals_base_idx ON pals(base_id);
 CREATE INDEX pals_roster_name_idx ON pals(nickname COLLATE NOCASE, character_id, id);
 CREATE INDEX pals_roster_level_idx ON pals(level DESC, id);
 CREATE INDEX pals_roster_marker_idx ON pals(is_lucky, is_boss, id);
+CREATE INDEX pals_care_attention_idx ON pals(current_hp, hunger, sanity, disease);
 CREATE TABLE guilds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -241,7 +247,8 @@ def build_world_cache(
             "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", player_rows
         )
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", pal_rows
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            pal_rows,
         )
         connection.executemany("INSERT INTO guilds VALUES(?, ?, ?, ?, ?)", group_rows)
         connection.executemany("INSERT INTO bases VALUES(?, ?, ?, ?, ?, ?, ?, ?)", base_rows)
@@ -416,10 +423,15 @@ def query_pal_roster(
     search: str | None,
     marker: str,
     sort: str,
+    care: str = "all",
 ) -> tuple[list[dict[str, object]], int]:
     """Query the immutable cache in a stable roster order without loading all Pals."""
 
-    if marker not in {"all", "lucky", "boss"} or sort not in {"balanced", "name", "level"}:
+    if (
+        marker not in {"all", "lucky", "boss"}
+        or sort not in {"balanced", "name", "level"}
+        or care not in {"all", "attention"}
+    ):
         raise ValueError("Unknown Pal roster query.")
     clauses: list[str] = []
     parameters: list[object] = []
@@ -430,6 +442,10 @@ def query_pal_roster(
         clauses.append("p.is_lucky = 1")
     elif marker == "boss":
         clauses.append("p.is_boss = 1")
+    if care == "attention":
+        clauses.append(
+            "(p.current_hp = 0 OR p.disease IS NOT NULL OR p.hunger < 20 OR p.sanity < 50)"
+        )
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     name_order = "COALESCE(NULLIF(p.nickname, ''), p.character_id) COLLATE NOCASE, p.id"
     order = (
@@ -450,7 +466,7 @@ def query_pal_roster(
             f"{where} ORDER BY {order} LIMIT ? OFFSET ?",
             (*parameters, page_size, (page - 1) * page_size),
         ).fetchall()
-        public_rows = [_public_row(dict(row)) for row in rows]
+        public_rows = [_pal_public_row(dict(row)) for row in rows]
         _add_relation_names(
             connection,
             public_rows,
@@ -524,7 +540,7 @@ def _pal_detail(connection: sqlite3.Connection, pal_id: str) -> dict[str, object
     row = connection.execute("SELECT * FROM pals WHERE id = ?", (pal_id,)).fetchone()
     if row is None:
         return None
-    result = _public_row(dict(row))
+    result = _pal_public_row(dict(row))
     result["owner"] = _reference(connection, "players", result.get("ownerPlayerId"))
     result["base"] = _reference(connection, "bases", result.get("baseId"))
     result["container"] = _reference(connection, "containers", result.get("containerId"))
@@ -830,6 +846,7 @@ def _characters(
         is_boss = character_id_upper.startswith(("BOSS_", "GYM_"))
         is_boss = is_boss or character_id_upper.endswith("BOSS")
         is_lucky = bool(_scalar(save_parameter.get("IsRarePal")))
+        care = _pal_care_fields(save_parameter)
         pals.append(
             (
                 instance_id,
@@ -845,6 +862,11 @@ def _characters(
             rank,
             int(is_boss),
             int(is_lucky),
+            care["current_hp"],
+            care["hunger"],
+            care["sanity"],
+            care["disease"],
+            care["activity"],
             _json(
                 {
                         "gender": gender,
@@ -858,11 +880,153 @@ def _characters(
                         "isImported": bool(
                             _scalar(save_parameter.get("bImportedCharacter"))
                         ),
+                        "care": care,
                     }
                 ),
             )
         )
     return players, pals
+
+
+def _pal_care_fields(save_parameter: Mapping[str, Any]) -> dict[str, object | None]:
+    status_raw = _first_present(save_parameter, "PalStatus")
+    disease_raw = _first_present(save_parameter, "Disease", "PalDisease", "SickType")
+    activity_raw = _first_present(
+        save_parameter, "Activity", "PalActivity", "WorkState", "WorkStatus"
+    )
+    status = _enum_text(status_raw)
+    disease_value = _enum_text(disease_raw)
+    activity_value = _enum_text(activity_raw)
+    if disease_value is None and _is_disease_status(status):
+        disease_value = status
+    if activity_value is None and _is_activity_status(status):
+        activity_value = status
+    return {
+        "current_hp": _save_number(save_parameter, "HP", "CurrentHP", "Health"),
+        "hunger": _save_number(save_parameter, "Hunger", "FoodAmount", "Food"),
+        "sanity": _save_number(save_parameter, "SanityValue", "Sanity", "SAN"),
+        "disease": disease_value,
+        "activity": activity_value,
+        "disease_recorded": status_raw is not None or disease_raw is not None,
+        "activity_recorded": activity_raw is not None or _is_activity_status(status),
+    }
+
+
+def _first_present(values: Mapping[str, Any], *keys: str) -> Any:
+    return next((values[key] for key in keys if key in values), None)
+
+
+def _save_number(values: Mapping[str, Any], *keys: str) -> float | None:
+    raw = _scalar(_first_present(values, *keys))
+    number = _number(raw)
+    if number is not None:
+        return number
+    if not isinstance(raw, Mapping):
+        return None
+    for key in ("Value", "Current", "CurrentValue", "value"):
+        number = _number(_scalar(raw.get(key)))
+        if number is not None:
+            return number
+    return None
+
+
+def _enum_text(value: Any) -> str | None:
+    return _text(_scalar(value))
+
+
+def _enum_key(value: str) -> str:
+    return value.rsplit("::", 1)[-1].replace("_", "").replace("-", "").casefold()
+
+
+def _is_activity_status(value: str | None) -> bool:
+    activity_keys = {"work", "working", "rest", "resting", "lazy", "slacking", "idle"}
+    return value is not None and _enum_key(value) in activity_keys
+
+
+def _is_disease_status(value: str | None) -> bool:
+    if value is None or _is_activity_status(value):
+        return False
+    return _enum_key(value) not in {"", "none", "normal", "healthy"}
+
+
+def _pal_public_row(row: dict[str, Any]) -> dict[str, object]:
+    result = _public_row(row)
+    result["care"] = _pal_care_status(result)
+    return result
+
+
+def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
+    current_hp = _number(row.get("currentHp"))
+    hunger = _number(row.get("hunger"))
+    sanity = _number(row.get("sanity"))
+    disease = _text(row.get("disease"))
+    activity = _text(row.get("activity"))
+    detail = _mapping(row.get("detail"))
+    stored_care = _mapping(detail.get("care"))
+    reasons: list[str] = []
+    if current_hp == 0:
+        reasons.append("zero_hp")
+    if disease is not None:
+        reasons.append("disease")
+    if hunger is not None and hunger < 20:
+        reasons.append("hunger_low")
+    if sanity is not None and sanity < 50:
+        reasons.append("san_low")
+    unavailable = [
+        key
+        for key, value in (("currentHp", current_hp), ("hunger", hunger), ("sanity", sanity))
+        if value is None
+    ]
+    severity = (
+        "critical"
+        if "zero_hp" in reasons or "disease" in reasons
+        else "warning"
+        if reasons
+        else "info"
+        if activity
+        else "healthy"
+    )
+    return {
+        "currentHp": current_hp,
+        "hunger": hunger,
+        "sanity": sanity,
+        "disease": disease,
+        "activity": activity,
+        "diseaseRecorded": bool(stored_care.get("disease_recorded")),
+        "activityRecorded": bool(stored_care.get("activity_recorded")),
+        "reasons": reasons,
+        "unavailable": unavailable,
+        "severity": severity,
+        "attention": bool(reasons),
+    }
+
+
+def query_pal_care_summary(path: Path) -> dict[str, int]:
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    try:
+        row = connection.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COALESCE(SUM(CASE WHEN current_hp = 0 OR disease IS NOT NULL
+                    THEN 1 ELSE 0 END), 0) AS critical,
+                COALESCE(SUM(CASE WHEN current_hp != 0 AND disease IS NULL
+                    AND (hunger < 20 OR sanity < 50) THEN 1 ELSE 0 END), 0) AS warning,
+                COALESCE(SUM(CASE WHEN current_hp IS NULL OR hunger IS NULL
+                    OR sanity IS NULL THEN 1 ELSE 0 END), 0) AS unavailable
+            FROM pals
+            """
+        ).fetchone()
+        critical, warning = int(row[1]), int(row[2])
+        return {
+            "total": int(row[0]),
+            "critical": critical,
+            "warning": warning,
+            "attention": critical + warning,
+            "unavailable": int(row[3]),
+        }
+    finally:
+        connection.close()
 
 
 def _item_containers(
