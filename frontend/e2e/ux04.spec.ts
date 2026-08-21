@@ -14,6 +14,7 @@ let reparseRequests = 0;
 
 test("UX-04：四类实体统一列表详情模式并支持关联跳转", async ({ page }, testInfo) => {
   reparseRequests = 0;
+  const worldListUrls: URL[] = [];
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
   await page.route("**/api/shell/status", (route) => route.fulfill({ json: shell }));
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: { executablePath: shell.executablePath, launchArguments: "" } }));
@@ -55,7 +56,10 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 } } });
     }
     const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
-    if (path in lists) return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
+    if (path in lists) {
+      worldListUrls.push(new URL(route.request().url()));
+      return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
+    }
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
       "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 } },
@@ -145,8 +149,9 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer).toContainText("工作帕鲁");
   await expect(drawer).toContainText("可明确关联的库存");
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
-  await page.getByLabel("关联筛选").selectOption("linked");
+  await page.getByLabel("状态筛选").selectOption("guilded");
   await page.getByLabel("排序方式").selectOption("id");
+  await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("status") === "guilded" && url.searchParams.get("sort") === "id" && url.searchParams.get("snapshotId") === "world")).toBeTruthy();
   await expect(page.getByRole("button", { name: "清除筛选条件" })).toBeVisible();
   await page.getByRole("button", { name: "重新解析" }).click();
   await expect.poll(() => reparseRequests).toBe(1);

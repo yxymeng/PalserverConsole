@@ -405,6 +405,8 @@ class WorldSnapshotService:
         owner_id: str | None,
         base_id: str | None,
         snapshot_id: str | None = None,
+        status: str = "all",
+        sort: str = "name",
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
         items, total = query_cache(
@@ -415,6 +417,8 @@ class WorldSnapshotService:
             search=search,
             owner_id=owner_id,
             base_id=base_id,
+            status=status,
+            sort=sort,
         )
         state = self._status_for_snapshot(current)
         return {

@@ -3,8 +3,9 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { AuthStatus, Operation, ServerSettings, ShellStatus } from "../../api/contracts";
-import { isAbortError, requestJson } from "../../api/client";
+import { createIdempotencyKey, isAbortError, requestJson } from "../../api/client";
 import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
+import { OperationStatusIsland } from "../../components/OperationStatusIsland";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
 import { Spinner } from "../../components/ui/spinner";
@@ -88,7 +89,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
         method: "POST",
         headers: {
           "X-CSRF-Token": auth.csrfToken || "",
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": createIdempotencyKey(),
         },
         body: JSON.stringify({
           countdownSeconds: 30,
@@ -122,7 +123,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
     try {
       const next = await requestJson<Operation>(`/api/server/operations/${operation.operationId}/force-stop`, {
         method: "POST",
-        headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": crypto.randomUUID() },
+        headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": createIdempotencyKey() },
         body: "{}",
       });
       setOperation(next);
@@ -141,7 +142,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
       <Button variant="outline" disabled={busy || operating || status?.serverState !== "running"} onClick={() => setPendingAction("restart")}><RotateCw data-icon="inline-start" aria-hidden="true" />重启</Button>
       <Button variant="ghost" size="icon" type="button" title="刷新服务器状态" aria-label="刷新服务器状态" onClick={() => void refresh()}>{busy ? <Spinner /> : <RefreshCw aria-hidden="true" />}</Button>
     </section>
-    {operation && createPortal(<OperationIsland operation={operation} onCancel={cancel} onForceStop={() => setPendingAction("force")} />, document.body)}
+    {operation && createPortal(<OperationStatusIsland operation={operation} onCancel={cancel} onForceStop={() => setPendingAction("force")} />, document.body)}
     {error && <Alert className="psc-control-feedback" variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>服务器操作未完成</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
     {message && <Alert className="psc-control-feedback" variant="success" role="status"><CheckCircle2 aria-hidden="true" /><AlertTitle>请求已提交</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
     <ConfirmActionDialog
@@ -160,27 +161,6 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
   </>;
 }
 
-function OperationIsland({ operation, onCancel, onForceStop }: { operation: Operation; onCancel: () => void; onForceStop: () => void }) {
-  const canCancel = operation.stage === "countdown" && ["queued", "running"].includes(operation.state);
-  const needsForceConfirmation = operation.state === "awaiting_force_confirmation";
-  const completed = TERMINAL_OPERATION_STATES.has(operation.state);
-  const islandClass = `operation-island${needsForceConfirmation || operation.state === "failed" ? " warning" : ""}${completed ? " completed" : ""}`;
-
-  return <section className={islandClass} aria-label="当前操作状态" aria-live="polite">
-    <span className="operation-island-icon" aria-hidden="true">{operationIcon(operation)}</span>
-    <div className="operation-island-copy"><span>当前操作</span><strong>{operationKindLabel(operation.kind)}</strong><small>{operationDescription(operation)}</small></div>
-    {canCancel && <Button className="operation-island-action" variant="outline" type="button" onClick={onCancel}>取消</Button>}
-    {needsForceConfirmation && <Button className="operation-island-action" variant="destructive" type="button" onClick={onForceStop}><CircleStop data-icon="inline-start" aria-hidden="true" />确认强制停止</Button>}
-  </section>;
-}
-
-function operationIcon(operation: Operation) {
-  if (operation.state === "succeeded") return <CheckCircle2 />;
-  if (operation.state === "failed" || operation.state === "awaiting_force_confirmation") return <AlertTriangle />;
-  if (operation.state === "cancelled") return <CircleStop />;
-  return <Spinner />;
-}
-
 function controlConfirmation(action: ControlAction | "force" | null, executablePath: string | null, pids: number[]) {
   const target = executablePath || "当前 PalServer";
   if (action === "start") return { title: "启动 PalServer？", description: `将启动 ${target}。启动完成前请保留当前页面。`, confirmLabel: "确认启动" };
@@ -189,18 +169,6 @@ function controlConfirmation(action: ControlAction | "force" | null, executableP
   if (action === "restart") return { title: "重启 PalServer？", description: `将先保存并关闭 ${target}，完成后重新启动；不会隐式应用配置草稿。`, confirmLabel: "确认重启" };
   if (action === "force") return { title: "强制结束 PalServer？", description: `PalServer 未能优雅退出。确认后将强制结束 PID ${pids.join(", ") || "未知"}。`, confirmLabel: "确认强制停止" };
   return { title: "确认服务器操作", description: "请确认目标和影响后再继续。", confirmLabel: "确认" };
-}
-
-function operationKindLabel(kind: string) {
-  return ({ start: "启动服务器", save: "保存世界", stop: "关闭服务器", restart: "重启服务器", force_stop: "强制停止服务器" } as Record<string, string>)[kind] || "服务器操作";
-}
-
-function operationDescription(operation: Operation) {
-  if (operation.state === "succeeded") return ({ start: "服务器已启动。", save: "世界数据已保存。", stop: "服务器已完全关闭。", restart: "服务器已重启。", force_stop: "服务器已强制停止。" } as Record<string, string>)[operation.kind] || "操作已完成。";
-  if (operation.state === "cancelled") return "操作已取消，服务器保持当前状态。";
-  if (operation.state === "failed") return "操作未完成，请检查服务器状态或日志。";
-  if (operation.state === "awaiting_force_confirmation") return "服务器尚未退出，确认后才会强制停止。";
-  return ({ queued: "正在等待服务器执行。", countdown: "维护倒计时中，仍可取消。", saving: "正在保存世界数据。", stopping: "正在请求服务器关闭。", restarting: "正在重新启动服务器。", health_check: "正在检查服务器启动状态。", force_stopping: "正在强制停止服务器。" } as Record<string, string>)[operation.stage] || "正在执行，请稍候。";
 }
 
 function operationFailureText(operation: Operation) {

@@ -42,6 +42,8 @@ export type Operation = {
   stage: string;
   errorCode: string | null;
   detail: string | null;
+  createdAt?: number | null;
+  updatedAt?: number | null;
 };
 export type NotificationStatus = { enabled: boolean; configured: boolean };
 

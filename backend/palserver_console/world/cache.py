@@ -338,6 +338,8 @@ def query_cache(
     search: str | None = None,
     owner_id: str | None = None,
     base_id: str | None = None,
+    status: str = "all",
+    sort: str = "name",
 ) -> tuple[list[dict[str, object]], int]:
     definitions = {
         "players": ("players", ("name", "id"), ("owner_id", "base_id")),
@@ -358,6 +360,33 @@ def query_cache(
     parameters: list[object] = []
     if resource == "work-pals":
         clauses.append("assignment = 'base_worker'")
+    status_clauses = {
+        "players": {
+            "all": None,
+            "guilded": "guild_id IS NOT NULL AND guild_id <> ''",
+            "unguilded": "guild_id IS NULL OR guild_id = ''",
+        },
+        "pals": {
+            "all": None,
+            "player": "owner_player_id IS NOT NULL AND owner_player_id <> ''",
+            "base": "base_id IS NOT NULL AND base_id <> ''",
+            "unassigned": (
+                "(owner_player_id IS NULL OR owner_player_id = '') "
+                "AND (base_id IS NULL OR base_id = '')"
+            ),
+        },
+        "guilds": {"all": None, "active": "member_count > 0", "empty": "member_count = 0"},
+        "bases": {
+            "all": None,
+            "guilded": "guild_id IS NOT NULL AND guild_id <> ''",
+            "unguilded": "guild_id IS NULL OR guild_id = ''",
+        },
+    }
+    if resource in status_clauses:
+        if status not in status_clauses[resource]:
+            raise ValueError("Unknown world status filter.")
+        if status_clause := status_clauses[resource][status]:
+            clauses.append(status_clause)
     if search:
         clauses.append("(" + " OR ".join(f"{field} LIKE ?" for field in search_fields) + ")")
         parameters.extend([f"%{search}%"] * len(search_fields))
@@ -366,7 +395,30 @@ def query_cache(
             clauses.append(f"{field} = ?")
             parameters.append(value)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-    order = "name COLLATE NOCASE, id" if table in {"players", "guilds", "bases"} else "rowid"
+    order_definitions = {
+        "players": {
+            "name": "name COLLATE NOCASE, id",
+            "level-desc": "level IS NULL, level DESC, name COLLATE NOCASE, id",
+            "id": "id",
+        },
+        "pals": {
+            "name": "COALESCE(NULLIF(nickname, ''), character_id) COLLATE NOCASE, id",
+            "level-desc": "level IS NULL, level DESC, character_id COLLATE NOCASE, id",
+            "id": "id",
+        },
+        "guilds": {
+            "name": "name COLLATE NOCASE, id",
+            "count-desc": "member_count DESC, base_count DESC, name COLLATE NOCASE, id",
+            "id": "id",
+        },
+        "bases": {"name": "name COLLATE NOCASE, id", "id": "id"},
+    }
+    if resource in order_definitions:
+        if sort not in order_definitions[resource]:
+            raise ValueError("Unknown world sort.")
+        order = order_definitions[resource][sort]
+    else:
+        order = "rowid"
     connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:

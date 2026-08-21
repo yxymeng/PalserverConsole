@@ -44,6 +44,10 @@ test("UX-03：常用配置保持精简，高级配置可搜索全部低频字段
   const instancePanel = page.getByRole("dialog");
   await expect(instancePanel).toContainText("test-world");
   await expect(instancePanel).toContainText("8223");
+  await expect(instancePanel.getByText("运行目标", { exact: true })).toBeVisible();
+  await expect(instancePanel.locator(".psc-instance-endpoints")).toBeVisible();
+  await page.waitForTimeout(350);
+  await page.screenshot({ path: testInfo.outputPath(`ux03-instance-${testInfo.project.name}.png`), fullPage: true });
   await instancePanel.getByRole("button", { name: "进入实例设置" }).click();
   await expect(page.getByRole("tab", { name: "实例与控制台" })).toHaveAttribute("aria-selected", "true");
   await page.getByRole("tab", { name: "游戏配置" }).click();
@@ -68,6 +72,9 @@ test("UX-03：常用配置保持精简，高级配置可搜索全部低频字段
   await expect(page.getByRole("button", { name: "保存 1 项草稿" })).toBeEnabled();
   await page.screenshot({ path: testInfo.outputPath(`ux03-game-${testInfo.project.name}.png`), fullPage: true });
   await page.getByRole("tab", { name: "实例与控制台" }).click();
-  await expect(page.getByRole("heading", { name: "控制台与实例设置" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "实例运行环境" })).toBeVisible();
+  await expect(page.locator(".config-instance-grid")).toBeVisible();
+  await expect(page.locator(".instance-target-strip")).toContainText("test-world");
+  await expect(page.locator(".console-port-summary")).toContainText("8223");
   await page.screenshot({ path: testInfo.outputPath(`ux03-${testInfo.project.name}.png`), fullPage: true });
 });

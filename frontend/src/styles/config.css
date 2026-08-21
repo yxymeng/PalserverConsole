@@ -5,6 +5,62 @@
 .config-workspace-tabs button:hover { color: var(--foreground); background: var(--surface-hover); }
 .config-workspace-tabs button.is-active { color: var(--primary); background: var(--primary-surface); }
 
+.config-instance-workspace { display: grid; gap: 16px; }
+.config-instance-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 22px; border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--primary-surface) 66%, var(--surface)); }
+.config-instance-heading > div { display: flex; min-width: 0; align-items: center; gap: 14px; }
+.config-instance-heading-icon, .instance-panel-icon { display: grid; flex: 0 0 auto; width: 42px; height: 42px; place-items: center; border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border)); border-radius: 11px; color: var(--primary); background: var(--surface); }
+.config-instance-heading-icon svg, .instance-panel-icon svg { width: 20px; }
+.config-instance-heading h2 { margin: 0; color: var(--foreground); font-size: 22px; letter-spacing: -.02em; }
+.config-instance-heading p { max-width: 68ch; margin: 4px 0 0; color: var(--muted-strong); font-size: 12px; line-height: 1.55; }
+.config-locality-badge { flex: 0 0 auto; padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--border)); border-radius: 999px; color: var(--warning); background: var(--warning-surface); font-size: 11px; font-weight: 700; }
+.config-locality-badge[data-local] { border-color: color-mix(in srgb, var(--success) 42%, var(--border)); color: var(--success); background: var(--success-surface); }
+.config-instance-map { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr); overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--border); gap: 1px; }
+.config-instance-map > span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 10px; padding: 13px 16px; background: var(--surface); }
+.config-instance-map svg { grid-row: span 2; width: 18px; color: var(--primary); }
+.config-instance-map strong { color: var(--foreground); font-size: 12px; }
+.config-instance-map small { color: var(--muted); font-size: 11px; }
+.config-instance-grid { display: grid; grid-template-columns: minmax(0, 1.42fr) minmax(300px, .58fr); align-items: start; gap: 16px; }
+.config-instance-grid .settings-section { width: auto; margin: 0; padding: 0; gap: 0; }
+.config-instance-grid .embedded-settings { overflow: hidden; border: 1px solid var(--border); border-radius: 13px; background: var(--surface); }
+.instance-panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 18px; border-bottom: 1px solid var(--border); }
+.instance-panel-heading > div { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.instance-panel-heading h2 { margin: 0; font-size: 16px; }
+.instance-panel-heading p { max-width: 52ch; margin: 3px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.instance-panel-heading .quiet-button { flex: 0 0 auto; margin: 0; }
+.instance-target-strip, .console-port-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); overflow: hidden; border-bottom: 1px solid var(--border); background: var(--border); gap: 1px; }
+.instance-target-strip > span, .console-port-summary > span { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 9px; min-width: 0; padding: 13px 16px; background: var(--surface-subtle); }
+.instance-target-strip svg, .console-port-summary svg { grid-row: span 2; width: 17px; color: var(--primary); }
+.instance-target-strip small, .console-port-summary small { color: var(--muted); font-size: 10px; }
+.instance-target-strip strong, .console-port-summary strong { min-width: 0; overflow: hidden; color: var(--foreground); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.instance-settings-form { display: grid; gap: 0; }
+.instance-field { display: grid; gap: 6px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+.instance-field > span { display: flex; align-items: center; gap: 8px; color: var(--foreground); }
+.instance-field > span svg { width: 16px; color: var(--primary); }
+.instance-field > span strong { font-size: 12px; }
+.instance-field > small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.instance-field input, .instance-field select, .console-port-form input { width: 100%; min-height: 42px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--foreground); font: inherit; }
+.instance-field input, .console-port-form input { padding: 0 11px; }
+.instance-field input:focus, .instance-field select:focus, .console-port-form input:focus { border-color: var(--primary); outline: 0; box-shadow: 0 0 0 3px var(--focus-ring); }
+.instance-form-action { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 15px 18px; background: var(--surface-subtle); }
+.instance-form-action > span { max-width: 48ch; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.instance-form-action .primary-button { flex: 0 0 auto; margin: 0; }
+.instance-candidate-list { display: grid; gap: 7px; padding: 14px 18px; border-bottom: 1px solid var(--border); }
+.instance-candidate-list > div { display: grid; gap: 2px; }
+.instance-candidate-list > div strong { color: var(--foreground); font-size: 12px; }
+.instance-candidate-list > div small { color: var(--muted); font-size: 10px; }
+.console-port-summary > span:first-child strong { color: var(--primary); font-size: 18px; }
+.console-scope-note { display: flex; gap: 10px; margin: 16px; padding: 12px; border: 1px solid color-mix(in srgb, var(--warning) 32%, var(--border)); border-radius: 9px; color: var(--warning); background: color-mix(in srgb, var(--warning-surface) 70%, var(--surface)); }
+.console-scope-note > svg { flex: 0 0 auto; width: 17px; }
+.console-scope-note p { display: grid; gap: 3px; margin: 0; }
+.console-scope-note strong { color: var(--foreground); font-size: 11px; }
+.console-scope-note span { color: var(--muted-strong); font-size: 10px; line-height: 1.45; }
+.console-port-form { display: grid; gap: 11px; padding: 0 16px 16px; }
+.console-port-form > label { display: grid; gap: 3px; }
+.console-port-form > label span { color: var(--foreground); font-size: 12px; font-weight: 700; }
+.console-port-form > label small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.console-port-form > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.console-port-form .primary-button { margin: 0; }
+
 .config-summary { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
 .config-file-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 17px 18px; border-bottom: 1px solid var(--border); }
 .config-file-summary h2 { margin: 0; font-size: 17px; }
@@ -216,6 +272,13 @@
   @media (max-width: 820px) {
   .config-workspace-tabs { overflow-x: auto; }
   .config-workspace-tabs button { flex: 0 0 auto; }
+  .config-instance-heading { align-items: flex-start; flex-direction: column; }
+  .config-instance-map, .config-instance-grid { grid-template-columns: 1fr; }
+  .instance-panel-heading { align-items: flex-start; }
+  .instance-panel-heading > div { align-items: flex-start; }
+  .instance-panel-heading .quiet-button { min-width: 40px; }
+  .instance-form-action { align-items: stretch; flex-direction: column; }
+  .instance-form-action .primary-button { width: 100%; }
   .config-file-summary { align-items: stretch; flex-direction: column; }
   .config-file-summary p { overflow: visible; white-space: normal; }
   .config-file-summary .quiet-button { width: 100%; }

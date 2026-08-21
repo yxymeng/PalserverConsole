@@ -2,6 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在完成后隐去", async ({ page }, testInfo) => {
   let operationPoll = 0;
+  await page.addInitScript(() => {
+    Object.defineProperty(globalThis.crypto, "randomUUID", { value: undefined });
+  });
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: {
     local: true, authenticated: true, adminPasswordConfigured: true,
     csrfToken: "ux02-csrf", lanWarning: null, port: 8223,
@@ -42,9 +45,12 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
     counts: { players: 8, pals: 797, guilds: 3, bases: 8 },
   } }));
   await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
-  await page.route("**/api/server/operations/stop", (route) => route.fulfill({ json: {
-    operationId: "ux02-stop", kind: "stop", state: "queued", stage: "queued", errorCode: null, detail: null,
-  } }));
+  await page.route("**/api/server/operations/stop", (route) => {
+    expect(route.request().headers()["idempotency-key"]).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    return route.fulfill({ json: {
+      operationId: "ux02-stop", kind: "stop", state: "queued", stage: "queued", errorCode: null, detail: null,
+    } });
+  });
   await page.route("**/api/server/operations/ux02-stop", (route) => {
     const states = [
       { state: "running", stage: "countdown" },
@@ -57,6 +63,7 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   });
 
   await page.goto("/");
+  expect(await page.evaluate(() => typeof globalThis.crypto.randomUUID)).toBe("undefined");
 
   const control = page.getByLabel("首页服务器控制");
   const liveStatus = page.getByLabel("实时服务器状态");
@@ -111,8 +118,13 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
     const button = control.getByRole("button", { name: action });
     if (testInfo.project.name === "mobile") await button.tap();
     else await button.click();
-    await expect(page.getByRole("alertdialog")).toBeVisible();
-    const cancel = page.getByRole("alertdialog").getByRole("button", { name: "取消" });
+    const actionDialog = page.getByRole("alertdialog");
+    await expect(actionDialog).toBeVisible();
+    const cancel = actionDialog.getByRole("button", { name: "取消" });
+    const confirm = actionDialog.getByRole("button", { name: `确认${action}` });
+    const [cancelBox, confirmBox] = await Promise.all([cancel.boundingBox(), confirm.boundingBox()]);
+    expect(Math.round(cancelBox?.width || 0)).toBe(Math.round(confirmBox?.width || 0));
+    expect(Math.round(cancelBox?.height || 0)).toBe(Math.round(confirmBox?.height || 0));
     if (testInfo.project.name === "mobile") await cancel.tap();
     else await cancel.click();
     await expect(page.getByRole("alertdialog")).toBeHidden();
@@ -128,6 +140,9 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   const operationIsland = page.getByLabel("当前操作状态");
   await expect(operationIsland).toContainText("关闭服务器");
   await expect(operationIsland).toContainText("维护倒计时中，仍可取消。", { timeout: 2_500 });
+  await expect(operationIsland.getByRole("progressbar")).toBeVisible();
+  await expect(operationIsland.locator(".operation-liquid-fill")).toBeVisible();
+  await expect(operationIsland).toContainText(/剩余 \d+ 秒/);
   await expect(operationIsland.getByRole("button", { name: "取消" })).toBeVisible();
   await expect(operationIsland).not.toContainText("countdown");
   await page.screenshot({ path: testInfo.outputPath(`ux02-${testInfo.project.name}.png`) });

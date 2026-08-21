@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { requestJson } from "../api/client";
 import { Badge } from "../components/ui/badge";
+import { BlurFade } from "../components/ui/blur-fade";
 import { Button } from "../components/ui/button";
 import {
   Sidebar,
@@ -170,17 +171,19 @@ function ConsoleLayout({
           </div>
         </header>
         <main className="psc-main" aria-label={`${pageTitle}页面`}>
-          {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} />}
-          {active === "world" && <WorldDataPage auth={auth} />}
-          {active === "config" && (
-            <ConfigPage
-              auth={auth}
-              onAuthChanged={onAuthChanged}
-              workspace={configWorkspace}
-              onWorkspaceChange={onConfigWorkspaceChange}
-            />
-          )}
-          {active === "maintenance" && <MaintenancePage auth={auth} />}
+          <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={4} blur="3px">
+            {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} />}
+            {active === "world" && <WorldDataPage auth={auth} />}
+            {active === "config" && (
+              <ConfigPage
+                auth={auth}
+                onAuthChanged={onAuthChanged}
+                workspace={configWorkspace}
+                onWorkspaceChange={onConfigWorkspaceChange}
+              />
+            )}
+            {active === "maintenance" && <MaintenancePage auth={auth} />}
+          </BlurFade>
         </main>
       </SidebarInset>
     </>

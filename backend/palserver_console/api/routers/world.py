@@ -8,6 +8,19 @@ from ...world.service import WorldDataError
 from ..schemas import CleanupConfirmationRequest, MessageResponse
 from ..security import error_response, peer_ip, require_authenticated_request, require_write
 
+WORLD_STATUS_FILTERS = {
+    "players": {"all", "guilded", "unguilded"},
+    "pals": {"all", "player", "base", "unassigned"},
+    "guilds": {"all", "active", "empty"},
+    "bases": {"all", "guilded", "unguilded"},
+}
+WORLD_SORTS = {
+    "players": {"name", "level-desc", "id"},
+    "pals": {"name", "level-desc", "id"},
+    "guilds": {"name", "count-desc", "id"},
+    "bases": {"name", "id"},
+}
+
 
 def router(deps: AppDependencies) -> APIRouter:
     api = APIRouter()
@@ -131,6 +144,8 @@ def router(deps: AppDependencies) -> APIRouter:
         ownerId: str | None = None,
         baseId: str | None = None,
         snapshotId: str | None = None,
+        status: str = "all",
+        sort: str = "name",
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
         if denied:
@@ -141,6 +156,10 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_WORLD_PAGE", "世界数据分页参数不正确。")
         if search is not None and len(search) > 100:
             return error_response(422, "INVALID_WORLD_SEARCH", "搜索文字不能超过 100 个字符。")
+        if resource in WORLD_STATUS_FILTERS and status not in WORLD_STATUS_FILTERS[resource]:
+            return error_response(422, "INVALID_WORLD_FILTER", "世界数据筛选条件不正确。")
+        if resource in WORLD_SORTS and sort not in WORLD_SORTS[resource]:
+            return error_response(422, "INVALID_WORLD_SORT", "世界数据排序条件不正确。")
         try:
             return deps.world.list_resource(
                 resource,
@@ -150,6 +169,8 @@ def router(deps: AppDependencies) -> APIRouter:
                 owner_id=ownerId,
                 base_id=baseId,
                 snapshot_id=snapshotId,
+                status=status,
+                sort=sort,
             )
         except WorldDataError as error:
             status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
