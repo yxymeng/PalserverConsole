@@ -40,18 +40,27 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/world/snapshots/current") {
       if (reparseRequests > 0) reparseStatusReads += 1;
-      const parsing = reparseStatusReads === 2;
-      if (reparseStatusReads >= 3) activeSnapshotId = "world-new";
+      const firstAttempt = reparseRequests === 1;
+      const parsing = firstAttempt && reparseStatusReads === 2;
+      const incompatible = firstAttempt && reparseStatusReads === 1;
+      const failed = reparseRequests === 2 && reparseStatusReads >= 1;
+      if (firstAttempt && reparseStatusReads >= 3) activeSnapshotId = "world-new";
+      const parseStatus = parsing ? "parsing" : incompatible ? "incompatible" : failed ? "failed" : "ready";
+      const errorCode = incompatible ? "CACHE_SCHEMA_INCOMPATIBLE" : failed ? "SNAPSHOT_PARSE_FAILED" : null;
       return route.fulfill({ json: {
-      source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: false, errorCode: null, error: null, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42,
-      sourceObservedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: parsing ? null : 1_786_000_042, parseStatus: parsing ? "parsing" : "ready",
+      source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: incompatible || failed, errorCode, error: errorCode, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42,
+      sourceObservedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: parsing ? null : 1_786_000_042, parseStatus,
+      reparseGeneration: incompatible ? 0 : reparseRequests,
       dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
       counts: { players: 1, pals: 3, guilds: 1, bases: 1, inventory_items: 1, work_pals: 1 },
     } });
     }
     if (path === "/api/world/reparse") {
-      if (route.request().method() === "POST") reparseRequests += 1;
-      return route.fulfill({ json: { message: "已开始只读重新解析" } });
+      if (route.request().method() === "POST") {
+        reparseRequests += 1;
+        reparseStatusReads = 0;
+      }
+      return route.fulfill({ json: { message: "已开始只读重新解析", reparseGeneration: reparseRequests } });
     }
     if (path === "/api/world/pals/roster") {
       const sort = new URL(route.request().url()).searchParams.get("sort");
@@ -164,6 +173,9 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect.poll(() => reparseRequests).toBe(1);
   await expect.poll(() => reparseStatusReads).toBeGreaterThanOrEqual(3);
   await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("snapshotId") === "world-new")).toBeTruthy();
+  await page.getByRole("button", { name: "重新解析" }).click();
+  await expect.poll(() => reparseRequests).toBe(2);
+  await expect(page.getByText(/SNAPSHOT_PARSE_FAILED/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });

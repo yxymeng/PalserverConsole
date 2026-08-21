@@ -38,6 +38,10 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class WorldReparseResponse(MessageResponse):
+    reparseGeneration: int
+
+
 class NetworkSettingsRequest(BaseModel):
     port: int = Field(ge=1, le=65535)
 

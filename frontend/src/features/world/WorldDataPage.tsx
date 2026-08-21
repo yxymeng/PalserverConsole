@@ -1,7 +1,7 @@
 import { Archive, ChevronLeft, ChevronRight, Database, LayoutDashboard, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
-import type { AuthStatus, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
+import type { AuthStatus, WorldReparseResponse, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
@@ -161,7 +161,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setReparsing(true);
     try {
       const previousSnapshotId = status?.snapshotId || null;
-      const response = await requestJson<{ message: string }>("/api/world/reparse", {
+      const response = await requestJson<WorldReparseResponse>("/api/world/reparse", {
         method: "POST",
         headers: { "X-CSRF-Token": auth.csrfToken || "" },
         body: "{}",
@@ -169,7 +169,9 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
       setMessage(response.message);
       const nextStatus = await waitForWorldReparse({
         previousSnapshotId,
+        reparseGeneration: response.reparseGeneration,
         readStatus: () => requestJson<WorldStatus>("/api/world/snapshots/current"),
+        onStatus: setStatus,
       });
       setStatus(nextStatus);
       await load();

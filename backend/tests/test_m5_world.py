@@ -11,15 +11,16 @@ import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fastapi.testclient import TestClient
 
+import palserver_console.world.cache as world_cache
 from palserver_console.config import AppSettings, ProfileError, ServerProfileService
 from palserver_console.main import create_app
 from palserver_console.persistence import Database
-from palserver_console.world.adapter import verify_stable_parse
+from palserver_console.world.adapter import read_save_properties, verify_stable_parse
 from palserver_console.world.cache import (
     CACHE_SCHEMA_VERSION,
     WorldCacheSchemaError,
@@ -31,6 +32,7 @@ from palserver_console.world.cache import (
     read_cache_metadata,
     validate_cache_file,
 )
+from palserver_console.world.pal_care_species import max_full_stomach
 from palserver_console.world.service import WorldDataError, WorldSnapshotService
 
 
@@ -429,12 +431,12 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
         "isAwakened": True,
         "isImported": True,
         "care": {
-                "current_hp": 0.0,
-                "hunger": 19.99,
-                "hunger_raw": 19.99,
-                "hunger_status": None,
-                "sanity": 49.99,
-                "physical_health": None,
+            "current_hp": 0.0,
+            "hunger": 19.99,
+            "hunger_raw": 19.99,
+            "hunger_status": "EPalStatusHungerType::Default",
+            "sanity": 49.99,
+            "physical_health": "EPalStatusPhysicalHealthType::Healthful",
             "disease": "EPalStatus::Cold",
             "activity": "EPalActivity::Working",
             "disease_recorded": True,
@@ -516,6 +518,9 @@ def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fie
             character_id="SheepBall",
             nickname="字段缺失帕鲁",
             is_player=False,
+            save_parameter_fields={
+                "Activity": _property("EPalActivity::Working", "EnumProperty")
+            },
         )
     )
     cache = tmp_path / "world-cache.sqlite"
@@ -524,7 +529,10 @@ def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fie
     items, total = query_pal_roster(
         cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
     )
-    by_name = {str(item["nickname"]): item["care"] for item in items}
+    by_name = {
+        str(item["nickname"]): cast(dict[str, Any], item["care"])
+        for item in items
+    }
     critical = by_name["工作帕鲁甲"]
     boundary = by_name["工作帕鲁乙"]
     missing = by_name["字段缺失帕鲁"]
@@ -534,9 +542,11 @@ def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fie
     assert boundary["reasons"] == ["disease"]
     assert boundary["hunger"] == 20.0 and boundary["sanity"] == 50.0
     assert boundary["disease"] == "EPalStatus::UnknownArchiveFever"
-    assert missing["unavailable"] == [
-        "currentHp", "hunger", "sanity", "disease", "activity",
-    ]
+    assert missing["unavailable"] == ["currentHp", "hunger"]
+    assert missing["sanity"] == 100.0
+    assert missing["diseaseRecorded"] is True
+    assert missing["activityRecorded"] is True
+    assert missing["activity"] == "EPalActivity::Working"
     assert missing["severity"] == "unavailable"
 
     attention, attention_total = query_pal_roster(
@@ -568,7 +578,6 @@ def test_pal_care_reads_real_save_field_shapes_without_treating_raw_food_as_perc
                     "value": {"Value": _property(125_000, "Int64Property")},
                 },
                 "FullStomach": _property(30.0, "FloatProperty"),
-                "MaxFullStomach": _property(150.0, "FloatProperty"),
                 "HungerType": _property(
                     "EPalStatusHungerType::Starvation", "EnumProperty"
                 ),
@@ -621,10 +630,10 @@ def test_pal_care_reads_real_save_field_shapes_without_treating_raw_food_as_perc
     items, _ = query_pal_roster(
         cache, page=1, page_size=60, search="真实字段帕鲁", marker="all", sort="balanced"
     )
-    care = items[0]["care"]
+    care = cast(dict[str, Any], items[0]["care"])
 
     assert care["currentHp"] == 125.0
-    assert care["hunger"] == 20.0
+    assert care["hunger"] == 30.0
     assert care["hungerRaw"] == 30.0
     assert care["hungerStatus"] == "EPalStatusHungerType::Starvation"
     assert care["sanity"] == 75.0
@@ -637,11 +646,51 @@ def test_pal_care_reads_real_save_field_shapes_without_treating_raw_food_as_perc
     raw_items, _ = query_pal_roster(
         cache, page=1, page_size=60, search="原始饱食值帕鲁", marker="all", sort="balanced"
     )
-    raw_care = raw_items[0]["care"]
-    assert raw_care["hunger"] is None
+    raw_care = cast(dict[str, Any], raw_items[0]["care"])
+    assert raw_care["hunger"] == 30.0
     assert raw_care["hungerRaw"] == 30.0
-    assert raw_care["unavailable"] == ["hunger"]
-    assert raw_care["severity"] == "unavailable"
+    assert raw_care["unavailable"] == []
+    assert raw_care["severity"] == "healthy"
+
+
+def test_pal_care_uses_current_work_suitability_as_snapshot_activity(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    characters = level["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    characters.append(
+        _character(
+            uuid.UUID(int=1),
+            uuid.UUID(int=407),
+            character_id="SheepBall",
+            nickname="当前工作帕鲁",
+            is_player=False,
+            current_hp=100.0,
+            hunger=100.0,
+            sanity=100.0,
+            save_parameter_fields={
+                "CurrentWorkSuitability": _property(
+                    "EPalWorkSuitability::Mining", "EnumProperty"
+                )
+            },
+        )
+    )
+    cache = tmp_path / "world-cache-current-work.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    items, total = query_pal_roster(
+        cache, page=1, page_size=60, search="当前工作帕鲁", marker="all", sort="balanced"
+    )
+    care = cast(dict[str, Any], items[0]["care"])
+
+    assert total == 1
+    assert care["activity"] == "EPalWorkSuitability::Mining"
+    assert care["severity"] == "info"
+    assert care["attention"] is False
+
+
+def test_pal_care_species_lookup_tolerates_save_id_casing() -> None:
+    assert max_full_stomach("SheepBall") == 100.0
+    assert max_full_stomach("Sheepball") == 100.0
+    assert max_full_stomach("FuturePal") is None
 
 
 def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) -> None:
@@ -1268,6 +1317,36 @@ def test_incompatible_world_cache_is_not_used_and_requests_reparse(tmp_path: Pat
     assert coverage["state"] == "unavailable"
     assert raised.value.code == "CACHE_SCHEMA_INCOMPATIBLE"
 
+    service.request_reparse()
+    requested = service.status()
+
+    assert requested["parseStatus"] == "parsing"
+    assert requested["parsing"] is True
+
+
+def test_reparse_request_replaces_an_old_failed_status_with_parsing(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    service._set_error("SNAPSHOT_PARSE_FAILED", "old failure")
+    assert service.status()["parseStatus"] == "failed"
+
+    generation = service.request_reparse()
+    status = service.status()
+
+    assert generation == 1
+    assert status["reparseGeneration"] == generation
+    assert status["parseStatus"] == "parsing"
+    assert status["parsing"] is True
+    assert status["errorCode"] is None
+
+    service._set_error("FAST_PARSE_FAILED", "fast failure")
+    failed = service.status()
+    assert failed["reparseGeneration"] == generation
+    assert failed["parseStatus"] == "failed"
+    assert failed["errorCode"] == "FAST_PARSE_FAILED"
+    assert service.request_reparse() == 2
+
 
 def test_service_start_rebuilds_legacy_current_cache_without_source_change(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -1311,9 +1390,9 @@ def test_service_start_rebuilds_legacy_current_cache_without_source_change(
         snapshot_id: str,
         observed_at: int,
         *,
-        collected_at: int,
-        parse_started_at: int,
-    ) -> dict[str, object]:
+        collected_at: int | None = None,
+        parse_started_at: int | None = None,
+    ) -> dict[str, Any]:
         build_world_cache(
             cache_path,
             level,
@@ -1332,6 +1411,8 @@ def test_service_start_rebuilds_legacy_current_cache_without_source_change(
         }
 
     monkeypatch.setattr(service, "_run_worker", fake_worker)
+    service.request_reparse()
+    assert service.status()["parseStatus"] == "parsing"
     service.start()
     try:
         assert rebuilt.wait(timeout=5)
@@ -1345,6 +1426,8 @@ def test_service_start_rebuilds_legacy_current_cache_without_source_change(
         CACHE_SCHEMA_VERSION
     )
     validate_cache_file(current_cache)
+    assert service.status()["parseStatus"] == "ready"
+    assert service.status()["parsing"] is False
 
 
 def test_failed_parse_keeps_last_compatible_cache_readable(tmp_path: Path) -> None:
@@ -1368,6 +1451,8 @@ def test_failed_parse_keeps_last_compatible_cache_readable(tmp_path: Path) -> No
         raise WorldDataError("PARSER_FAILED", "synthetic parser failure")
 
     service._run_worker = failed_worker  # type: ignore[method-assign]
+    service.request_reparse()
+    assert service.status()["parseStatus"] == "parsing"
     service._capture_and_parse(world, expected)
     listing = service.list_resource(
         "players", page=1, page_size=50, search=None, owner_id=None, base_id=None
@@ -1377,6 +1462,58 @@ def test_failed_parse_keeps_last_compatible_cache_readable(tmp_path: Path) -> No
     assert listing["snapshotId"] == "old"
     assert listing["stale"] is True
     assert listing["parseStatus"] == "failed"
+    assert listing["errorCode"] == "PARSER_FAILED"
+
+
+def test_reparse_requested_during_parse_is_not_cleared_by_older_attempt(tmp_path: Path) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(
+        database, lambda: None, tmp_path / "data", minimum_free_bytes=0
+    )
+    world = tmp_path / "world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    service.snapshots_root.mkdir(parents=True)
+    expected = service._fingerprint(world)
+    level, players = _synthetic_properties()
+
+    def successful_worker(
+        snapshot: Path,
+        cache_path: Path,
+        snapshot_id: str,
+        observed_at: int,
+        *,
+        collected_at: int | None = None,
+        parse_started_at: int | None = None,
+    ) -> dict[str, Any]:
+        assert snapshot.is_dir()
+        build_world_cache(
+            cache_path,
+            level,
+            players,
+            snapshot_id=snapshot_id,
+            source_observed_at=observed_at,
+            collected_at=collected_at,
+            parse_started_at=parse_started_at,
+        )
+        assert service.request_reparse() == 2
+        return {
+            "parsedAt": 2,
+            "durationMs": 1,
+            "peakMemoryBytes": 2,
+            "cacheSizeBytes": cache_path.stat().st_size,
+        }
+
+    service._run_worker = successful_worker  # type: ignore[method-assign]
+    assert service.request_reparse() == 1
+    service._capture_and_parse(world, expected)
+
+    status = service.status()
+    assert status["reparseGeneration"] == 2
+    assert status["parseStatus"] == "parsing"
+    assert status["parsing"] is True
 
 
 def test_world_contract_reports_unavailable_without_a_successful_cache(tmp_path: Path) -> None:
@@ -1423,7 +1560,7 @@ def test_world_contract_rejects_results_for_a_replaced_snapshot(tmp_path: Path) 
 
 @pytest.mark.integration
 @pytest.mark.private_fixture
-def test_current_sanitized_save_uses_detailed_m5_decoder() -> None:
+def test_current_sanitized_save_uses_detailed_m5_decoder(tmp_path: Path) -> None:
     source = os.environ.get("PALSERVER_M5_LEVEL_SAV")
     dll = os.environ.get("PALSERVER_OOZ_DLL")
     if not source or not dll:
@@ -1432,3 +1569,95 @@ def test_current_sanitized_save_uses_detailed_m5_decoder() -> None:
     assert analysis.property_decode_mode == "m5_2026_07_read_only_compat"
     assert all(item.found for item in analysis.coverage)
     assert analysis.parse_durations_ms
+    cache = tmp_path / "real-save-care.sqlite"
+    properties = read_save_properties(Path(source), ooz_dll_path=Path(dll))
+    counts = build_world_cache(
+        cache,
+        properties,
+        [],
+        snapshot_id="private-real-save",
+        source_observed_at=1,
+    )
+    with sqlite3.connect(cache) as connection:
+        total, hp, hunger, sanity, disease_available, activity_available = connection.execute(
+            """
+            SELECT COUNT(*),
+                SUM(current_hp IS NOT NULL),
+                SUM(hunger IS NOT NULL),
+                SUM(sanity IS NOT NULL),
+                SUM(COALESCE(json_extract(detail_json, '$.care.disease_recorded'), 0) = 1),
+                SUM(COALESCE(json_extract(detail_json, '$.care.activity_recorded'), 0) = 1)
+            FROM pals
+            """
+        ).fetchone()
+    assert total == counts["pals"] and total > 0
+    assert hp == total
+    assert hunger > 0
+    assert sanity == total
+    assert disease_available == total
+    assert activity_available == total
+    assert query_pal_care_summary(cache)["unavailable"] < total
+
+    world = world_cache._property(properties.get("worldSaveData"))
+    assert isinstance(world, dict)
+    raw_expectations: dict[str, dict[str, float | str]] = {}
+    for entry in world_cache._list_property(world.get("CharacterSaveParameterMap")):
+        entry_mapping = world_cache._mapping(entry)
+        key = world_cache._mapping(entry_mapping.get("key"))
+        raw = world_cache._property(world_cache._mapping(entry_mapping.get("value")).get("RawData"))
+        if not isinstance(raw, dict):
+            continue
+        save_parameter = world_cache._property(
+            world_cache._mapping(raw.get("object")).get("SaveParameter")
+        )
+        if not isinstance(save_parameter, dict) or bool(
+            world_cache._scalar(save_parameter.get("IsPlayer"))
+        ):
+            continue
+        instance_id = world_cache._id(world_cache._property(key.get("InstanceId")))
+        character_id = world_cache._text(
+            world_cache._scalar(save_parameter.get("CharacterID"))
+        )
+        if not instance_id or not character_id:
+            continue
+        expected: dict[str, float | str] = {}
+        hp_value = world_cache._save_hp(save_parameter)
+        if hp_value is not None:
+            expected["currentHp"] = hp_value
+        sanity_value = world_cache._save_number(save_parameter, "SanityValue")
+        if sanity_value is not None:
+            expected["sanity"] = sanity_value
+        disease_value = world_cache._enum_text(save_parameter.get("WorkerSick"))
+        if disease_value and world_cache._enum_key(disease_value) not in {"none", "healthy"}:
+            expected["disease"] = disease_value
+        activity_value = world_cache._enum_text(save_parameter.get("CurrentWorkSuitability"))
+        if activity_value and world_cache._enum_key(activity_value) != "none":
+            expected["activity"] = activity_value
+        full_stomach = world_cache._save_number(save_parameter, "FullStomach")
+        maximum = max_full_stomach(character_id)
+        if full_stomach is not None and maximum:
+            expected["hunger"] = min(100.0, max(0.0, full_stomach / maximum * 100.0))
+        if expected:
+            raw_expectations[instance_id] = expected
+
+    items, item_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=total,
+        search=None,
+        marker="all",
+        sort="name",
+        care="all",
+    )
+    cached_care = {str(item["id"]): cast(dict[str, Any], item["care"]) for item in items}
+    assert item_total == total
+    assert raw_expectations.keys() <= cached_care.keys()
+    assert any("hunger" in expected for expected in raw_expectations.values())
+    assert any("disease" in expected for expected in raw_expectations.values())
+    assert any("activity" in expected for expected in raw_expectations.values())
+    for instance_id, expected in raw_expectations.items():
+        for field, raw_value in expected.items():
+            if isinstance(raw_value, float):
+                assert cached_care[instance_id][field] == pytest.approx(raw_value)
+            else:
+                assert cached_care[instance_id][field] == raw_value

@@ -95,11 +95,15 @@ applies to these adapted layout definitions.
 
 - Source: https://github.com/deafdudecomputers/PalworldSaveTools
 - Fixed revision: `18b9554168ecf684c5f1e1e4d8e583083b942eb9`.
-- Purpose: character catalog and selected local WebP portrait source for the read-only world browser.
+- Purpose: character catalog, selected local WebP portrait source, and the species
+  `max_full_stomach` values used to derive read-only Pal hunger percentages.
 - License reported by the source repository: MIT License.
 - Import behavior: `scripts/sync-pal-catalog.ps1` checks out the fixed revision,
   copies only the required WebP files, and retains the source license at
   `frontend/public/assets/pals/LICENSE-PalworldSaveTools.txt`.
+- `backend/tools/generate_pal_care_species.py` verifies the pinned
+  `characters.json` SHA-256 and generates only the offline Character ID to
+  `max_full_stomach` mapping in `world/pal_care_species.py`.
 
 We thank the PalworldSaveTools maintainers for making this catalog available.
 

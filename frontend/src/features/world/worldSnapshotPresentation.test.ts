@@ -15,6 +15,7 @@ const status = (overrides: Partial<WorldSnapshotSummary> = {}): WorldSnapshotSum
   error: null,
   parsing: false,
   parseStatus: "ready",
+  reparseGeneration: 0,
   dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
   parseDurationMs: 1,
   peakMemoryBytes: null,

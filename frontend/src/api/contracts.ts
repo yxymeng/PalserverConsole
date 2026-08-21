@@ -103,6 +103,7 @@ export type WorldSnapshotContext = {
   dataCoverage: WorldDataCoverage;
 };
 export type WorldSnapshotSummary = WorldSnapshotContext & {
+  reparseGeneration: number;
   error: string | null;
   parseDurationMs: number | null;
   peakMemoryBytes: number | null;
@@ -119,6 +120,7 @@ export type WorldSnapshotSummary = WorldSnapshotContext & {
   };
 };
 export type WorldStatus = WorldSnapshotSummary;
+export type WorldReparseResponse = { message: string; reparseGeneration: number };
 
 export type WorldPlayerListItem = {
   id: string; instanceId: string; name: string; level: number | null; guildId: string | null;

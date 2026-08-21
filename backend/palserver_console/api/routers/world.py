@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from ...dependencies import AppDependencies
 from ...world.service import WorldDataError
-from ..schemas import CleanupConfirmationRequest, MessageResponse
+from ..schemas import CleanupConfirmationRequest, WorldReparseResponse
 from ..security import error_response, peer_ip, require_authenticated_request, require_write
 
 WORLD_STATUS_FILTERS = {
@@ -176,18 +176,21 @@ def router(deps: AppDependencies) -> APIRouter:
             response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
             return error_response(response_status, error.code, str(error))
 
-    @api.post("/api/world/reparse", tags=["world"], response_model=MessageResponse)
-    def world_reparse(request: Request) -> MessageResponse | JSONResponse:
+    @api.post("/api/world/reparse", tags=["world"], response_model=WorldReparseResponse)
+    def world_reparse(request: Request) -> WorldReparseResponse | JSONResponse:
         denied = require_write(request, deps.auth)
         if denied:
             return denied
-        deps.world.request_reparse()
+        generation = deps.world.request_reparse()
         deps.audit.record(
             "world.reparse",
             result="queued",
             detail={"source": "save-snapshot"},
             peer_ip=peer_ip(request),
         )
-        return MessageResponse(message="已请求重新读取存档；文件稳定 5 秒后开始解析。")
+        return WorldReparseResponse(
+            message="已请求重新读取存档；文件稳定 5 秒后开始解析。",
+            reparseGeneration=generation,
+        )
 
     return api

@@ -8,13 +8,41 @@ import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from ..steam import is_reparse_point
+from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 5
+CACHE_SCHEMA_VERSION = 6
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+
+PalCareReason = Literal["zero_hp", "disease", "hunger_low", "san_low"]
+PalCareUnavailable = Literal["currentHp", "hunger", "sanity", "disease", "activity"]
+PalCareSeverity = Literal["critical", "warning", "unavailable", "info", "healthy"]
+
+
+class PalCareSignals(TypedDict):
+    current_hp: float | None
+    hunger: float | None
+    sanity: float | None
+    disease: str | None
+    activity: str | None
+    disease_recorded: bool
+    activity_recorded: bool
+
+
+class PalCareFields(PalCareSignals):
+    hunger_raw: float | None
+    hunger_status: str | None
+    physical_health: str | None
+
+
+class PalCareAssessment(TypedDict):
+    reasons: list[PalCareReason]
+    unavailable: list[PalCareUnavailable]
+    severity: PalCareSeverity
+    attention: bool
 
 
 class WorldCacheSchemaError(ValueError):
@@ -898,7 +926,7 @@ def _characters(
         is_boss = character_id_upper.startswith(("BOSS_", "GYM_"))
         is_boss = is_boss or character_id_upper.endswith("BOSS")
         is_lucky = bool(_scalar(save_parameter.get("IsRarePal")))
-        care = _pal_care_fields(save_parameter)
+        care = _pal_care_fields(save_parameter, character_id)
         pals.append(
             (
                 instance_id,
@@ -940,7 +968,9 @@ def _characters(
     return players, pals
 
 
-def _pal_care_fields(save_parameter: Mapping[str, Any]) -> dict[str, object | None]:
+def _pal_care_fields(
+    save_parameter: Mapping[str, Any], character_id: str
+) -> PalCareFields:
     status_raw = _first_present(save_parameter, "PalStatus")
     disease_raw = _first_present(
         save_parameter, "WorkerSick", "Disease", "PalDisease", "SickType"
@@ -954,12 +984,17 @@ def _pal_care_fields(save_parameter: Mapping[str, Any]) -> dict[str, object | No
         "WorkState",
         "WorkStatus",
         "BaseCampWorkerEventType",
+        "CurrentWorkSuitability",
     )
     status = _enum_text(status_raw)
     disease_value = _enum_text(disease_raw)
     activity_value = _enum_text(activity_raw)
     physical_health = _enum_text(physical_health_raw)
+    if physical_health is None:
+        physical_health = "EPalStatusPhysicalHealthType::Healthful"
     hunger_status = _enum_text(hunger_status_raw)
+    if hunger_status is None:
+        hunger_status = "EPalStatusHungerType::Default"
     if disease_value is not None and _enum_key(disease_value) in {"", "none", "normal", "healthy"}:
         disease_value = None
     if activity_value is not None and _enum_key(activity_value) in {"", "none"}:
@@ -973,23 +1008,29 @@ def _pal_care_fields(save_parameter: Mapping[str, Any]) -> dict[str, object | No
     if hunger_raw is None:
         hunger_raw = _save_number(save_parameter, "Hunger", "FoodAmount", "Food")
     hunger_max = _save_number(save_parameter, "MaxFullStomach")
+    if hunger_max is None:
+        hunger_max = max_full_stomach(character_id)
     hunger = None
-    # FullStomach is an absolute, species-dependent value; only expose a
-    # percentage when the same record also provides its maximum.
+    # FullStomach is absolute; normalize it with an explicit saved maximum or
+    # the pinned offline species maximum. Unknown species remain unavailable.
     if full_stomach is not None and hunger_max is not None and hunger_max > 0:
         hunger = min(100.0, max(0.0, full_stomach / hunger_max * 100.0))
+    sanity = _save_number(save_parameter, "SanityValue", "Sanity", "SAN")
+    if sanity is None:
+        sanity = 100.0
     return {
         "current_hp": _save_hp(save_parameter),
         "hunger": hunger,
         "hunger_raw": hunger_raw,
         "hunger_status": hunger_status,
-        "sanity": _save_number(save_parameter, "SanityValue", "Sanity", "SAN"),
+        "sanity": sanity,
         "physical_health": physical_health,
         "disease": disease_value,
         "activity": activity_value,
-        "disease_recorded": disease_raw is not None
-        or (status_raw is not None and not _is_activity_status(status)),
-        "activity_recorded": activity_raw is not None or _is_activity_status(status),
+        # These sparse save properties omit their normal/default enum values.
+        # Availability is a parser capability, not per-Pal key presence.
+        "disease_recorded": True,
+        "activity_recorded": True,
     }
 
 
@@ -1063,36 +1104,16 @@ def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
     physical_health = _text(stored_care.get("physical_health"))
     disease_recorded = bool(stored_care.get("disease_recorded"))
     activity_recorded = bool(stored_care.get("activity_recorded"))
-    reasons: list[str] = []
-    if current_hp == 0:
-        reasons.append("zero_hp")
-    if disease is not None:
-        reasons.append("disease")
-    if hunger is not None and hunger < 20:
-        reasons.append("hunger_low")
-    if sanity is not None and sanity < 50:
-        reasons.append("san_low")
-    unavailable = [
-        key
-        for key, available in (
-            ("currentHp", current_hp is not None),
-            ("hunger", hunger is not None),
-            ("sanity", sanity is not None),
-            ("disease", disease_recorded),
-            ("activity", activity_recorded),
-        )
-        if not available
-    ]
-    severity = (
-        "critical"
-        if "zero_hp" in reasons or "disease" in reasons
-        else "warning"
-        if reasons
-        else "info"
-        if activity
-        else "unavailable"
-        if unavailable
-        else "healthy"
+    assessment = _assess_pal_care(
+        {
+            "current_hp": current_hp,
+            "hunger": hunger,
+            "sanity": sanity,
+            "disease": disease,
+            "activity": activity,
+            "disease_recorded": disease_recorded,
+            "activity_recorded": activity_recorded,
+        }
     )
     return {
         "currentHp": current_hp,
@@ -1105,6 +1126,44 @@ def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
         "activity": activity,
         "diseaseRecorded": disease_recorded,
         "activityRecorded": activity_recorded,
+        **assessment,
+    }
+
+
+def _assess_pal_care(signals: PalCareSignals) -> PalCareAssessment:
+    reasons: list[PalCareReason] = []
+    if signals["current_hp"] == 0:
+        reasons.append("zero_hp")
+    if signals["disease"] is not None:
+        reasons.append("disease")
+    if signals["hunger"] is not None and signals["hunger"] < 20:
+        reasons.append("hunger_low")
+    if signals["sanity"] is not None and signals["sanity"] < 50:
+        reasons.append("san_low")
+    availability: tuple[tuple[PalCareUnavailable, bool], ...] = (
+        ("currentHp", signals["current_hp"] is not None),
+        ("hunger", signals["hunger"] is not None),
+        ("sanity", signals["sanity"] is not None),
+        ("disease", signals["disease_recorded"]),
+        ("activity", signals["activity_recorded"]),
+    )
+    unavailable = [
+        key
+        for key, available in availability
+        if not available
+    ]
+    severity: PalCareSeverity = (
+        "critical"
+        if "zero_hp" in reasons or "disease" in reasons
+        else "warning"
+        if reasons
+        else "unavailable"
+        if unavailable
+        else "info"
+        if signals["activity"]
+        else "healthy"
+    )
+    return {
         "reasons": reasons,
         "unavailable": unavailable,
         "severity": severity,
@@ -1115,29 +1174,36 @@ def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
 def query_pal_care_summary(path: Path) -> dict[str, int]:
     connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
     try:
-        row = connection.execute(
+        rows = connection.execute(
             """
-            SELECT
-                COUNT(*) AS total,
-                COALESCE(SUM(CASE WHEN current_hp = 0 OR disease IS NOT NULL
-                    THEN 1 ELSE 0 END), 0) AS critical,
-                COALESCE(SUM(CASE WHEN current_hp != 0 AND disease IS NULL
-                    AND (hunger < 20 OR sanity < 50) THEN 1 ELSE 0 END), 0) AS warning,
-                COALESCE(SUM(CASE WHEN current_hp IS NULL OR hunger IS NULL
-                    OR sanity IS NULL
-                    OR COALESCE(json_extract(detail_json, '$.care.disease_recorded'), 0) = 0
-                    OR COALESCE(json_extract(detail_json, '$.care.activity_recorded'), 0) = 0
-                    THEN 1 ELSE 0 END), 0) AS unavailable
+            SELECT current_hp, hunger, sanity, disease, activity,
+                COALESCE(json_extract(detail_json, '$.care.disease_recorded'), 0),
+                COALESCE(json_extract(detail_json, '$.care.activity_recorded'), 0)
             FROM pals
             """
-        ).fetchone()
-        critical, warning = int(row[1]), int(row[2])
+        ).fetchall()
+        assessments = [
+            _assess_pal_care(
+                {
+                    "current_hp": _number(row[0]),
+                    "hunger": _number(row[1]),
+                    "sanity": _number(row[2]),
+                    "disease": _text(row[3]),
+                    "activity": _text(row[4]),
+                    "disease_recorded": bool(row[5]),
+                    "activity_recorded": bool(row[6]),
+                }
+            )
+            for row in rows
+        ]
+        critical = sum(item["severity"] == "critical" for item in assessments)
+        warning = sum(item["severity"] == "warning" for item in assessments)
         return {
-            "total": int(row[0]),
+            "total": len(rows),
             "critical": critical,
             "warning": warning,
             "attention": critical + warning,
-            "unavailable": int(row[3]),
+            "unavailable": sum(bool(item["unavailable"]) for item in assessments),
         }
     finally:
         connection.close()

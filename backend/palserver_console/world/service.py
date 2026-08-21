@@ -95,6 +95,8 @@ class WorldSnapshotService:
         self._disk_space_retry_delay_seconds = 0.0
         self._disk_space_retry_until = 0.0
         self._parsing = False
+        self._reparse_requested = False
+        self._reparse_generation = 0
         self._last_error: tuple[str, str] | None = None
         self._last_duration_ms: int | None = None
         self._last_peak_memory_bytes: int | None = None
@@ -200,13 +202,18 @@ class WorldSnapshotService:
             "errorCode": None,
         }
 
-    def request_reparse(self) -> None:
+    def request_reparse(self) -> int:
         with self._lock:
+            self._reparse_generation += 1
             self._last_seen = None
             self._pending = None
+            self._reparse_requested = True
+            self._last_error = None
             self._reset_disk_space_retry_locked()
             self._ooz_discovery_cache = None
+            generation = self._reparse_generation
         self._wake.set()
+        return generation
 
     def _reset_disk_space_retry_locked(self) -> None:
         self._disk_space_retry_delay_seconds = 0.0
@@ -306,7 +313,8 @@ class WorldSnapshotService:
     def _status_for_snapshot(self, current: dict[str, object] | None) -> dict[str, object]:
         with self._lock:
             error = self._last_error
-            parsing = self._parsing
+            parsing = self._parsing or self._reparse_requested
+            reparse_generation = self._reparse_generation
             duration = self._last_duration_ms
             peak_memory = self._last_peak_memory_bytes
             cache_size = self._last_cache_size_bytes
@@ -362,16 +370,17 @@ class WorldSnapshotService:
                 "inventories": False,
                 "work-pals": False,
             }
-        if error is not None and error[0] == "CACHE_SCHEMA_INCOMPATIBLE":
-            parse_status = "incompatible"
-        elif parsing:
+        if parsing:
             parse_status = "parsing"
+        elif error is not None and error[0] == "CACHE_SCHEMA_INCOMPATIBLE":
+            parse_status = "incompatible"
         elif error is not None:
             parse_status = "failed"
         elif current is not None:
             parse_status = "ready"
         else:
             parse_status = "unavailable"
+        visible_error = None if parsing else error
         return {
             "source": "save-snapshot",
             "observedAt": observed_at,
@@ -379,11 +388,16 @@ class WorldSnapshotService:
             "collectedAt": collected_at,
             "parsedAt": parsed_at,
             "stale": error is not None or current is None,
-            "errorCode": error[0] if error else ("SNAPSHOT_PENDING" if current is None else None),
-            "error": error[1] if error else None,
+            "errorCode": visible_error[0]
+            if visible_error
+            else "SNAPSHOT_PENDING"
+            if current is None and not parsing
+            else None,
+            "error": visible_error[1] if visible_error else None,
             "snapshotId": current["id"] if current else None,
             "parsing": parsing,
             "parseStatus": parse_status,
+            "reparseGeneration": reparse_generation,
             "dataCoverage": {
                 "state": coverage_state,
                 "resources": coverage_resources,
@@ -696,6 +710,7 @@ class WorldSnapshotService:
         parse_started_at = int(self.clock())
         with self._lock:
             self._parsing = True
+            parse_generation = self._reparse_generation
         try:
             self._ensure_disk_space()
             result = self._run_worker(
@@ -737,7 +752,9 @@ class WorldSnapshotService:
             )
             with self._lock:
                 self._reset_disk_space_retry_locked()
-                self._last_error = None
+                if self._reparse_generation == parse_generation:
+                    self._reparse_requested = False
+                    self._last_error = None
                 self._last_duration_ms = duration_ms
                 self._last_peak_memory_bytes = peak_memory_bytes
                 self._last_cache_size_bytes = cache_size_bytes
@@ -762,14 +779,22 @@ class WorldSnapshotService:
                 make_current=False,
             )
             if isinstance(error, WorldDataError):
-                self._set_error(error.code, str(error))
+                self._set_error(error.code, str(error), generation=parse_generation)
                 if error.code == "DISK_SPACE_LOW":
                     self._schedule_disk_space_retry(expected)
             elif self._is_disk_full_error(error):
                 self._schedule_disk_space_retry(expected)
-                self._set_error("DISK_SPACE_LOW", "磁盘剩余空间不足，已保留最后成功缓存。")
+                self._set_error(
+                    "DISK_SPACE_LOW",
+                    "磁盘剩余空间不足，已保留最后成功缓存。",
+                    generation=parse_generation,
+                )
             else:
-                self._set_error("SNAPSHOT_PARSE_FAILED", f"{type(error).__name__}: {error}")
+                self._set_error(
+                    "SNAPSHOT_PARSE_FAILED",
+                    f"{type(error).__name__}: {error}",
+                    generation=parse_generation,
+                )
         finally:
             with self._lock:
                 self._parsing = False
@@ -1322,8 +1347,11 @@ class WorldSnapshotService:
                 "observedAt": now,
             }
 
-    def _set_error(self, code: str, message: str) -> None:
+    def _set_error(self, code: str, message: str, *, generation: int | None = None) -> None:
         with self._lock:
+            if generation is not None and generation != self._reparse_generation:
+                return
+            self._reparse_requested = False
             self._last_error = (code, message)
 
     @staticmethod

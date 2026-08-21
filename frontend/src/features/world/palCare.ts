@@ -2,8 +2,11 @@ import type { WorldPalCare } from "../../api/contracts";
 
 const diseaseLabels: Record<string, string> = {
   cold: "感冒", sick: "感冒", commoncold: "感冒", sprain: "扭伤", injury: "扭伤",
-  ulcer: "胃溃疡", stomachulcer: "胃溃疡", fracture: "骨折", bonefracture: "骨折",
-  weakness: "虚弱", depression: "抑郁症", gluttony: "暴食症", overeating: "暴食症",
+  ulcer: "胃溃疡", stomachulcer: "胃溃疡", gastriculcer: "胃溃疡",
+  fracture: "骨折", bonefracture: "骨折", weakness: "虚弱",
+  depression: "抑郁症", depressionsprain: "抑郁症",
+  gluttony: "暴食症", overeating: "暴食症", bulimia: "暴食症",
+  disturbingelement: "情绪紊乱",
 };
 const activityLabels: Record<string, string> = {
   work: "工作中", working: "工作中", rest: "休息", resting: "休息",
@@ -26,6 +29,7 @@ export function diseaseLabel(disease: string | null) {
 
 export function activityLabel(activity: string | null) {
   if (!activity) return null;
+  if (activity.startsWith("EPalWorkSuitability::")) return "工作中";
   return activityLabels[enumKey(activity)] || null;
 }
 

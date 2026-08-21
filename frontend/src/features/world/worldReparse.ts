@@ -2,7 +2,9 @@ import type { WorldStatus } from "../../api/contracts";
 
 export type WorldReparsePollingOptions = {
   previousSnapshotId: string | null;
+  reparseGeneration: number;
   readStatus: () => Promise<WorldStatus>;
+  onStatus?: (status: WorldStatus) => void;
   wait?: (milliseconds: number) => Promise<void>;
   intervalMs?: number;
   timeoutMs?: number;
@@ -13,11 +15,19 @@ export async function waitForWorldReparse(options: WorldReparsePollingOptions): 
   const intervalMs = options.intervalMs ?? 500;
   const timeoutMs = options.timeoutMs ?? 240_000;
   const startedAt = Date.now();
-
   while (Date.now() - startedAt <= timeoutMs) {
     const status = await options.readStatus();
-    if (status.snapshotId !== options.previousSnapshotId && status.parseStatus === "ready") return status;
-    if (status.parseStatus === "failed" || status.parseStatus === "incompatible") {
+    const isCurrentAttempt = status.reparseGeneration >= options.reparseGeneration;
+    if (status.snapshotId !== options.previousSnapshotId && status.parseStatus === "ready") {
+      options.onStatus?.(status);
+      return status;
+    }
+    if (status.parseStatus === "parsing") {
+      options.onStatus?.(status);
+    } else if (isCurrentAttempt && (
+      status.parseStatus === "failed" || status.parseStatus === "incompatible"
+    )) {
+      options.onStatus?.(status);
       throw new Error(`${status.errorCode || "WORLD_REPARSE_FAILED"}: 重新解析未生成可用快照。`);
     }
     await wait(intervalMs);
