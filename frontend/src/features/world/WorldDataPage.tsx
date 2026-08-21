@@ -6,6 +6,7 @@ import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
+import { PalRoster } from "./PalRoster";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 
 type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
@@ -54,10 +55,16 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const loadSequence = useRef(0);
   const snapshotId = status?.snapshotId;
 
+  const refreshSnapshot = useCallback(async () => {
+    const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current");
+    setStatus(nextStatus);
+    return nextStatus.snapshotId;
+  }, []);
+
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
     const signal = nextRequestSignal();
-    const hasEntityBrowser = workspace !== "overview" && workspace !== "inventories";
+    const hasEntityBrowser = workspace !== "overview" && workspace !== "inventories" && resource !== "pals";
     setListLoading(hasEntityBrowser);
     setError("");
     try {
@@ -186,7 +193,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
       {WORKSPACES.map(({ key, label, icon: Icon, countKey, planned }) => <button key={key} className={workspace === key ? "active" : ""} type="button" role="tab" id={`world-workspace-tab-${key}`} aria-selected={workspace === key} aria-controls={`world-workspace-${key}`} onClick={() => chooseWorkspace(key)}><Icon size={17} /><span>{label}</span>{countKey && <strong>{status?.counts[countKey] ?? "-"}</strong>}{planned && <em>后续</em>}</button>)}
     </div>
     <main id={`world-workspace-${workspace}`} className="world-workspace" role="tabpanel" aria-labelledby={`world-workspace-tab-${workspace}`}>
-      {workspace === "overview" ? <WorldWorkspacePlaceholder workspace="overview" onChooseResource={chooseResource} /> : workspace === "inventories" ? <WorldWorkspacePlaceholder workspace="inventories" onChooseResource={chooseResource} /> : <div className="world-browser">
+      {workspace === "overview" ? <WorldWorkspacePlaceholder workspace="overview" onChooseResource={chooseResource} /> : workspace === "inventories" ? <WorldWorkspacePlaceholder workspace="inventories" onChooseResource={chooseResource} /> : workspace === "pals" ? <PalRoster snapshotId={status?.snapshotId} onSnapshotReplaced={refreshSnapshot} /> : <div className="world-browser">
       <section className="world-list-panel" aria-label={`${RESOURCE_LABELS[resource]}列表`}>
         <form className="world-toolbar" onSubmit={submitSearch}>
           <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>

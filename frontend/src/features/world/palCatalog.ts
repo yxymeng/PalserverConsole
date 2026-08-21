@@ -45,13 +45,13 @@ export function resolvePal(source: PalSource): PalPresentation {
     englishName: catalogEntry?.englishName || characterId || "Unknown Pal",
     icon: catalogEntry?.icon || UNKNOWN_PAL_ICON,
     known: Boolean(catalogEntry),
-    gender: genderValue(detail.gender),
-    rank: numberValue(detail.rank),
-    isBoss: booleanValue(detail.isBoss) || /^(BOSS_|GYM_)|Boss$/i.test(characterId),
-    isPredator: booleanValue(detail.isPredator) || /^PREDATOR_/i.test(characterId),
-    isLucky: booleanValue(detail.isLucky),
-    isAwakened: booleanValue(detail.isAwakened),
-    isImported: booleanValue(detail.isImported),
+    gender: genderValue(source.gender ?? detail.gender),
+    rank: numberValue(source.rank ?? detail.rank),
+    isBoss: booleanValue(source.isBoss ?? detail.isBoss) || /^(BOSS_|GYM_)|Boss$/i.test(characterId),
+    isPredator: booleanValue(source.isPredator ?? detail.isPredator) || /^PREDATOR_/i.test(characterId),
+    isLucky: booleanValue(source.isLucky ?? detail.isLucky),
+    isAwakened: booleanValue(source.isAwakened ?? detail.isAwakened),
+    isImported: booleanValue(source.isImported ?? detail.isImported),
   };
 }
 

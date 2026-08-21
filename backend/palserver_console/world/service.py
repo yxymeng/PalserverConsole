@@ -24,6 +24,7 @@ from .cache import (
     entity_detail,
     inspect_storage,
     query_cache,
+    query_pal_roster,
     read_cache_metadata,
     validate_cache_file,
 )
@@ -413,6 +414,43 @@ class WorldSnapshotService:
             search=search,
             owner_id=owner_id,
             base_id=base_id,
+        )
+        state = self._status_for_snapshot(current)
+        return {
+            "items": items,
+            "page": page,
+            "pageSize": page_size,
+            "total": total,
+            "source": state["source"],
+            "observedAt": state["observedAt"],
+            "sourceObservedAt": state["sourceObservedAt"],
+            "collectedAt": state["collectedAt"],
+            "parsedAt": state["parsedAt"],
+            "snapshotId": state["snapshotId"],
+            "stale": state["stale"],
+            "parseStatus": state["parseStatus"],
+            "errorCode": state["errorCode"],
+            "dataCoverage": state["dataCoverage"],
+        }
+
+    def list_pal_roster(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None,
+        marker: str,
+        sort: str,
+        snapshot_id: str | None = None,
+    ) -> dict[str, object]:
+        current, cache = self._current_snapshot_cache(snapshot_id)
+        items, total = query_pal_roster(
+            cache,
+            page=page,
+            page_size=page_size,
+            search=search,
+            marker=marker,
+            sort=sort,
         )
         state = self._status_for_snapshot(current)
         return {

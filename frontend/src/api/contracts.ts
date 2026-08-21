@@ -127,6 +127,19 @@ export type WorldPalListItem = {
   containerId: string | null; slotIndex: number | null; baseId: string | null; assignment: string;
   ownerName?: string; baseName?: string;
 };
+export type WorldPalRosterItem = WorldPalListItem & {
+  gender: string | null;
+  rank: number | null;
+  isBoss: boolean;
+  isLucky: boolean;
+  locationType: "player" | "party" | "storage" | "base" | "unassigned";
+};
+export type WorldPalRosterResponse = WorldSnapshotContext & {
+  items: WorldPalRosterItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
 export type WorldGuildListItem = {
   id: string; name: string; memberCount: number; baseCount: number;
 };

@@ -25,6 +25,7 @@ from palserver_console.world.cache import (
     build_world_cache,
     entity_detail,
     query_cache,
+    query_pal_roster,
     read_cache_metadata,
     validate_cache_file,
 )
@@ -363,6 +364,64 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
     }
 
 
+def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    with sqlite3.connect(cache) as connection:
+        connection.execute("DELETE FROM pals")
+    empty, empty_total = query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )
+    assert empty == []
+    assert empty_total == 0
+
+    def rows(start: int, stop: int) -> list[tuple[object, ...]]:
+        return [
+            (
+                f"pal-{index:05d}", None, "FuturePal" if index == 1_599 else "SheepBall",
+                f"名册-{index:05d}", index % 50, None, None, None, "unassigned",
+                "EPalGenderType::Male", index % 5, int(index % 97 == 0), int(index % 89 == 0), "{}",
+            )
+            for index in range(start, stop)
+        ]
+
+    with sqlite3.connect(cache) as connection:
+        connection.executemany(
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows(0, 1_600)
+        )
+    first_1600, total_1600 = query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )
+    assert total_1600 == 1_600
+    assert len(first_1600) == 60
+    assert first_1600 == query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )[0]
+    unknown, unknown_total = query_pal_roster(
+        cache, page=1, page_size=60, search="FuturePal", marker="all", sort="balanced"
+    )
+    assert unknown_total == 1
+    assert unknown[0]["id"] == "pal-01599"
+    assert unknown[0]["locationType"] == "unassigned"
+
+    with sqlite3.connect(cache) as connection:
+        connection.executemany(
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows(1_600, 5_000)
+        )
+    level_page, total_5000 = query_pal_roster(
+        cache, page=2, page_size=60, search=None, marker="all", sort="level"
+    )
+    lucky, lucky_total = query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="lucky", sort="balanced"
+    )
+    assert total_5000 == 5_000
+    assert len(level_page) == 60
+    assert all(item["isLucky"] for item in lucky)
+    assert lucky_total > 0
+
+
 def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
@@ -497,6 +556,8 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
         response = client.get("/api/world/bases?page=1&pageSize=1")
         rejected = client.get("/api/world/pals?pageSize=201")
         replaced = client.get("/api/world/pals?snapshotId=superseded")
+        roster = client.get("/api/world/pals/roster?pageSize=60")
+        roster_replaced = client.get("/api/world/pals/roster?snapshotId=superseded")
         pal_detail = client.get(f"/api/world/pals/{uuid.UUID(int=401)}")
 
     assert response.status_code == 200
@@ -509,6 +570,10 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert rejected.json()["errorCode"] == "INVALID_WORLD_PAGE"
     assert replaced.status_code == 409
     assert replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
+    assert roster.status_code == 200
+    assert roster.json()["pageSize"] == 60
+    assert roster_replaced.status_code == 409
+    assert roster_replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
     assert pal_detail.status_code == 200
     assert pal_detail.json()["owner"]["name"] == "测试玩家"
 

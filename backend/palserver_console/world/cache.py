@@ -13,7 +13,7 @@ from typing import Any
 from ..steam import is_reparse_point
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 2
+CACHE_SCHEMA_VERSION = 3
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
 
@@ -47,11 +47,18 @@ CREATE TABLE pals (
     slot_index INTEGER,
     base_id TEXT,
     assignment TEXT NOT NULL,
+    gender TEXT,
+    rank INTEGER,
+    is_boss INTEGER NOT NULL DEFAULT 0,
+    is_lucky INTEGER NOT NULL DEFAULT 0,
     detail_json TEXT NOT NULL
 );
 CREATE INDEX pals_character_idx ON pals(character_id);
 CREATE INDEX pals_owner_idx ON pals(owner_player_id);
 CREATE INDEX pals_base_idx ON pals(base_id);
+CREATE INDEX pals_roster_name_idx ON pals(nickname COLLATE NOCASE, character_id, id);
+CREATE INDEX pals_roster_level_idx ON pals(level DESC, id);
+CREATE INDEX pals_roster_marker_idx ON pals(is_lucky, is_boss, id);
 CREATE TABLE guilds (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -234,7 +241,7 @@ def build_world_cache(
             "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", player_rows
         )
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", pal_rows
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", pal_rows
         )
         connection.executemany("INSERT INTO guilds VALUES(?, ?, ?, ?, ?)", group_rows)
         connection.executemany("INSERT INTO bases VALUES(?, ?, ?, ?, ?, ?, ?, ?)", base_rows)
@@ -395,6 +402,74 @@ def query_cache(
                 id_field="guildId",
                 name_field="guildName",
                 table="guilds",
+            )
+        return public_rows, total
+    finally:
+        connection.close()
+
+
+def query_pal_roster(
+    path: Path,
+    *,
+    page: int,
+    page_size: int,
+    search: str | None,
+    marker: str,
+    sort: str,
+) -> tuple[list[dict[str, object]], int]:
+    """Query the immutable cache in a stable roster order without loading all Pals."""
+
+    if marker not in {"all", "lucky", "boss"} or sort not in {"balanced", "name", "level"}:
+        raise ValueError("Unknown Pal roster query.")
+    clauses: list[str] = []
+    parameters: list[object] = []
+    if search:
+        clauses.append("(p.nickname LIKE ? OR p.character_id LIKE ? OR p.id LIKE ?)")
+        parameters.extend([f"%{search}%"] * 3)
+    if marker == "lucky":
+        clauses.append("p.is_lucky = 1")
+    elif marker == "boss":
+        clauses.append("p.is_boss = 1")
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    name_order = "COALESCE(NULLIF(p.nickname, ''), p.character_id) COLLATE NOCASE, p.id"
+    order = (
+        "p.level IS NULL, p.level DESC, " + name_order
+        if sort == "level"
+        else name_order
+    )
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        count_row = connection.execute(
+            f"SELECT COUNT(*) FROM pals AS p{where}", parameters
+        ).fetchone()
+        total = int(count_row[0])
+        rows = connection.execute(
+            "SELECT p.*, c.kind AS container_kind FROM pals AS p "
+            "LEFT JOIN containers AS c ON c.id = p.container_id"
+            f"{where} ORDER BY {order} LIMIT ? OFFSET ?",
+            (*parameters, page_size, (page - 1) * page_size),
+        ).fetchall()
+        public_rows = [_public_row(dict(row)) for row in rows]
+        _add_relation_names(
+            connection,
+            public_rows,
+            id_field="ownerPlayerId",
+            name_field="ownerName",
+            table="players",
+        )
+        _add_relation_names(
+            connection, public_rows, id_field="baseId", name_field="baseName", table="bases"
+        )
+        for row in public_rows:
+            kind = row.pop("containerKind", None)
+            row["locationType"] = (
+                "base" if row.get("baseId") else "party" if kind == "pal_party"
+                else "storage"
+                if kind == "pal_storage"
+                else "player"
+                if row.get("ownerPlayerId")
+                else "unassigned"
             )
         return public_rows, total
     finally:
@@ -749,6 +824,12 @@ def _characters(
         if instance_id in locations:
             container_id, slot_index, base_id = locations[instance_id]
         assignment = "base_worker" if base_id else ("player" if owner_id else "unassigned")
+        gender = _scalar(save_parameter.get("Gender"))
+        rank = _integer(_scalar(save_parameter.get("Rank")))
+        character_id_upper = character_id.upper()
+        is_boss = character_id_upper.startswith(("BOSS_", "GYM_"))
+        is_boss = is_boss or character_id_upper.endswith("BOSS")
+        is_lucky = bool(_scalar(save_parameter.get("IsRarePal")))
         pals.append(
             (
                 instance_id,
@@ -758,16 +839,19 @@ def _characters(
                 level,
                 container_id,
                 slot_index,
-                base_id,
-                assignment,
-                _json(
-                    {
-                        "gender": _scalar(save_parameter.get("Gender")),
-                        "rank": _scalar(save_parameter.get("Rank")),
-                        "isBoss": character_id.upper().startswith(("BOSS_", "GYM_"))
-                        or character_id.upper().endswith("BOSS"),
+            base_id,
+            assignment,
+            gender,
+            rank,
+            int(is_boss),
+            int(is_lucky),
+            _json(
+                {
+                        "gender": gender,
+                        "rank": rank,
+                        "isBoss": is_boss,
                         "isPredator": character_id.upper().startswith("PREDATOR_"),
-                        "isLucky": bool(_scalar(save_parameter.get("IsRarePal"))),
+                        "isLucky": is_lucky,
                         "isAwakened": bool(
                             _scalar(save_parameter.get("bIsAwakening"))
                         ),

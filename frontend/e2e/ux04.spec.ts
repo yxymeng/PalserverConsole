@@ -43,11 +43,19 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       if (route.request().method() === "POST") reparseRequests += 1;
       return route.fulfill({ json: { message: "已开始只读重新解析" } });
     }
+    if (path === "/api/world/pals/roster") {
+      const sort = new URL(route.request().url()).searchParams.get("sort");
+      const marker = new URL(route.request().url()).searchParams.get("marker");
+      const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }];
+      const sorted = sort === "name" ? [rosterPals[2], rosterPals[0], rosterPals[1]] : rosterPals;
+      const items = marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : sorted;
+      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
+    }
     const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
     if (path in lists) return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
-      "/api/world/pals/pal-1": { ...pal, owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 } },
+      "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 } },
       "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], detail: { adminPlayerId: "player-1" } },
       "/api/world/bases/base-1": { ...base, guild, workers: [pal], inventory: [{ id: "item-2", itemId: "Stone", quantity: 8, containerId: "base-bag" }], detail: { state: 1 } },
     };
@@ -89,24 +97,33 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
 
   await page.getByRole("tab", { name: "帕鲁" }).click();
-  await expect(page.locator(".world-list-panel")).toContainText("FuturePal");
-  await expect(page.locator(".world-list-panel")).toContainText("Alice");
-  const palRow = page.locator(".world-table-row").filter({ hasText: "小羊" });
+  await expect(page.locator(".pal-roster")).toContainText("FuturePal");
+  await expect(page.locator(".pal-roster")).toContainText("据点工作");
+  const palRow = page.locator(".pal-roster-row").filter({ hasText: "小羊" });
   await expect(palRow.locator(".world-pal-gender")).toHaveText("♀");
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
-  await expect(palRow.locator('[data-label="属性"]')).toHaveText("闪光 · 浓缩等级 1");
-  await expect(palRow.locator('[data-label="据点"]')).toHaveText("据点一号");
+  await expect(palRow.locator('[data-label="星级"]')).toHaveText("1");
+  await expect(palRow.locator('[data-label="个体标记"]')).toHaveText("闪光");
+  await expect(palRow.locator('[data-label="归属"]')).toContainText("据点一号");
   await expect(palRow).not.toContainText("base-1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
-  await page.getByLabel("排序方式").selectOption("name");
-  await expect(page.locator(".world-table-row").first()).toContainText("阿帕");
+  await page.getByLabel("帕鲁名册排序").selectOption("name");
+  await expect(page.locator(".pal-roster-row").first()).toContainText("阿帕");
   await page.getByRole("button", { name: "小羊" }).click();
-  await expect(drawer).toContainText("种族");
-  await expect(drawer).toContainText("棉悠悠");
-  await expect(drawer.locator(".world-pal-gender")).toHaveText("♀");
-  await expect(drawer).toContainText("闪光 · 浓缩等级 1");
+  const palDrawer = page.getByRole("dialog", { name: "帕鲁详情" });
+  await expect(palDrawer).toContainText("Character ID");
+  await expect(palDrawer).toContainText("棉悠悠");
+  await expect(palDrawer).toContainText("闪光 · 浓缩等级 1");
+  const closePalDrawer = palDrawer.getByRole("button", { name: "关闭帕鲁详情" });
+  await expect(closePalDrawer).toBeFocused();
+  await page.keyboard.press("Shift+Tab");
+  await expect(palDrawer.locator("summary")).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(closePalDrawer).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath(`ux05-${testInfo.project.name}.png`), fullPage: true });
-  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
+  await page.keyboard.press("Escape");
+  await expect(palDrawer).toBeHidden();
+  await expect(page.getByRole("button", { name: "小羊" })).toBeFocused();
 
   await page.getByRole("tab", { name: "公会" }).click();
   await page.getByRole("button", { name: "测试工会" }).click();

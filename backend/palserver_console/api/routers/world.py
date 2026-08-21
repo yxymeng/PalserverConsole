@@ -64,6 +64,40 @@ def router(deps: AppDependencies) -> APIRouter:
             )
             return error_response(status, error.code, str(error))
 
+    @api.get("/api/world/pals/roster", tags=["world"], response_model=None)
+    def world_pal_roster(
+        request: Request,
+        page: int = 1,
+        pageSize: int = 60,
+        search: str | None = None,
+        marker: str = "all",
+        sort: str = "balanced",
+        snapshotId: str | None = None,
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        if page < 1 or pageSize < 1 or pageSize > 60:
+            return error_response(422, "INVALID_PAL_ROSTER_PAGE", "帕鲁名册分页参数不正确。")
+        if search is not None and len(search) > 100:
+            return error_response(422, "INVALID_WORLD_SEARCH", "搜索文字不能超过 100 个字符。")
+        if marker not in {"all", "lucky", "boss"}:
+            return error_response(422, "INVALID_PAL_ROSTER_MARKER", "帕鲁快捷筛选条件不正确。")
+        if sort not in {"balanced", "name", "level"}:
+            return error_response(422, "INVALID_PAL_ROSTER_SORT", "帕鲁排序方式不正确。")
+        try:
+            return deps.world.list_pal_roster(
+                page=page,
+                page_size=pageSize,
+                search=search,
+                marker=marker,
+                sort=sort,
+                snapshot_id=snapshotId,
+            )
+        except WorldDataError as error:
+            status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
+            return error_response(status, error.code, str(error))
+
     @api.get("/api/world/{resource}/{entity_id}", tags=["world"], response_model=None)
     def world_entity(
         resource: str, entity_id: str, request: Request, snapshotId: str | None = None
