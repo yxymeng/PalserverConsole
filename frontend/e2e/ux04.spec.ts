@@ -8,8 +8,10 @@ const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level:
 const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned" };
 const guild = { id: "guild-1", name: "测试工会", memberCount: 1, baseCount: 1 };
 const base = { id: "base-1", name: "据点一号", guildId: "guild-1", workerContainerId: "container-1", x: 1, y: 2, z: 3 };
+let reparseRequests = 0;
 
 test("UX-04：四类实体统一列表详情模式并支持关联跳转", async ({ page }, testInfo) => {
+  reparseRequests = 0;
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
   await page.route("**/api/shell/status", (route) => route.fulfill({ json: shell }));
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: { executablePath: shell.executablePath, launchArguments: "" } }));
@@ -33,10 +35,16 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
     const path = new URL(route.request().url()).pathname;
     if (path === "/api/world/snapshots/current") return route.fulfill({ json: {
       source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null, snapshotId: "world", parsing: false, parseDurationMs: 42,
+      sourceObservedAt: 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: 1_786_000_042, parseStatus: "ready",
+      dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
       counts: { players: 1, pals: 3, guilds: 1, bases: 1, inventory_items: 1, work_pals: 1 },
     } });
+    if (path === "/api/world/reparse") {
+      if (route.request().method() === "POST") reparseRequests += 1;
+      return route.fulfill({ json: { message: "已开始只读重新解析" } });
+    }
     const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
-    if (path in lists) return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, stale: false, errorCode: null } });
+    if (path in lists) return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
       "/api/world/pals/pal-1": { ...pal, owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 } },
@@ -51,14 +59,19 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   await page.getByRole("button", { name: "世界数据" }).click();
 
-  const tabs = page.getByRole("tablist", { name: "世界实体分类" });
-  await expect(tabs.getByRole("tab")).toHaveCount(4);
+  const tabs = page.getByRole("tablist", { name: "世界资产工作区" });
+  await expect(tabs.getByRole("tab")).toHaveCount(6);
+  await expect(tabs).toContainText("总览");
   await expect(tabs).toContainText("玩家");
-  await expect(tabs).toContainText("帕鲁");
-  await expect(tabs).toContainText("工会");
+  await expect(tabs).toContainText("帕鲁名册");
+  await expect(tabs).toContainText("仓库");
+  await expect(tabs).toContainText("公会");
   await expect(tabs).toContainText("据点");
-  await expect(tabs).not.toContainText("库存");
-  await expect(tabs).not.toContainText("工作帕鲁");
+  await expect(page.getByRole("heading", { name: "总览聚合将在后续 ticket 交付" })).toBeVisible();
+  await expect(page.locator(".world-snapshot-bar")).toContainText("存档记录");
+  await expect(page.locator(".world-snapshot-bar")).toContainText("解析完成");
+  await expect(page.locator(".world-snapshot-bar")).toContainText("不会修改真实 .sav");
+  await tabs.getByRole("tab", { name: "玩家" }).click();
   await expect(page.locator(".world-player-avatar")).toHaveText("A");
   await expect(page.locator(".world-list-panel")).toContainText("测试工会");
   await expect(page.locator(".world-list-panel")).toContainText("已加入工会");
@@ -95,7 +108,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.screenshot({ path: testInfo.outputPath(`ux05-${testInfo.project.name}.png`), fullPage: true });
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
 
-  await page.getByRole("tab", { name: "工会" }).click();
+  await page.getByRole("tab", { name: "公会" }).click();
   await page.getByRole("button", { name: "测试工会" }).click();
   await expect(drawer).toContainText("成员");
   await expect(drawer).toContainText("关联据点");
@@ -109,5 +122,8 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.getByLabel("关联筛选").selectOption("linked");
   await page.getByLabel("排序方式").selectOption("id");
   await expect(page.getByRole("button", { name: "清除筛选条件" })).toBeVisible();
+  await page.getByRole("button", { name: "重新解析" }).click();
+  await expect.poll(() => reparseRequests).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });

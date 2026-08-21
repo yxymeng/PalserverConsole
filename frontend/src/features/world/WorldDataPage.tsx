@@ -1,4 +1,4 @@
-import { ChevronLeft, ChevronRight, Database, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
+import { Archive, ChevronLeft, ChevronRight, Database, LayoutDashboard, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 
 import type { AuthStatus, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
@@ -6,17 +6,23 @@ import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
+import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 
 type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
 type SortKey = "name" | "level" | "id";
 type RelationFilter = "all" | "linked" | "unlinked";
+type WorkspaceKey = "overview" | PrimaryWorldResource | "inventories";
 
-const PRIMARY_RESOURCES: { key: PrimaryWorldResource; label: string; icon: typeof Users }[] = [
-  { key: "players", label: "玩家", icon: Users },
-  { key: "pals", label: "帕鲁", icon: PawPrint },
-  { key: "guilds", label: "工会", icon: Users },
-  { key: "bases", label: "据点", icon: Warehouse },
+const WORKSPACES: { key: WorkspaceKey; label: string; icon: typeof Database; countKey?: keyof WorldStatus["counts"]; resource?: PrimaryWorldResource; planned?: boolean }[] = [
+  { key: "overview", label: "总览", icon: LayoutDashboard, planned: true },
+  { key: "players", label: "玩家", icon: Users, countKey: "players", resource: "players" },
+  { key: "pals", label: "帕鲁名册", icon: PawPrint, countKey: "pals", resource: "pals" },
+  { key: "inventories", label: "仓库", icon: Archive, countKey: "inventory_items", planned: true },
+  { key: "bases", label: "据点", icon: Warehouse, countKey: "bases", resource: "bases" },
+  { key: "guilds", label: "公会", icon: Users, countKey: "guilds", resource: "guilds" },
 ];
+
+const WORKSPACE_BY_RESOURCE: Record<PrimaryWorldResource, WorkspaceKey> = { players: "players", pals: "pals", guilds: "guilds", bases: "bases" };
 
 const RESOURCE_LABELS: Record<PrimaryWorldResource, string> = {
   players: "玩家",
@@ -27,6 +33,7 @@ const RESOURCE_LABELS: Record<PrimaryWorldResource, string> = {
 
 export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<WorldStatus | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceKey>("overview");
   const [resource, setResource] = useState<PrimaryWorldResource>("players");
   const [result, setResult] = useState<WorldResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -36,10 +43,12 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [relationFilter, setRelationFilter] = useState<RelationFilter>("all");
   const [selected, setSelected] = useState<EntityDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [listLoading, setListLoading] = useState(true);
+  const [listLoading, setListLoading] = useState(false);
   const [showListLoading, setShowListLoading] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [reparseError, setReparseError] = useState("");
+  const [reparsing, setReparsing] = useState(false);
   const pageSize = 50;
   const nextRequestSignal = useAbortableRequest();
   const loadSequence = useRef(0);
@@ -48,18 +57,23 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
     const signal = nextRequestSignal();
-    setListLoading(true);
+    const hasEntityBrowser = workspace !== "overview" && workspace !== "inventories";
+    setListLoading(hasEntityBrowser);
     setError("");
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current", { signal });
+        setStatus(nextStatus);
+        if (!hasEntityBrowser || !nextStatus.snapshotId) {
+          setResult(null);
+          break;
+        }
         const query = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
         if (appliedSearch) query.set("search", appliedSearch);
         if (nextStatus.snapshotId) query.set("snapshotId", nextStatus.snapshotId);
         try {
           const nextResult = await requestJson<WorldResponse>(`/api/world/${resource}?${query}`, { signal });
           if (nextResult.snapshotId !== nextStatus.snapshotId) continue;
-          setStatus(nextStatus);
           setResult(nextResult);
           break;
         } catch (caught) {
@@ -72,7 +86,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     } finally {
       if (sequence === loadSequence.current) setListLoading(false);
     }
-  }, [appliedSearch, nextRequestSignal, page, resource]);
+  }, [appliedSearch, nextRequestSignal, page, resource, workspace]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -85,10 +99,22 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   }, [listLoading]);
 
   function chooseResource(next: PrimaryWorldResource) {
+    setWorkspace(WORKSPACE_BY_RESOURCE[next]);
     setResource(next);
     setResult(null);
     setPage(1);
     setRelationFilter("all");
+    setSelected(null);
+  }
+
+  function chooseWorkspace(next: WorkspaceKey) {
+    const target = WORKSPACES.find((item) => item.key === next);
+    if (target?.resource) {
+      chooseResource(target.resource);
+      return;
+    }
+    setWorkspace(next);
+    setResult(null);
     setSelected(null);
   }
 
@@ -107,8 +133,9 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   }
 
   async function reparse() {
-    setError("");
+    setReparseError("");
     setMessage("");
+    setReparsing(true);
     try {
       const response = await requestJson<{ message: string }>("/api/world/reparse", {
         method: "POST",
@@ -116,9 +143,11 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
         body: "{}",
       });
       setMessage(response.message);
-      await load();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "重新解析请求失败");
+      setReparseError(caught instanceof Error ? caught.message : "重新解析请求失败");
+    } finally {
+      setReparsing(false);
+      await load();
     }
   }
 
@@ -152,15 +181,12 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const hasFilters = Boolean(appliedSearch) || relationFilter !== "all" || sortKey !== "name";
 
   return <div className="page-stack world-page">
-    <section className={`world-status ${status?.stale ? "stale" : ""}`}>
-      <div className="status-icon">{status?.parsing ? <RefreshCw className="spin" size={23} /> : <Database size={23} />}</div>
-      <div><h2>{status?.parsing ? "正在解析存档快照" : status?.stale ? "正在显示最后成功缓存" : "存档缓存可用"}</h2><p>{status?.error || `最后成功：${formatWorldTime(status?.observedAt)}${status?.parseDurationMs ? ` · ${status.parseDurationMs} ms` : ""}`}</p></div>
-      <button className="quiet-button" type="button" onClick={() => void reparse()}><RefreshCw size={17} />重新解析</button>
-    </section>
-    <div className="world-tabs" role="tablist" aria-label="世界实体分类">
-      {PRIMARY_RESOURCES.map(({ key, label, icon: Icon }) => <button key={key} className={resource === key ? "active" : ""} type="button" role="tab" aria-selected={resource === key} onClick={() => chooseResource(key)}><Icon size={17} /><span>{label}</span><strong>{status?.counts[key] ?? "-"}</strong></button>)}
+    <WorldSnapshotBar status={status} message={message} reparseError={reparseError} reparsing={reparsing} onReparse={() => void reparse()} />
+    <div className="world-tabs world-workspace-tabs" role="tablist" aria-label="世界资产工作区">
+      {WORKSPACES.map(({ key, label, icon: Icon, countKey, planned }) => <button key={key} className={workspace === key ? "active" : ""} type="button" role="tab" id={`world-workspace-tab-${key}`} aria-selected={workspace === key} aria-controls={`world-workspace-${key}`} onClick={() => chooseWorkspace(key)}><Icon size={17} /><span>{label}</span>{countKey && <strong>{status?.counts[countKey] ?? "-"}</strong>}{planned && <em>后续</em>}</button>)}
     </div>
-    <div className="world-browser">
+    <main id={`world-workspace-${workspace}`} className="world-workspace" role="tabpanel" aria-labelledby={`world-workspace-tab-${workspace}`}>
+      {workspace === "overview" ? <WorldWorkspacePlaceholder workspace="overview" onChooseResource={chooseResource} /> : workspace === "inventories" ? <WorldWorkspacePlaceholder workspace="inventories" onChooseResource={chooseResource} /> : <div className="world-browser">
       <section className="world-list-panel" aria-label={`${RESOURCE_LABELS[resource]}列表`}>
         <form className="world-toolbar" onSubmit={submitSearch}>
           <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
@@ -187,8 +213,47 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
       </section>
       {selected && <button className="world-drawer-backdrop" type="button" aria-label="关闭详情遮罩" onClick={() => setSelected(null)} />}
       <EntityDrawer detail={selected} loading={detailLoading} onClose={() => setSelected(null)} onNavigate={(target, id) => void openDetail(target, id)} />
-    </div>
+      </div>}
+    </main>
   </div>;
+}
+
+function WorldSnapshotBar({ status, message, reparseError, reparsing, onReparse }: { status: WorldStatus | null; message: string; reparseError: string; reparsing: boolean; onReparse: () => void }) {
+  const presentation = presentWorldSnapshot(status);
+  const [copied, setCopied] = useState(false);
+  const errorIdentifier = presentation.errorIdentifier || reparseError || null;
+  const sourceObservedAt = status?.sourceObservedAt ?? status?.observedAt;
+
+  async function copyErrorIdentifier() {
+    if (!errorIdentifier) return;
+    try {
+      await navigator.clipboard.writeText(errorIdentifier);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return <section className={`world-status world-snapshot-bar ${presentation.tone}`} aria-live="polite">
+    <div className="status-icon">{presentation.tone === "loading" ? <RefreshCw className="spin" size={23} /> : <Database size={23} />}</div>
+    <div className="world-snapshot-summary"><h2>{presentation.label}</h2><p>{presentation.summary}</p></div>
+    <div className="world-snapshot-times"><span><small>存档记录</small><strong>{formatWorldTime(sourceObservedAt)}</strong></span><span><small>解析完成</small><strong>{status?.parsedAt ? formatWorldTime(status.parsedAt) : "尚未完成"}</strong></span></div>
+    <button className="quiet-button" type="button" disabled={reparsing || status?.parsing} onClick={onReparse}><RefreshCw className={reparsing ? "spin" : ""} size={17} />{reparsing || status?.parsing ? "正在解析" : "重新解析"}</button>
+    <div className="world-snapshot-guidance"><p><strong>影响：</strong>{presentation.impact}</p><p><strong>下一步：</strong>{presentation.nextStep}</p></div>
+    {errorIdentifier && <div className="world-snapshot-error" role="alert"><span>错误标识</span><code>{errorIdentifier}</code><button className="world-copy-button" type="button" onClick={() => void copyErrorIdentifier()}>{copied ? "已复制" : "复制"}</button></div>}
+    {message && <p className="form-success world-snapshot-message" role="status">{message}</p>}
+    {reparseError && <p className="form-error world-snapshot-message" role="alert">重新解析请求失败；请复制错误标识后检查连接或存档状态。</p>}
+    <p className="world-snapshot-boundary">重新解析只读取存档并生成派生缓存，不会修改真实 .sav。</p>
+  </section>;
+}
+
+function WorldWorkspacePlaceholder({ workspace, onChooseResource }: { workspace: "overview" | "inventories"; onChooseResource: (resource: PrimaryWorldResource) => void }) {
+  const overview = workspace === "overview";
+  return <section className="world-shell-placeholder">
+    <div className="world-shell-placeholder-icon">{overview ? <LayoutDashboard size={22} /> : <Archive size={22} />}</div>
+    <div><h2>{overview ? "总览聚合将在后续 ticket 交付" : "仓库聚合将在后续 ticket 交付"}</h2><p>{overview ? "当前先保留世界资产台的稳定导航与快照上下文。实体浏览仍可使用，但不会把旧列表伪装成最终总览。" : "物品总量、分类和位置聚合尚未实现；当前不会展示不完整的库存结果。"}</p></div>
+    {overview && <div className="world-shell-links" aria-label="可用世界实体浏览"><span>当前可用的只读实体浏览</span><div><button className="quiet-button" type="button" onClick={() => onChooseResource("players")}>玩家</button><button className="quiet-button" type="button" onClick={() => onChooseResource("pals")}>帕鲁名册</button><button className="quiet-button" type="button" onClick={() => onChooseResource("bases")}>据点</button><button className="quiet-button" type="button" onClick={() => onChooseResource("guilds")}>公会</button></div></div>}
+  </section>;
 }
 
 function WorldTableSkeleton({ columns }: { columns: number }) {
