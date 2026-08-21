@@ -350,7 +350,7 @@ class WorldSnapshotService:
                 "guilds": True,
                 "bases": True,
                 "inventories": True,
-                "workPals": True,
+                "work-pals": True,
             }
         else:
             coverage_state = "unavailable"
@@ -360,7 +360,7 @@ class WorldSnapshotService:
                 "guilds": False,
                 "bases": False,
                 "inventories": False,
-                "workPals": False,
+                "work-pals": False,
             }
         if error is not None and error[0] == "CACHE_SCHEMA_INCOMPATIBLE":
             parse_status = "incompatible"

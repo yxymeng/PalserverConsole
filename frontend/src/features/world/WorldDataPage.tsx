@@ -8,6 +8,7 @@ import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } f
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { PalRoster } from "./PalRoster";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
+import { waitForWorldReparse } from "./worldReparse";
 
 type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
 type SortKey = "name" | "level-desc" | "count-desc" | "id";
@@ -159,17 +160,23 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setMessage("");
     setReparsing(true);
     try {
+      const previousSnapshotId = status?.snapshotId || null;
       const response = await requestJson<{ message: string }>("/api/world/reparse", {
         method: "POST",
         headers: { "X-CSRF-Token": auth.csrfToken || "" },
         body: "{}",
       });
       setMessage(response.message);
+      const nextStatus = await waitForWorldReparse({
+        previousSnapshotId,
+        readStatus: () => requestJson<WorldStatus>("/api/world/snapshots/current"),
+      });
+      setStatus(nextStatus);
+      await load();
     } catch (caught) {
       setReparseError(caught instanceof Error ? caught.message : "重新解析请求失败");
     } finally {
       setReparsing(false);
-      await load();
     }
   }
 

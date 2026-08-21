@@ -6,7 +6,7 @@ import type { WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterRe
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { mergePalRosterPage } from "./palRosterState";
-import { activityLabel, careReasonLabels, careSummaryLabel, diseaseLabel } from "./palCare";
+import { activityLabel, careReasonLabels, careSummaryLabel, diseaseLabel, physicalHealthLabel } from "./palCare";
 
 type Marker = "all" | "lucky" | "boss";
 type CareFilter = "all" | "attention";
@@ -246,10 +246,16 @@ function PalRosterDetail({ data, pal }: { data: WorldPalDetail | WorldPalRosterI
 function PalCareDetail({ care }: { care: WorldPalCare }) {
   const disease = diseaseLabel(care.disease);
   const activity = activityLabel(care.activity);
+  const physicalHealth = physicalHealthLabel(care.physicalHealth);
+  const hunger = care.hunger !== null
+    ? `${care.hunger}%`
+    : care.hungerRaw !== null
+      ? `原始值 ${care.hungerRaw}${care.hungerStatus ? ` · ${care.hungerStatus}` : ""}`
+      : "数据不可用";
   return <div className="pal-care-detail-content">
     <p className={`pal-care-badge ${care.severity}`}>{care.attention && <CircleAlert size={15} aria-hidden="true" />}{careSummaryLabel(care)}</p>
     {care.attention && <ul>{careReasonLabels(care).map((reason) => <li key={reason}>{reason}</li>)}</ul>}
-    <dl><div><dt>生命</dt><dd>{care.currentHp ?? "数据不可用"}</dd></div><div><dt>饱食度</dt><dd>{care.hunger === null ? "数据不可用" : `${care.hunger}%`}</dd></div><div><dt>SAN</dt><dd>{care.sanity === null ? "数据不可用" : `${care.sanity}%`}</dd></div><div><dt>疾病</dt><dd>{care.disease ? disease || <><code>{care.disease}</code>（资料未收录）</> : care.diseaseRecorded ? "未见疾病" : "数据不可用"}</dd></div><div><dt>活动</dt><dd>{care.activity ? activity || <code>{care.activity}</code> : care.activityRecorded ? "未见活动" : "数据不可用"}</dd></div></dl>
+    <dl><div><dt>生命</dt><dd>{care.currentHp ?? "数据不可用"}</dd></div><div><dt>身体状态</dt><dd>{care.physicalHealth ? physicalHealth || <code>{care.physicalHealth}</code> : "数据不可用"}</dd></div><div><dt>饱食度</dt><dd>{hunger}</dd></div><div><dt>SAN</dt><dd>{care.sanity === null ? "数据不可用" : `${care.sanity}%`}</dd></div><div><dt>疾病</dt><dd>{care.disease ? disease || <><code>{care.disease}</code>（资料未收录）</> : care.diseaseRecorded ? "未见疾病" : "数据不可用"}</dd></div><div><dt>活动</dt><dd>{care.activity ? activity || <code>{care.activity}</code> : care.activityRecorded ? "未见活动" : "数据不可用"}</dd></div></dl>
     {care.unavailable.length > 0 && <p className="pal-care-unavailable">部分照护字段数据不可用，未按健康状态处理。</p>}
   </div>;
 }

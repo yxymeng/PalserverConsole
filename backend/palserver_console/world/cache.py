@@ -13,7 +13,7 @@ from typing import Any
 from ..steam import is_reparse_point
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 4
+CACHE_SCHEMA_VERSION = 5
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 
 
@@ -908,19 +908,19 @@ def _characters(
                 level,
                 container_id,
                 slot_index,
-            base_id,
-            assignment,
-            gender,
-            rank,
-            int(is_boss),
-            int(is_lucky),
-            care["current_hp"],
-            care["hunger"],
-            care["sanity"],
-            care["disease"],
-            care["activity"],
-            _json(
-                {
+                base_id,
+                assignment,
+                gender,
+                rank,
+                int(is_boss),
+                int(is_lucky),
+                care["current_hp"],
+                care["hunger"],
+                care["sanity"],
+                care["disease"],
+                care["activity"],
+                _json(
+                    {
                         "gender": gender,
                         "rank": rank,
                         "isBoss": is_boss,
@@ -942,24 +942,53 @@ def _characters(
 
 def _pal_care_fields(save_parameter: Mapping[str, Any]) -> dict[str, object | None]:
     status_raw = _first_present(save_parameter, "PalStatus")
-    disease_raw = _first_present(save_parameter, "Disease", "PalDisease", "SickType")
+    disease_raw = _first_present(
+        save_parameter, "WorkerSick", "Disease", "PalDisease", "SickType"
+    )
+    physical_health_raw = _first_present(save_parameter, "PhysicalHealth")
+    hunger_status_raw = _first_present(save_parameter, "HungerType")
     activity_raw = _first_present(
-        save_parameter, "Activity", "PalActivity", "WorkState", "WorkStatus"
+        save_parameter,
+        "Activity",
+        "PalActivity",
+        "WorkState",
+        "WorkStatus",
+        "BaseCampWorkerEventType",
     )
     status = _enum_text(status_raw)
     disease_value = _enum_text(disease_raw)
     activity_value = _enum_text(activity_raw)
+    physical_health = _enum_text(physical_health_raw)
+    hunger_status = _enum_text(hunger_status_raw)
+    if disease_value is not None and _enum_key(disease_value) in {"", "none", "normal", "healthy"}:
+        disease_value = None
+    if activity_value is not None and _enum_key(activity_value) in {"", "none"}:
+        activity_value = None
     if disease_value is None and _is_disease_status(status):
         disease_value = status
     if activity_value is None and _is_activity_status(status):
         activity_value = status
+    full_stomach = _save_number(save_parameter, "FullStomach")
+    hunger_raw = full_stomach
+    if hunger_raw is None:
+        hunger_raw = _save_number(save_parameter, "Hunger", "FoodAmount", "Food")
+    hunger_max = _save_number(save_parameter, "MaxFullStomach")
+    hunger = None
+    # FullStomach is an absolute, species-dependent value; only expose a
+    # percentage when the same record also provides its maximum.
+    if full_stomach is not None and hunger_max is not None and hunger_max > 0:
+        hunger = min(100.0, max(0.0, full_stomach / hunger_max * 100.0))
     return {
-        "current_hp": _save_number(save_parameter, "HP", "CurrentHP", "Health"),
-        "hunger": _save_number(save_parameter, "Hunger", "FoodAmount", "Food"),
+        "current_hp": _save_hp(save_parameter),
+        "hunger": hunger,
+        "hunger_raw": hunger_raw,
+        "hunger_status": hunger_status,
         "sanity": _save_number(save_parameter, "SanityValue", "Sanity", "SAN"),
+        "physical_health": physical_health,
         "disease": disease_value,
         "activity": activity_value,
-        "disease_recorded": status_raw is not None or disease_raw is not None,
+        "disease_recorded": disease_raw is not None
+        or (status_raw is not None and not _is_activity_status(status)),
         "activity_recorded": activity_raw is not None or _is_activity_status(status),
     }
 
@@ -979,6 +1008,20 @@ def _save_number(values: Mapping[str, Any], *keys: str) -> float | None:
         number = _number(_scalar(raw.get(key)))
         if number is not None:
             return number
+    return None
+
+
+def _save_hp(values: Mapping[str, Any]) -> float | None:
+    for key in ("Hp", "HP", "CurrentHP", "Health"):
+        if key not in values:
+            continue
+        number = _save_number(values, key)
+        if number is None:
+            return None
+        raw = values[key]
+        if isinstance(raw, Mapping) and raw.get("struct_type") == "FixedPoint64":
+            return number / 1000.0
+        return number
     return None
 
 
@@ -1015,6 +1058,11 @@ def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
     activity = _text(row.get("activity"))
     detail = _mapping(row.get("detail"))
     stored_care = _mapping(detail.get("care"))
+    hunger_raw = _number(stored_care.get("hunger_raw"))
+    hunger_status = _text(stored_care.get("hunger_status"))
+    physical_health = _text(stored_care.get("physical_health"))
+    disease_recorded = bool(stored_care.get("disease_recorded"))
+    activity_recorded = bool(stored_care.get("activity_recorded"))
     reasons: list[str] = []
     if current_hp == 0:
         reasons.append("zero_hp")
@@ -1026,8 +1074,14 @@ def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
         reasons.append("san_low")
     unavailable = [
         key
-        for key, value in (("currentHp", current_hp), ("hunger", hunger), ("sanity", sanity))
-        if value is None
+        for key, available in (
+            ("currentHp", current_hp is not None),
+            ("hunger", hunger is not None),
+            ("sanity", sanity is not None),
+            ("disease", disease_recorded),
+            ("activity", activity_recorded),
+        )
+        if not available
     ]
     severity = (
         "critical"
@@ -1036,16 +1090,21 @@ def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:
         if reasons
         else "info"
         if activity
+        else "unavailable"
+        if unavailable
         else "healthy"
     )
     return {
         "currentHp": current_hp,
         "hunger": hunger,
+        "hungerRaw": hunger_raw,
+        "hungerStatus": hunger_status,
         "sanity": sanity,
+        "physicalHealth": physical_health,
         "disease": disease,
         "activity": activity,
-        "diseaseRecorded": bool(stored_care.get("disease_recorded")),
-        "activityRecorded": bool(stored_care.get("activity_recorded")),
+        "diseaseRecorded": disease_recorded,
+        "activityRecorded": activity_recorded,
         "reasons": reasons,
         "unavailable": unavailable,
         "severity": severity,
@@ -1065,7 +1124,10 @@ def query_pal_care_summary(path: Path) -> dict[str, int]:
                 COALESCE(SUM(CASE WHEN current_hp != 0 AND disease IS NULL
                     AND (hunger < 20 OR sanity < 50) THEN 1 ELSE 0 END), 0) AS warning,
                 COALESCE(SUM(CASE WHEN current_hp IS NULL OR hunger IS NULL
-                    OR sanity IS NULL THEN 1 ELSE 0 END), 0) AS unavailable
+                    OR sanity IS NULL
+                    OR COALESCE(json_extract(detail_json, '$.care.disease_recorded'), 0) = 0
+                    OR COALESCE(json_extract(detail_json, '$.care.activity_recorded'), 0) = 0
+                    THEN 1 ELSE 0 END), 0) AS unavailable
             FROM pals
             """
         ).fetchone()

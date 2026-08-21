@@ -112,8 +112,8 @@ def router(deps: AppDependencies) -> APIRouter:
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:
-            status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
-            return error_response(status, error.code, str(error))
+            response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
+            return error_response(response_status, error.code, str(error))
 
     @api.get("/api/world/{resource}/{entity_id}", tags=["world"], response_model=None)
     def world_entity(
@@ -173,8 +173,8 @@ def router(deps: AppDependencies) -> APIRouter:
                 sort=sort,
             )
         except WorldDataError as error:
-            status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
-            return error_response(status, error.code, str(error))
+            response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
+            return error_response(response_status, error.code, str(error))
 
     @api.post("/api/world/reparse", tags=["world"], response_model=MessageResponse)
     def world_reparse(request: Request) -> MessageResponse | JSONResponse:

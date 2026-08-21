@@ -140,14 +140,17 @@ export type WorldPalRosterItem = WorldPalListItem & {
 export type WorldPalCare = {
   currentHp: number | null;
   hunger: number | null;
+  hungerRaw: number | null;
+  hungerStatus: string | null;
   sanity: number | null;
+  physicalHealth: string | null;
   disease: string | null;
   activity: string | null;
   diseaseRecorded: boolean;
   activityRecorded: boolean;
   reasons: ("zero_hp" | "disease" | "hunger_low" | "san_low")[];
-  unavailable: ("currentHp" | "hunger" | "sanity")[];
-  severity: "critical" | "warning" | "info" | "healthy";
+  unavailable: ("currentHp" | "hunger" | "sanity" | "disease" | "activity")[];
+  severity: "critical" | "warning" | "info" | "unavailable" | "healthy";
   attention: boolean;
 };
 export type WorldPalCareSummary = {

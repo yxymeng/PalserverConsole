@@ -21,6 +21,7 @@ from palserver_console.main import create_app
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import verify_stable_parse
 from palserver_console.world.cache import (
+    CACHE_SCHEMA_VERSION,
     WorldCacheSchemaError,
     build_world_cache,
     entity_detail,
@@ -125,6 +126,7 @@ def _character(
     sanity: float | None = None,
     disease: str | None = None,
     activity: str | None = None,
+    save_parameter_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     parameter: dict[str, Any] = {
         "Level": _property(20, "IntProperty"),
@@ -148,13 +150,16 @@ def _character(
         if current_hp is not None:
             parameter["HP"] = _property(current_hp, "FloatProperty")
         if hunger is not None:
-            parameter["Hunger"] = _property(hunger, "FloatProperty")
+            parameter["FullStomach"] = _property(hunger, "FloatProperty")
+            parameter["MaxFullStomach"] = _property(100.0, "FloatProperty")
         if sanity is not None:
             parameter["SanityValue"] = _property(sanity, "FloatProperty")
         if disease is not None:
             parameter["PalStatus"] = _property(disease, "EnumProperty")
         if activity is not None:
             parameter["Activity"] = _property(activity, "EnumProperty")
+        if save_parameter_fields:
+            parameter.update(save_parameter_fields)
     return {
         "key": {
             "PlayerUId": _property(player_id),
@@ -424,9 +429,12 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
         "isAwakened": True,
         "isImported": True,
         "care": {
-            "current_hp": 0.0,
-            "hunger": 19.99,
-            "sanity": 49.99,
+                "current_hp": 0.0,
+                "hunger": 19.99,
+                "hunger_raw": 19.99,
+                "hunger_status": None,
+                "sanity": 49.99,
+                "physical_health": None,
             "disease": "EPalStatus::Cold",
             "activity": "EPalActivity::Working",
             "disease_recorded": True,
@@ -526,7 +534,10 @@ def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fie
     assert boundary["reasons"] == ["disease"]
     assert boundary["hunger"] == 20.0 and boundary["sanity"] == 50.0
     assert boundary["disease"] == "EPalStatus::UnknownArchiveFever"
-    assert missing["unavailable"] == ["currentHp", "hunger", "sanity"]
+    assert missing["unavailable"] == [
+        "currentHp", "hunger", "sanity", "disease", "activity",
+    ]
+    assert missing["severity"] == "unavailable"
 
     attention, attention_total = query_pal_roster(
         cache, page=1, page_size=60, search=None, marker="all", sort="balanced", care="attention"
@@ -536,6 +547,101 @@ def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fie
     assert query_pal_care_summary(cache) == {
         "total": 3, "critical": 2, "warning": 0, "attention": 2, "unavailable": 1,
     }
+
+
+def test_pal_care_reads_real_save_field_shapes_without_treating_raw_food_as_percent(
+    tmp_path: Path,
+) -> None:
+    level, players = _synthetic_properties()
+    characters = level["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    characters.append(
+        _character(
+            uuid.UUID(int=1),
+            uuid.UUID(int=405),
+            character_id="SheepBall",
+            nickname="真实字段帕鲁",
+            is_player=False,
+            save_parameter_fields={
+                "Hp": {
+                    "type": "StructProperty",
+                    "struct_type": "FixedPoint64",
+                    "value": {"Value": _property(125_000, "Int64Property")},
+                },
+                "FullStomach": _property(30.0, "FloatProperty"),
+                "MaxFullStomach": _property(150.0, "FloatProperty"),
+                "HungerType": _property(
+                    "EPalStatusHungerType::Starvation", "EnumProperty"
+                ),
+                "SanityValue": _property(75.0, "FloatProperty"),
+                "PhysicalHealth": _property(
+                    "EPalStatusPhysicalHealthType::MinorInjury", "EnumProperty"
+                ),
+                "WorkerSick": _property(
+                    "EPalBaseCampWorkerSickType::Cold", "EnumProperty"
+                ),
+                "BaseCampWorkerEventType": _property(
+                    "EPalBaseCampWorkerEventType::DodgeWork", "EnumProperty"
+                ),
+            },
+        )
+    )
+    characters.append(
+        _character(
+            uuid.UUID(int=1),
+            uuid.UUID(int=406),
+            character_id="SheepBall",
+            nickname="原始饱食值帕鲁",
+            is_player=False,
+            save_parameter_fields={
+                "Hp": {
+                    "type": "StructProperty",
+                    "struct_type": "FixedPoint64",
+                    "value": {"Value": _property(100_000, "Int64Property")},
+                },
+                "FullStomach": _property(30.0, "FloatProperty"),
+                "HungerType": _property(
+                    "EPalStatusHungerType::Default", "EnumProperty"
+                ),
+                "SanityValue": _property(100.0, "FloatProperty"),
+                "PhysicalHealth": _property(
+                    "EPalStatusPhysicalHealthType::Healthful", "EnumProperty"
+                ),
+                "WorkerSick": _property(
+                    "EPalBaseCampWorkerSickType::None", "EnumProperty"
+                ),
+                "BaseCampWorkerEventType": _property(
+                    "EPalBaseCampWorkerEventType::None", "EnumProperty"
+                ),
+            },
+        )
+    )
+    cache = tmp_path / "world-cache-real-fields.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    items, _ = query_pal_roster(
+        cache, page=1, page_size=60, search="真实字段帕鲁", marker="all", sort="balanced"
+    )
+    care = items[0]["care"]
+
+    assert care["currentHp"] == 125.0
+    assert care["hunger"] == 20.0
+    assert care["hungerRaw"] == 30.0
+    assert care["hungerStatus"] == "EPalStatusHungerType::Starvation"
+    assert care["sanity"] == 75.0
+    assert care["physicalHealth"] == "EPalStatusPhysicalHealthType::MinorInjury"
+    assert care["disease"] == "EPalBaseCampWorkerSickType::Cold"
+    assert care["activity"] == "EPalBaseCampWorkerEventType::DodgeWork"
+    assert care["diseaseRecorded"] is True
+    assert care["activityRecorded"] is True
+
+    raw_items, _ = query_pal_roster(
+        cache, page=1, page_size=60, search="原始饱食值帕鲁", marker="all", sort="balanced"
+    )
+    raw_care = raw_items[0]["care"]
+    assert raw_care["hunger"] is None
+    assert raw_care["hungerRaw"] == 30.0
+    assert raw_care["unavailable"] == ["hunger"]
+    assert raw_care["severity"] == "unavailable"
 
 
 def test_entity_detail_links_pals_to_owner_base_and_container(tmp_path: Path) -> None:
@@ -1128,7 +1234,7 @@ def test_typed_world_contract_pins_list_and_detail_to_one_snapshot(tmp_path: Pat
     assert summary["parseStatus"] == "ready"
     assert summary["dataCoverage"] == {"state": "complete", "resources": {
         "players": True, "pals": True, "guilds": True, "bases": True,
-        "inventories": True, "workPals": True,
+        "inventories": True, "work-pals": True,
     }}
     assert listing["snapshotId"] == "fixture"
     assert listing["collectedAt"] == 11
@@ -1161,6 +1267,84 @@ def test_incompatible_world_cache_is_not_used_and_requests_reparse(tmp_path: Pat
     assert isinstance(coverage, dict)
     assert coverage["state"] == "unavailable"
     assert raised.value.code == "CACHE_SCHEMA_INCOMPATIBLE"
+
+
+def test_service_start_rebuilds_legacy_current_cache_without_source_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    data_dir = tmp_path / "data"
+    world = tmp_path / "world"
+    (world / "Players").mkdir(parents=True)
+    (world / "Level.sav").write_bytes(b"level")
+    (world / "LevelMeta.sav").write_bytes(b"meta")
+    level, players = _synthetic_properties()
+    legacy_cache = data_dir / "cache" / "world-cache-legacy.sqlite"
+    build_world_cache(
+        legacy_cache, level, players, snapshot_id="legacy", source_observed_at=10
+    )
+    legacy_version = CACHE_SCHEMA_VERSION - 1
+    with sqlite3.connect(legacy_cache) as connection:
+        connection.execute(
+            "UPDATE cache_info SET value = ? WHERE key = 'schema_version'",
+            (str(legacy_version),),
+        )
+        connection.execute(f"PRAGMA user_version = {legacy_version}")
+    database.record_snapshot_version(
+        "legacy", str(legacy_cache), 10, "success", make_current=True
+    )
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        data_dir,
+        stability_seconds=0.01,
+        poll_seconds=0.005,
+        minimum_free_bytes=0,
+    )
+    monkeypatch.setattr(service, "_world_directory", lambda: world)
+    rebuilt = threading.Event()
+
+    def fake_worker(
+        snapshot: Path,
+        cache_path: Path,
+        snapshot_id: str,
+        observed_at: int,
+        *,
+        collected_at: int,
+        parse_started_at: int,
+    ) -> dict[str, object]:
+        build_world_cache(
+            cache_path,
+            level,
+            players,
+            snapshot_id=snapshot_id,
+            source_observed_at=observed_at,
+            collected_at=collected_at,
+            parse_started_at=parse_started_at,
+        )
+        rebuilt.set()
+        return {
+            "parsedAt": 2,
+            "durationMs": 1,
+            "peakMemoryBytes": 2,
+            "cacheSizeBytes": cache_path.stat().st_size,
+        }
+
+    monkeypatch.setattr(service, "_run_worker", fake_worker)
+    service.start()
+    try:
+        assert rebuilt.wait(timeout=5)
+    finally:
+        service.stop()
+
+    current = database.current_snapshot_version()
+    assert current is not None and current["id"] != "legacy"
+    current_cache = Path(str(current["cache_path"]))
+    assert read_cache_metadata(current_cache)["schema_version"] == str(
+        CACHE_SCHEMA_VERSION
+    )
+    validate_cache_file(current_cache)
 
 
 def test_failed_parse_keeps_last_compatible_cache_readable(tmp_path: Path) -> None:

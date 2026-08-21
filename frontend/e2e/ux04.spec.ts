@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux04-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-1" };
 const player = { id: "player-1", name: "Alice", level: 20, guildId: "guild-1", guildName: "测试工会" };
-const care = { currentHp: 0, hunger: 12, sanity: 40, disease: "EPalStatus::Cold", activity: "EPalActivity::Working", diseaseRecorded: true, activityRecorded: true, reasons: ["zero_hp", "disease", "hunger_low", "san_low"], unavailable: [], severity: "critical", attention: true };
-const unavailableCare = { currentHp: null, hunger: null, sanity: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity"], severity: "healthy", attention: false };
+const care = { currentHp: 0, hunger: 12, hungerRaw: null, hungerStatus: null, sanity: 40, physicalHealth: null, disease: "EPalStatus::Cold", activity: "EPalActivity::Working", diseaseRecorded: true, activityRecorded: true, reasons: ["zero_hp", "disease", "hunger_low", "san_low"], unavailable: [], severity: "critical", attention: true };
+const unavailableCare = { currentHp: null, hunger: null, hungerRaw: null, hungerStatus: null, sanity: null, physicalHealth: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity", "disease", "activity"], severity: "unavailable", attention: false };
 const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", detail: { gender: "Female", rank: 1, isLucky: true }, care };
 const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", care: unavailableCare };
 const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", care: unavailableCare };
@@ -15,6 +15,8 @@ let reparseRequests = 0;
 test("UX-04：四类实体统一列表详情模式并支持关联跳转", async ({ page }, testInfo) => {
   reparseRequests = 0;
   const worldListUrls: URL[] = [];
+  let reparseStatusReads = 0;
+  let activeSnapshotId = "world";
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
   await page.route("**/api/shell/status", (route) => route.fulfill({ json: shell }));
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: { executablePath: shell.executablePath, launchArguments: "" } }));
@@ -36,12 +38,17 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
   await page.route("**/api/world/**", (route) => {
     const path = new URL(route.request().url()).pathname;
-    if (path === "/api/world/snapshots/current") return route.fulfill({ json: {
-      source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null, snapshotId: "world", parsing: false, parseDurationMs: 42,
-      sourceObservedAt: 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: 1_786_000_042, parseStatus: "ready",
+    if (path === "/api/world/snapshots/current") {
+      if (reparseRequests > 0) reparseStatusReads += 1;
+      const parsing = reparseStatusReads === 2;
+      if (reparseStatusReads >= 3) activeSnapshotId = "world-new";
+      return route.fulfill({ json: {
+      source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: false, errorCode: null, error: null, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42,
+      sourceObservedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: parsing ? null : 1_786_000_042, parseStatus: parsing ? "parsing" : "ready",
       dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
       counts: { players: 1, pals: 3, guilds: 1, bases: 1, inventory_items: 1, work_pals: 1 },
     } });
+    }
     if (path === "/api/world/reparse") {
       if (route.request().method() === "POST") reparseRequests += 1;
       return route.fulfill({ json: { message: "已开始只读重新解析" } });
@@ -53,12 +60,12 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }];
       const sorted = sort === "name" ? [rosterPals[2], rosterPals[0], rosterPals[1]] : rosterPals;
       const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : sorted;
-      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 } } });
+      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 } } });
     }
     const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
     if (path in lists) {
       worldListUrls.push(new URL(route.request().url()));
-      return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
+      return route.fulfill({ json: { items: lists[path], page: 1, pageSize: 50, total: lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null } });
     }
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
@@ -155,6 +162,8 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(page.getByRole("button", { name: "清除筛选条件" })).toBeVisible();
   await page.getByRole("button", { name: "重新解析" }).click();
   await expect.poll(() => reparseRequests).toBe(1);
+  await expect.poll(() => reparseStatusReads).toBeGreaterThanOrEqual(3);
+  await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("snapshotId") === "world-new")).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });

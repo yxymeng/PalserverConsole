@@ -267,6 +267,7 @@
 .pal-care-badge.critical { border-color: color-mix(in srgb, var(--danger) 42%, var(--border)); color: var(--danger); background: var(--danger-surface); }
 .pal-care-badge.warning { border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); color: var(--warning); background: var(--warning-surface); }
 .pal-care-badge.info { color: var(--primary); background: var(--primary-surface); }
+.pal-care-badge.unavailable { border-style: dashed; color: var(--muted-strong); background: var(--surface-muted); }
 .pal-care-detail-content { display: grid; gap: 10px; }
 .pal-care-detail-content > ul { display: grid; gap: 5px; margin: 0; padding-left: 18px; color: var(--muted-strong); font-size: 13px; }
 .pal-care-detail-content > dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; border: 1px solid var(--border); background: var(--border); }

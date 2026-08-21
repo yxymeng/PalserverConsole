@@ -7,7 +7,12 @@ const diseaseLabels: Record<string, string> = {
 };
 const activityLabels: Record<string, string> = {
   work: "工作中", working: "工作中", rest: "休息", resting: "休息",
-  lazy: "偷懒", slacking: "偷懒", idle: "闲置",
+  lazy: "偷懒", slacking: "偷懒", idle: "闲置", dodgework: "偷懒",
+  dodgeworksleep: "偷懒睡觉", dodgeworkshort: "短暂偷懒",
+};
+const physicalHealthLabels: Record<string, string> = {
+  healthful: "健康", minorinjury: "轻伤", severe: "重伤", dying: "濒死",
+  deadbody: "死亡", cloudcemetery: "墓地状态",
 };
 
 function enumKey(value: string) {
@@ -22,6 +27,11 @@ export function diseaseLabel(disease: string | null) {
 export function activityLabel(activity: string | null) {
   if (!activity) return null;
   return activityLabels[enumKey(activity)] || null;
+}
+
+export function physicalHealthLabel(physicalHealth: string | null) {
+  if (!physicalHealth) return null;
+  return physicalHealthLabels[enumKey(physicalHealth)] || null;
 }
 
 export function careSummaryLabel(care: WorldPalCare) {

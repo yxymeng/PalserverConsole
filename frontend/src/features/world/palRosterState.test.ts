@@ -8,7 +8,7 @@ function response(snapshotId: string, count: number, start = 0): WorldPalRosterR
     id: `pal-${start + index}`, ownerPlayerId: null, characterId: "FuturePal", nickname: null,
     level: 1, containerId: null, slotIndex: null, baseId: null, assignment: "unassigned",
     gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned",
-    care: { currentHp: null, hunger: null, sanity: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity"], severity: "healthy", attention: false },
+    care: { currentHp: null, hunger: null, hungerRaw: null, hungerStatus: null, sanity: null, physicalHealth: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity", "disease", "activity"], severity: "unavailable", attention: false },
   }));
   return {
     items, page: 1, pageSize: 60, total: count, snapshotId, source: "fixture", observedAt: 1,
