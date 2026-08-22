@@ -10,12 +10,15 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
+from ..metadata import WorldMetadataBundle, WorldMetadataError, load_world_metadata
+from ..metadata.loader import WORK_SUITABILITY_TYPES, unavailable_metadata_status
 from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 6
+CACHE_SCHEMA_VERSION = 7
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
+_WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
 PalCareReason = Literal["zero_hp", "disease", "hunger_low", "san_low"]
 PalCareUnavailable = Literal["currentHp", "hunger", "sanity", "disease", "activity"]
@@ -79,6 +82,13 @@ CREATE TABLE pals (
     rank INTEGER,
     is_boss INTEGER NOT NULL DEFAULT 0,
     is_lucky INTEGER NOT NULL DEFAULT 0,
+    species_rarity INTEGER,
+    iv_hp REAL,
+    iv_attack REAL,
+    iv_defense REAL,
+    iv_average REAL,
+    work_suitability_json TEXT NOT NULL DEFAULT '{}',
+    metadata_known INTEGER NOT NULL DEFAULT 0,
     current_hp REAL,
     hunger REAL,
     sanity REAL,
@@ -91,6 +101,7 @@ CREATE INDEX pals_owner_idx ON pals(owner_player_id);
 CREATE INDEX pals_base_idx ON pals(base_id);
 CREATE INDEX pals_roster_name_idx ON pals(nickname COLLATE NOCASE, character_id, id);
 CREATE INDEX pals_roster_level_idx ON pals(level DESC, id);
+CREATE INDEX pals_roster_aptitude_idx ON pals(species_rarity DESC, iv_average DESC, id);
 CREATE INDEX pals_roster_marker_idx ON pals(is_lucky, is_boss, id);
 CREATE INDEX pals_care_attention_idx ON pals(current_hp, hunger, sanity, disease);
 CREATE TABLE guilds (
@@ -235,8 +246,14 @@ def build_world_cache(
     character_container_rows, instance_locations = _character_containers(
         character_containers, worker_container_to_base, player_profiles
     )
+    try:
+        world_metadata = load_world_metadata()
+        metadata_status = world_metadata.status
+    except WorldMetadataError as error:
+        world_metadata = None
+        metadata_status = unavailable_metadata_status(error.code)
     player_rows, pal_rows = _characters(
-        characters, player_profiles, player_group, instance_locations
+        characters, player_profiles, player_group, instance_locations, world_metadata
     )
     item_container_rows, item_rows = _item_containers(
         item_containers, player_profiles, base_rows
@@ -263,6 +280,12 @@ def build_world_cache(
             "source_observed_at": str(source_observed_at),
             "created_at": str(int(time.time())),
             "counts": json.dumps(counts, separators=(",", ":")),
+            "metadata_status": str(metadata_status["status"]),
+            "metadata_schema": str(metadata_status["schema"]),
+            "metadata_schema_version": str(metadata_status["schemaVersion"]),
+            "metadata_data_version": str(metadata_status["dataVersion"] or ""),
+            "metadata_source_revision": str(metadata_status["sourceRevision"] or ""),
+            "metadata_error_code": str(metadata_status["errorCode"] or ""),
         }
         if game_time_ticks is not None:
             metadata["game_time_ticks"] = str(game_time_ticks)
@@ -275,7 +298,8 @@ def build_world_cache(
             "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", player_rows
         )
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             pal_rows,
         )
         connection.executemany("INSERT INTO guilds VALUES(?, ?, ?, ?, ?)", group_rows)
@@ -326,6 +350,18 @@ def read_cache_metadata(path: Path) -> dict[str, str]:
         return {str(key): str(value) for key, value in rows}
     finally:
         connection.close()
+
+
+def query_world_metadata_status(path: Path) -> dict[str, object]:
+    metadata = read_cache_metadata(path)
+    return {
+        "status": metadata.get("metadata_status", "unavailable"),
+        "schema": metadata.get("metadata_schema", "palserver-console-world-metadata"),
+        "schemaVersion": int(metadata.get("metadata_schema_version", "1")),
+        "dataVersion": metadata.get("metadata_data_version") or None,
+        "sourceRevision": metadata.get("metadata_source_revision") or None,
+        "errorCode": metadata.get("metadata_error_code") or None,
+    }
 
 
 def validate_cache_file(path: Path) -> dict[str, int]:
@@ -504,13 +540,23 @@ def query_pal_roster(
     marker: str,
     sort: str,
     care: str = "all",
+    min_level: int | None = None,
+    min_rank: int | None = None,
+    min_rarity: int | None = None,
+    min_hp_iv: float | None = None,
+    min_attack_iv: float | None = None,
+    min_defense_iv: float | None = None,
+    min_average_iv: float | None = None,
+    work_suitabilities: Sequence[str] = (),
+    min_work_level: int = 1,
 ) -> tuple[list[dict[str, object]], int]:
     """Query the immutable cache in a stable roster order without loading all Pals."""
 
     if (
         marker not in {"all", "lucky", "boss"}
-        or sort not in {"balanced", "name", "level"}
+        or sort not in {"balanced", "name", "level", "rarity", "averageIv", "workSuitability"}
         or care not in {"all", "attention"}
+        or any(name not in _WORK_SUITABILITY_TYPES for name in work_suitabilities)
     ):
         raise ValueError("Unknown Pal roster query.")
     clauses: list[str] = []
@@ -526,13 +572,34 @@ def query_pal_roster(
         clauses.append(
             "(p.current_hp = 0 OR p.disease IS NOT NULL OR p.hunger < 20 OR p.sanity < 50)"
         )
+    for value, column in (
+        (min_level, "p.level"),
+        (min_rank, "p.rank"),
+        (min_rarity, "p.species_rarity"),
+        (min_hp_iv, "p.iv_hp"),
+        (min_attack_iv, "p.iv_attack"),
+        (min_defense_iv, "p.iv_defense"),
+        (min_average_iv, "p.iv_average"),
+    ):
+        if value is not None:
+            clauses.append(f"{column} >= ?")
+            parameters.append(value)
+    for suitability in dict.fromkeys(work_suitabilities):
+        clauses.append(f"json_extract(p.work_suitability_json, '$.{suitability}') >= ?")
+        parameters.append(min_work_level)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     name_order = "COALESCE(NULLIF(p.nickname, ''), p.character_id) COLLATE NOCASE, p.id"
-    order = (
-        "p.level IS NULL, p.level DESC, " + name_order
-        if sort == "level"
-        else name_order
-    )
+    order = {
+        "balanced": name_order,
+        "name": name_order,
+        "level": "p.level IS NULL, p.level DESC, " + name_order,
+        "rarity": "p.species_rarity IS NULL, p.species_rarity DESC, " + name_order,
+        "averageIv": "p.iv_average IS NULL, p.iv_average DESC, " + name_order,
+        "workSuitability": (
+            "COALESCE((SELECT MAX(CAST(value AS INTEGER)) "
+            "FROM json_each(p.work_suitability_json)), -1) DESC, " + name_order
+        ),
+    }[sort]
     connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
@@ -871,6 +938,7 @@ def _characters(
     profiles: Mapping[str, Mapping[str, Any]],
     player_group: Mapping[str, str],
     locations: Mapping[str, tuple[str, int, str | None]],
+    world_metadata: WorldMetadataBundle | None,
 ) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     players: list[tuple[Any, ...]] = []
     pals: list[tuple[Any, ...]] = []
@@ -926,6 +994,17 @@ def _characters(
         is_boss = character_id_upper.startswith(("BOSS_", "GYM_"))
         is_boss = is_boss or character_id_upper.endswith("BOSS")
         is_lucky = bool(_scalar(save_parameter.get("IsRarePal")))
+        species = world_metadata.pal(character_id) if world_metadata else None
+        iv_hp = _save_number(save_parameter, "Talent_HP")
+        iv_attack = _save_number(save_parameter, "Talent_Shot")
+        iv_defense = _save_number(save_parameter, "Talent_Defense")
+        iv_values = (iv_hp, iv_attack, iv_defense)
+        iv_average = (
+            sum(value for value in iv_values if value is not None) / 3
+            if all(value is not None for value in iv_values)
+            else None
+        )
+        work_suitabilities = species.work_suitabilities if species else {}
         care = _pal_care_fields(save_parameter, character_id)
         pals.append(
             (
@@ -942,6 +1021,13 @@ def _characters(
                 rank,
                 int(is_boss),
                 int(is_lucky),
+                species.rarity if species else None,
+                iv_hp,
+                iv_attack,
+                iv_defense,
+                iv_average,
+                _json(work_suitabilities),
+                int(species is not None),
                 care["current_hp"],
                 care["hunger"],
                 care["sanity"],
@@ -960,6 +1046,15 @@ def _characters(
                         "isImported": bool(
                             _scalar(save_parameter.get("bImportedCharacter"))
                         ),
+                        "aptitude": {
+                            "species_rarity": species.rarity if species else None,
+                            "iv_hp": iv_hp,
+                            "iv_attack": iv_attack,
+                            "iv_defense": iv_defense,
+                            "iv_average": iv_average,
+                            "work_suitabilities": work_suitabilities,
+                            "metadata_known": species is not None,
+                        },
                         "care": care,
                     }
                 ),
@@ -1087,6 +1182,27 @@ def _is_disease_status(value: str | None) -> bool:
 
 def _pal_public_row(row: dict[str, Any]) -> dict[str, object]:
     result = _public_row(row)
+    work = _mapping(result.pop("workSuitability", {}))
+    result["aptitude"] = {
+        "speciesRarity": result.pop("speciesRarity", None),
+        "ivs": {
+            "hp": result.pop("ivHp", None),
+            "attack": result.pop("ivAttack", None),
+            "defense": result.pop("ivDefense", None),
+            "average": result.pop("ivAverage", None),
+        },
+        "workSuitabilities": [
+            {"type": name, "level": int(level)}
+            for name, level in sorted(
+                work.items(), key=lambda item: (-int(item[1]), str(item[0]))
+            )
+            if isinstance(name, str) and isinstance(level, int | float)
+        ],
+        "metadataKnown": bool(result.pop("metadataKnown", False)),
+        "metadataLabel": None
+        if bool(row.get("metadata_known"))
+        else "资料未收录",
+    }
     result["care"] = _pal_care_status(result)
     return result
 

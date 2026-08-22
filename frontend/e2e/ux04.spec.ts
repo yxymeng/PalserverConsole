@@ -5,9 +5,11 @@ const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped",
 const player = { id: "player-1", name: "Alice", level: 20, guildId: "guild-1", guildName: "测试工会" };
 const care = { currentHp: 0, hunger: 12, hungerRaw: null, hungerStatus: null, sanity: 40, physicalHealth: null, disease: "EPalStatus::Cold", activity: "EPalActivity::Working", diseaseRecorded: true, activityRecorded: true, reasons: ["zero_hp", "disease", "hunger_low", "san_low"], unavailable: [], severity: "critical", attention: true };
 const unavailableCare = { currentHp: null, hunger: null, hungerRaw: null, hungerStatus: null, sanity: null, physicalHealth: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity", "disease", "activity"], severity: "unavailable", attention: false };
-const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", detail: { gender: "Female", rank: 1, isLucky: true }, care };
-const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", care: unavailableCare };
-const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", care: unavailableCare };
+const aptitude = { speciesRarity: 1, ivs: { hp: 90, attack: 80, defense: 70, average: 80 }, workSuitabilities: [{ type: "Handcraft", level: 1 }, { type: "Transport", level: 1 }], metadataKnown: true, metadataLabel: null };
+const unknownAptitude = { speciesRarity: null, ivs: { hp: null, attack: null, defense: null, average: null }, workSuitabilities: [], metadataKnown: false, metadataLabel: "资料未收录" };
+const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", detail: { gender: "Female", rank: 1, isLucky: true }, aptitude, care };
+const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude: unknownAptitude, care: unavailableCare };
+const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude, care: unavailableCare };
 const guild = { id: "guild-1", name: "测试工会", memberCount: 1, baseCount: 1 };
 const base = { id: "base-1", name: "据点一号", guildId: "guild-1", workerContainerId: "container-1", x: 1, y: 2, z: 3 };
 let reparseRequests = 0;
@@ -15,6 +17,7 @@ let reparseRequests = 0;
 test("UX-04：四类实体统一列表详情模式并支持关联跳转", async ({ page }, testInfo) => {
   reparseRequests = 0;
   const worldListUrls: URL[] = [];
+  const rosterUrls: URL[] = [];
   let reparseStatusReads = 0;
   let activeSnapshotId = "world";
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
@@ -63,13 +66,14 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       return route.fulfill({ json: { message: "已开始只读重新解析", reparseGeneration: reparseRequests } });
     }
     if (path === "/api/world/pals/roster") {
+      rosterUrls.push(new URL(route.request().url()));
       const sort = new URL(route.request().url()).searchParams.get("sort");
       const marker = new URL(route.request().url()).searchParams.get("marker");
       const careFilter = new URL(route.request().url()).searchParams.get("care");
       const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }];
       const sorted = sort === "name" ? [rosterPals[2], rosterPals[0], rosterPals[1]] : rosterPals;
       const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : sorted;
-      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 } } });
+      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
     if (path in lists) {
@@ -78,7 +82,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
     }
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
-      "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 } },
+      "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } },
       "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], detail: { adminPlayerId: "player-1" } },
       "/api/world/bases/base-1": { ...base, guild, workers: [pal], inventory: [{ id: "item-2", itemId: "Stone", quantity: 8, containerId: "base-bag" }], detail: { state: 1 } },
     };
@@ -125,12 +129,23 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   const palRow = page.locator(".pal-roster-row").filter({ hasText: "小羊" });
   await expect(palRow.locator(".world-pal-gender")).toHaveText("♀");
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
-  await expect(palRow.locator('[data-label="星级"]')).toHaveText("1");
+  await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("1 星");
+  await expect(palRow.locator('[data-label="资质"]')).toContainText("稀有度 1");
+  await expect(palRow.locator('[data-label="工作适应性"]')).toContainText("手工作业 1");
   await expect(palRow.locator('[data-label="个体标记"]')).toHaveText("闪光");
   await expect(palRow.locator('[data-label="归属"]')).toContainText("据点一号");
   await expect(palRow.locator('[data-label="照护状态"]')).toContainText("需立即处理");
   await expect(palRow).not.toContainText("base-1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
+  await page.getByText("资质与工作适应性", { exact: true }).click();
+  await page.getByLabel("最低物种稀有度").fill("1");
+  await page.getByLabel("最低工作等级").selectOption("1");
+  await page.getByLabel("手工作业", { exact: true }).check();
+  await page.getByLabel("搬运", { exact: true }).check();
+  await page.getByRole("button", { name: "应用资质筛选" }).click();
+  await expect.poll(() => rosterUrls.some((url) => url.searchParams.get("minRarity") === "1" && url.searchParams.get("workSuitability") === "Handcraft,Transport" && url.searchParams.get("minWorkLevel") === "1")).toBeTruthy();
+  await expect(page.getByLabel("已应用筛选")).toContainText("手工作业 ≥ 1 级");
+  await expect(page.getByLabel("已应用筛选")).toContainText("搬运 ≥ 1 级");
   await page.getByLabel("帕鲁名册排序").selectOption("name");
   await expect(page.locator(".pal-roster-row").first()).toContainText("阿帕");
   await page.getByRole("button", { name: "小羊" }).click();
@@ -141,6 +156,9 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(palDrawer).toContainText("照护状态");
   await expect(palDrawer).toContainText("来自存档快照");
   await expect(palDrawer).toContainText("感冒");
+  await expect(palDrawer).toContainText("生命 / 攻击 / 防御");
+  await expect(palDrawer).toContainText("平均");
+  await expect(palDrawer).toContainText("工作适应性");
   const closePalDrawer = palDrawer.getByRole("button", { name: "关闭帕鲁详情" });
   await expect(closePalDrawer).toBeFocused();
   await page.keyboard.press("Shift+Tab");

@@ -26,6 +26,7 @@ from .cache import (
     query_cache,
     query_pal_care_summary,
     query_pal_roster,
+    query_world_metadata_status,
     read_cache_metadata,
     validate_cache_file,
 )
@@ -461,6 +462,15 @@ class WorldSnapshotService:
         marker: str,
         sort: str,
         care: str = "all",
+        min_level: int | None = None,
+        min_rank: int | None = None,
+        min_rarity: int | None = None,
+        min_hp_iv: float | None = None,
+        min_attack_iv: float | None = None,
+        min_defense_iv: float | None = None,
+        min_average_iv: float | None = None,
+        work_suitabilities: tuple[str, ...] = (),
+        min_work_level: int = 1,
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -472,6 +482,15 @@ class WorldSnapshotService:
             marker=marker,
             sort=sort,
             care=care,
+            min_level=min_level,
+            min_rank=min_rank,
+            min_rarity=min_rarity,
+            min_hp_iv=min_hp_iv,
+            min_attack_iv=min_attack_iv,
+            min_defense_iv=min_defense_iv,
+            min_average_iv=min_average_iv,
+            work_suitabilities=work_suitabilities,
+            min_work_level=min_work_level,
         )
         state = self._status_for_snapshot(current)
         return {
@@ -480,6 +499,7 @@ class WorldSnapshotService:
             "pageSize": page_size,
             "total": total,
             "careSummary": query_pal_care_summary(cache),
+            "metadata": query_world_metadata_status(cache),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],
@@ -524,7 +544,7 @@ class WorldSnapshotService:
         if result is None:
             raise WorldDataError("WORLD_ENTITY_NOT_FOUND", "实体不存在于当前存档缓存。")
         state = self._status_for_snapshot(current)
-        return {
+        response: dict[str, object] = {
             **result,
             "source": state["source"],
             "observedAt": state["observedAt"],
@@ -537,6 +557,9 @@ class WorldSnapshotService:
             "errorCode": state["errorCode"],
             "dataCoverage": state["dataCoverage"],
         }
+        if resource == "pals":
+            response["metadata"] = query_world_metadata_status(cache)
+        return response
 
     def _current_cache(self) -> Path:
         return self._current_snapshot_cache()[1]

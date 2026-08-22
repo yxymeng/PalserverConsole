@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 import palserver_console.world.cache as world_cache
 from palserver_console.config import AppSettings, ProfileError, ServerProfileService
 from palserver_console.main import create_app
+from palserver_console.metadata import WorldMetadataError
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import read_save_properties, verify_stable_parse
 from palserver_console.world.cache import (
@@ -265,6 +266,11 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
                             sanity=49.99,
                             disease="EPalStatus::Cold",
                             activity="EPalActivity::Working",
+                            save_parameter_fields={
+                                "Talent_HP": _property(90, "ByteProperty"),
+                                "Talent_Shot": _property(80, "ByteProperty"),
+                                "Talent_Defense": _property(70, "ByteProperty"),
+                            },
                         ),
                         _character(
                             player_id,
@@ -430,6 +436,19 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
         "isLucky": True,
         "isAwakened": True,
         "isImported": True,
+        "aptitude": {
+            "species_rarity": 5,
+            "iv_hp": 90.0,
+            "iv_attack": 80.0,
+            "iv_defense": 70.0,
+            "iv_average": 80.0,
+            "work_suitabilities": {
+                "Handcraft": 1,
+                "MonsterFarm": 1,
+                "Transport": 1,
+            },
+            "metadata_known": True,
+        },
         "care": {
             "current_hp": 0.0,
             "hunger": 19.99,
@@ -464,6 +483,10 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
                 f"pal-{index:05d}", None, "FuturePal" if index == 1_599 else "SheepBall",
                 f"名册-{index:05d}", index % 50, None, None, None, "unassigned",
                     "EPalGenderType::Male", index % 5, int(index % 97 == 0), int(index % 89 == 0),
+                    None if index == 1_599 else 1,
+                    float(index % 101), float(index % 101), float(index % 101), float(index % 101),
+                    "{}" if index == 1_599 else '{"Handcraft":1}',
+                    0 if index == 1_599 else 1,
                     None, None, None, None, None, "{}",
             )
             for index in range(start, stop)
@@ -471,7 +494,8 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows(0, 1_600),
         )
     first_1600, total_1600 = query_pal_roster(
@@ -488,10 +512,12 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
     assert unknown_total == 1
     assert unknown[0]["id"] == "pal-01599"
     assert unknown[0]["locationType"] == "unassigned"
+    assert cast(dict[str, Any], unknown[0]["aptitude"])["metadataLabel"] == "资料未收录"
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             rows(1_600, 5_000),
         )
     level_page, total_5000 = query_pal_roster(
@@ -504,6 +530,104 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
     assert len(level_page) == 60
     assert all(item["isLucky"] for item in lucky)
     assert lucky_total > 0
+
+
+def test_pal_roster_exposes_and_filters_aptitude_with_all_work_semantics(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache-aptitude.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    items, total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="averageIv",
+    )
+    assert total == 2
+    boss_aptitude = cast(dict[str, Any], items[0]["aptitude"])
+    assert boss_aptitude == {
+        "speciesRarity": 5,
+        "ivs": {"hp": 90.0, "attack": 80.0, "defense": 70.0, "average": 80.0},
+        "workSuitabilities": [
+            {"type": "Handcraft", "level": 1},
+            {"type": "MonsterFarm", "level": 1},
+            {"type": "Transport", "level": 1},
+        ],
+        "metadataKnown": True,
+        "metadataLabel": None,
+    }
+
+    rare, rare_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="rarity",
+        min_rarity=6,
+    )
+    assert rare_total == 1 and rare[0]["characterId"] == "CatMage"
+    ivs, iv_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="averageIv",
+        min_hp_iv=90,
+        min_attack_iv=80,
+        min_defense_iv=70,
+        min_average_iv=80,
+    )
+    assert iv_total == 1 and ivs[0]["characterId"] == "BOSS_SheepBall"
+    work, work_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="workSuitability",
+        work_suitabilities=("Handcraft", "ProductMedicine"),
+        min_work_level=3,
+    )
+    assert work_total == 1 and work[0]["characterId"] == "CatMage"
+    none, none_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="workSuitability",
+        work_suitabilities=("Handcraft", "ProductMedicine", "Transport"),
+        min_work_level=3,
+    )
+    assert none == [] and none_total == 0
+
+
+def test_missing_world_metadata_keeps_unknown_pal_records_read_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    level, players = _synthetic_properties()
+
+    def unavailable() -> None:
+        raise WorldMetadataError("WORLD_METADATA_UNAVAILABLE", "missing")
+
+    monkeypatch.setattr(world_cache, "load_world_metadata", unavailable)
+    cache = tmp_path / "world-cache-no-metadata.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    items, total = query_pal_roster(
+        cache, page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )
+    assert total == 2
+    assert all(cast(dict[str, Any], item["aptitude"])["metadataKnown"] is False for item in items)
+    assert all(
+        cast(dict[str, Any], item["aptitude"])["metadataLabel"] == "资料未收录"
+        for item in items
+    )
+    assert read_cache_metadata(cache)["metadata_error_code"] == "WORLD_METADATA_UNAVAILABLE"
 
 
 def test_pal_care_attention_preserves_thresholds_unknown_disease_and_missing_fields(
@@ -828,6 +952,14 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
         rejected = client.get("/api/world/pals?pageSize=201")
         replaced = client.get("/api/world/pals?snapshotId=superseded")
         roster = client.get("/api/world/pals/roster?pageSize=60")
+        aptitude_roster = client.get(
+            "/api/world/pals/roster?minRarity=5&minHpIv=90&minAverageIv=80"
+            "&workSuitability=Handcraft,Transport&minWorkLevel=1&sort=averageIv"
+        )
+        invalid_aptitude = client.get("/api/world/pals/roster?minHpIv=101")
+        invalid_work = client.get(
+            "/api/world/pals/roster?workSuitability=UnknownWork&minWorkLevel=1"
+        )
         roster_replaced = client.get("/api/world/pals/roster?snapshotId=superseded")
         pal_detail = client.get(f"/api/world/pals/{uuid.UUID(int=401)}")
 
@@ -843,10 +975,21 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
     assert roster.status_code == 200
     assert roster.json()["pageSize"] == 60
+    assert roster.json()["metadata"]["status"] == "ready"
+    assert roster.json()["items"][0]["aptitude"]["metadataKnown"] is True
+    assert aptitude_roster.status_code == 200
+    assert aptitude_roster.json()["total"] == 1
+    assert aptitude_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"
+    assert invalid_aptitude.status_code == 422
+    assert invalid_aptitude.json()["errorCode"] == "INVALID_PAL_APTITUDE_FILTER"
+    assert invalid_work.status_code == 422
+    assert invalid_work.json()["errorCode"] == "INVALID_PAL_WORK_FILTER"
     assert roster_replaced.status_code == 409
     assert roster_replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
     assert pal_detail.status_code == 200
     assert pal_detail.json()["owner"]["name"] == "测试玩家"
+    assert pal_detail.json()["aptitude"]["ivs"]["average"] == 80.0
+    assert pal_detail.json()["metadata"]["status"] == "ready"
 
 
 def test_source_change_discards_snapshot_before_parser(

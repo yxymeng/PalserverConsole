@@ -236,6 +236,29 @@
 .pal-roster-heading p { margin: 5px 0 0; color: var(--muted); font-size: 13px; }
 .pal-roster-heading > span { flex: 0 0 auto; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .pal-roster-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto auto auto; gap: 8px; align-items: center; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-subtle); }
+.pal-metadata-warning { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; margin: 0; padding: 10px 12px; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); color: var(--muted-strong); background: var(--surface-subtle); font-size: 12px; }
+.pal-metadata-warning code { overflow-wrap: anywhere; color: var(--foreground); font-size: 11px; }
+.pal-aptitude-filters { grid-column: 1 / -1; border-top: 1px solid var(--border); }
+.pal-aptitude-filters summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 42px; padding: 7px 2px 0; color: var(--foreground); font-size: 13px; font-weight: 650; cursor: pointer; list-style: none; }
+.pal-aptitude-filters summary::-webkit-details-marker { display: none; }
+.pal-aptitude-filters summary small { color: var(--muted); font-size: 11px; font-weight: 500; }
+.pal-aptitude-filters summary svg { transition: transform .16s ease; }
+.pal-aptitude-filters[open] summary svg { transform: rotate(180deg); }
+.pal-aptitude-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 11px 0 2px; }
+.pal-aptitude-filter-grid > label { display: grid; gap: 5px; min-width: 0; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
+.pal-aptitude-filter-grid > label input, .pal-work-level select { width: 100%; min-height: 40px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--foreground); background: var(--surface); font: inherit; }
+.pal-work-filter { grid-column: 1 / -1; min-width: 0; margin: 2px 0 0; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.pal-work-filter legend { padding: 0 5px; color: var(--foreground); font-size: 12px; font-weight: 700; }
+.pal-work-filter > p { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
+.pal-work-filter > div { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.pal-work-filter > div label { display: flex; min-height: 36px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: var(--surface-subtle); font-size: 11px; cursor: pointer; }
+.pal-work-filter > div label:has(input:checked) { border-color: color-mix(in srgb, var(--primary) 42%, var(--border)); color: var(--primary); background: var(--primary-surface); }
+.pal-work-filter input { accent-color: var(--primary); }
+.pal-work-level { display: grid; grid-template-columns: auto 96px; align-items: center; gap: 8px; width: fit-content; margin: 0 0 10px; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
+.pal-aptitude-apply { grid-column: 1 / -1; justify-self: end; }
+.pal-applied-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pal-applied-filters > span { color: var(--muted); font-size: 11px; font-weight: 650; }
+.pal-applied-filters button { display: inline-flex; min-height: 30px; align-items: center; gap: 5px; padding: 0 8px; border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border)); border-radius: 999px; color: var(--primary); background: var(--primary-surface); font: inherit; font-size: 11px; cursor: pointer; }
 .pal-care-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--border); }
 .pal-care-summary > span { display: flex; min-height: 58px; align-items: center; justify-content: space-between; gap: 9px; padding: 10px 13px; background: var(--surface); }
 .pal-care-summary strong, .pal-care-summary small { color: var(--muted); font-size: 11px; font-weight: 650; }
@@ -250,7 +273,7 @@
 .pal-roster-markers button:hover { background: var(--surface-hover); }
 .pal-roster-markers button.active { color: var(--primary); background: var(--primary-surface); }
 .pal-roster-table { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-.pal-roster-head, .pal-roster-row { display: grid; grid-template-columns: minmax(220px, 1.5fr) 62px 62px minmax(92px, .8fr) minmax(112px, .9fr) minmax(130px, 1fr); align-items: center; gap: 12px; padding: 12px 16px; }
+.pal-roster-head, .pal-roster-row { display: grid; grid-template-columns: minmax(190px, 1.4fr) 82px minmax(145px, 1fr) minmax(128px, .9fr) minmax(88px, .65fr) minmax(108px, .75fr) minmax(118px, .85fr); align-items: center; gap: 10px; padding: 12px 14px; }
 .pal-roster-head { color: var(--muted); background: var(--surface-muted); font-size: 12px; font-weight: 650; }
 .pal-roster-row { min-height: 64px; border-top: 1px solid var(--border); color: var(--foreground); font-size: 13px; transition: background-color .16s ease; }
 .pal-roster-row:hover { background: color-mix(in srgb, var(--primary) 7%, var(--surface)); }
@@ -260,7 +283,14 @@
 .pal-roster-name strong, .pal-roster-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pal-roster-name small, .pal-roster-location small { color: var(--muted); font-size: 11px; }
 .pal-roster-row > span { min-width: 0; overflow-wrap: anywhere; }
-.pal-roster-row > span[data-label="星级"] { display: inline-flex; align-items: center; gap: 3px; color: var(--electric); font-variant-numeric: tabular-nums; }
+.pal-roster-level, .pal-aptitude-summary { display: grid; gap: 3px; font-variant-numeric: tabular-nums; }
+.pal-roster-level small { display: inline-flex; align-items: center; gap: 3px; color: var(--electric); font-size: 11px; }
+.pal-aptitude-summary strong { font-size: 12px; }
+.pal-aptitude-summary small { color: var(--muted); font-size: 10px; line-height: 1.4; }
+.pal-aptitude-summary.unavailable { color: var(--muted-strong); }
+.pal-work-summary { display: flex; flex-wrap: wrap; gap: 4px; }
+.pal-work-summary em { padding: 3px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 10px; font-style: normal; font-weight: 650; }
+.pal-work-summary small { color: var(--muted); font-size: 11px; }
 .pal-roster-traits { display: flex; flex-wrap: wrap; gap: 4px; color: var(--muted); font-size: 12px; }
 .pal-roster-traits em { padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border)); border-radius: 999px; color: var(--primary); background: var(--primary-surface); font-style: normal; font-weight: 650; }
 .pal-care-badge { display: inline-flex; width: fit-content; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 12px; font-weight: 650; }
@@ -275,6 +305,14 @@
 .pal-care-detail-content dt { color: var(--muted); font-size: 11px; }
 .pal-care-detail-content dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--foreground); font-size: 12px; font-weight: 650; }
 .pal-care-unavailable { color: var(--muted) !important; }
+.pal-aptitude-detail > dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; border: 1px solid var(--border); background: var(--border); }
+.pal-aptitude-detail > dl > div { display: grid; gap: 3px; padding: 10px; background: var(--surface-subtle); }
+.pal-aptitude-detail dt { color: var(--muted); font-size: 11px; }
+.pal-aptitude-detail dd { margin: 0; color: var(--foreground); font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.pal-work-detail ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; padding: 1px; background: var(--border); list-style: none; }
+.pal-work-detail li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; background: var(--surface-subtle); font-size: 12px; }
+.pal-work-detail li strong { color: var(--primary); }
+.pal-technical-ids p { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
 .pal-roster-location { display: grid; gap: 2px; }
 .pal-roster-location strong { font-size: 12px; }
 .pal-roster-more { justify-self: center; margin: 2px 0 0; }
@@ -523,6 +561,11 @@
   .pal-roster-markers button { flex: 1; justify-content: center; }
   .pal-roster-toolbar .world-control { min-width: 0; }
   .pal-roster-toolbar .world-clear-button { grid-column: 1 / -1; justify-self: start; }
+  .pal-metadata-warning { grid-template-columns: auto minmax(0, 1fr); }
+  .pal-metadata-warning code { grid-column: 1 / -1; }
+  .pal-aptitude-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pal-work-filter > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pal-aptitude-apply { width: 100%; }
   .pal-roster-head { display: none; }
   .pal-roster-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 14px; }
   .pal-roster-row > span { display: grid; gap: 2px; }
@@ -530,6 +573,7 @@
   .pal-roster-name { grid-column: 1 / -1; }
   .pal-roster-name > span:nth-child(2) { max-width: calc(100vw - 108px); }
   .pal-care-detail-content > dl { grid-template-columns: 1fr; }
+  .pal-aptitude-detail > dl, .pal-work-detail ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pal-roster-drawer { width: 100vw; border-left: 0; }
   .world-entity-drawer.empty { display: none; }
   .world-entity-drawer:not(.empty) { position: fixed; z-index: 42; inset: 12px; top: 12px; max-height: calc(100dvh - 24px); border-color: var(--border-strong); border-radius: var(--radius); background: var(--background); box-shadow: 0 22px 60px rgb(0 0 0 / 42%); }

@@ -4,6 +4,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from ...dependencies import AppDependencies
+from ...metadata.loader import WORK_SUITABILITY_TYPES
 from ...world.service import WorldDataError
 from ..schemas import CleanupConfirmationRequest, WorldReparseResponse
 from ..security import error_response, peer_ip, require_authenticated_request, require_write
@@ -86,6 +87,15 @@ def router(deps: AppDependencies) -> APIRouter:
         marker: str = "all",
         sort: str = "balanced",
         care: str = "all",
+        minLevel: int | None = None,
+        minRank: int | None = None,
+        minRarity: int | None = None,
+        minHpIv: float | None = None,
+        minAttackIv: float | None = None,
+        minDefenseIv: float | None = None,
+        minAverageIv: float | None = None,
+        workSuitability: str | None = None,
+        minWorkLevel: int = 1,
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
@@ -97,10 +107,29 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_WORLD_SEARCH", "搜索文字不能超过 100 个字符。")
         if marker not in {"all", "lucky", "boss"}:
             return error_response(422, "INVALID_PAL_ROSTER_MARKER", "帕鲁快捷筛选条件不正确。")
-        if sort not in {"balanced", "name", "level"}:
+        if sort not in {"balanced", "name", "level", "rarity", "averageIv", "workSuitability"}:
             return error_response(422, "INVALID_PAL_ROSTER_SORT", "帕鲁排序方式不正确。")
         if care not in {"all", "attention"}:
             return error_response(422, "INVALID_PAL_ROSTER_CARE", "帕鲁照护筛选条件不正确。")
+        minimums = (minLevel, minRank, minRarity, minHpIv, minAttackIv, minDefenseIv, minAverageIv)
+        if any(value is not None and value < 0 for value in minimums):
+            return error_response(422, "INVALID_PAL_APTITUDE_FILTER", "帕鲁资质最低值不能小于 0。")
+        if any(
+            value is not None and value > 100
+            for value in (minHpIv, minAttackIv, minDefenseIv, minAverageIv)
+        ):
+            return error_response(422, "INVALID_PAL_APTITUDE_FILTER", "个体值最低值不能大于 100。")
+        work_suitabilities = tuple(
+            name.strip() for name in (workSuitability or "").split(",") if name.strip()
+        )
+        if (
+            any(name not in WORK_SUITABILITY_TYPES for name in work_suitabilities)
+            or minWorkLevel < 1
+            or minWorkLevel > 10
+        ):
+            return error_response(
+                422, "INVALID_PAL_WORK_FILTER", "工作适应性或最低工作等级不正确。"
+            )
         try:
             return deps.world.list_pal_roster(
                 page=page,
@@ -109,6 +138,15 @@ def router(deps: AppDependencies) -> APIRouter:
                 marker=marker,
                 sort=sort,
                 care=care,
+                min_level=minLevel,
+                min_rank=minRank,
+                min_rarity=minRarity,
+                min_hp_iv=minHpIv,
+                min_attack_iv=minAttackIv,
+                min_defense_iv=minDefenseIv,
+                min_average_iv=minAverageIv,
+                work_suitabilities=work_suitabilities,
+                min_work_level=minWorkLevel,
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:

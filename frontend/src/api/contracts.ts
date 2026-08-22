@@ -137,7 +137,23 @@ export type WorldPalRosterItem = WorldPalListItem & {
   isBoss: boolean;
   isLucky: boolean;
   locationType: "player" | "party" | "storage" | "base" | "unassigned";
+  aptitude: WorldPalAptitude;
   care: WorldPalCare;
+};
+export type WorldPalAptitude = {
+  speciesRarity: number | null;
+  ivs: { hp: number | null; attack: number | null; defense: number | null; average: number | null };
+  workSuitabilities: { type: string; level: number }[];
+  metadataKnown: boolean;
+  metadataLabel: "资料未收录" | null;
+};
+export type WorldMetadataStatus = {
+  status: "ready" | "unavailable";
+  schema: string;
+  schemaVersion: number;
+  dataVersion: string | null;
+  sourceRevision: string | null;
+  errorCode: string | null;
 };
 export type WorldPalCare = {
   currentHp: number | null;
@@ -168,6 +184,7 @@ export type WorldPalRosterResponse = WorldSnapshotContext & {
   pageSize: number;
   total: number;
   careSummary: WorldPalCareSummary;
+  metadata: WorldMetadataStatus;
 };
 export type WorldGuildListItem = {
   id: string; name: string; memberCount: number; baseCount: number;
@@ -196,6 +213,8 @@ export type WorldPalDetail = WorldPalListItem & {
   base: WorldBaseListItem | null;
   container: WorldContainerReference | null;
   care: WorldPalCare;
+  aptitude: WorldPalAptitude;
+  metadata: WorldMetadataStatus;
 };
 export type WorldGuildDetail = WorldGuildListItem & {
   members: WorldPlayerListItem[];

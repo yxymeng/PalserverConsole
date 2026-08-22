@@ -96,7 +96,7 @@ applies to these adapted layout definitions.
 - Source: https://github.com/deafdudecomputers/PalworldSaveTools
 - Fixed revision: `18b9554168ecf684c5f1e1e4d8e583083b942eb9`.
 - Purpose: character catalog, selected local WebP portrait source, and the species
-  `max_full_stomach` values used to derive read-only Pal hunger percentages.
+  `max_full_stomach`, rarity, and work-suitability values used by read-only world views.
 - License reported by the source repository: MIT License.
 - Import behavior: `scripts/sync-pal-catalog.ps1` checks out the fixed revision,
   copies only the required WebP files, and retains the source license at
@@ -104,6 +104,17 @@ applies to these adapted layout definitions.
 - `backend/tools/generate_pal_care_species.py` verifies the pinned
   `characters.json` SHA-256 and generates only the offline Character ID to
   `max_full_stomach` mapping in `world/pal_care_species.py`.
+- `backend/tools/generate_world_metadata.py` verifies the same pinned
+  `characters.json` SHA-256
+  (`83373a0e6dab7f3feac88a08928356b955e07804e0da94b2d452e641ab2609f2`)
+  and generates data version `2026.08.22.1` of the shared offline metadata
+  bundle. The bundle records schema version 1, source revision, generation
+  method, per-collection counts, and a SHA-256 integrity value. Its initial Pal
+  consumer imports only species rarity and positive work-suitability levels;
+  the shared `skills` and `items` collections remain empty until a separately
+  licensed source is approved.
+- Application runtime loads only this bundled local metadata. It does not fetch
+  metadata from the network or send save contents to this or any other source.
 
 We thank the PalworldSaveTools maintainers for making this catalog available.
 
