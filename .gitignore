@@ -21,7 +21,7 @@ build/
 
 # Local runtime state and secrets
 runtime/
-data/
+/data/
 tmp-m8-prod-data/
 tmp-*/
 .env

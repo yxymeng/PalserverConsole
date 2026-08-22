@@ -1,0 +1,5604 @@
+{
+  "schema": "palserver-console-world-metadata",
+  "schemaVersion": 1,
+  "dataVersion": "2026.08.22.1",
+  "source": {
+    "repository": "https://github.com/deafdudecomputers/PalworldSaveTools",
+    "revision": "18b9554168ecf684c5f1e1e4d8e583083b942eb9",
+    "path": "resources/game_data/characters.json",
+    "sha256": "83373a0e6dab7f3feac88a08928356b955e07804e0da94b2d452e641ab2609f2",
+    "license": "MIT",
+    "licenseFile": "frontend/public/assets/pals/LICENSE-PalworldSaveTools.txt"
+  },
+  "generatedBy": "backend/tools/generate_world_metadata.py",
+  "collections": {
+    "pals": {
+      "Alpaca": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "MonsterFarm": 2
+        }
+      },
+      "AmaterasuWolf": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 3
+        }
+      },
+      "AmaterasuWolf_Dark": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 4
+        }
+      },
+      "AmaterasuWolf_Dark_Quest_Enemy": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 4
+        }
+      },
+      "AmaterasuWolf_Dark_Quest_Friend": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 4
+        }
+      },
+      "Anubis": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "Mining": 6,
+          "Transport": 4
+        }
+      },
+      "ArmorWoodlouse": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_Alpaca": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "MonsterFarm": 2
+        }
+      },
+      "BOSS_AmaterasuWolf": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 3
+        }
+      },
+      "BOSS_AmaterasuWolf_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 4
+        }
+      },
+      "BOSS_ArmorWoodlouse": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_BadCatgirl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 2,
+          "Handcraft": 4,
+          "Transport": 3
+        }
+      },
+      "BOSS_Baphomet": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_Baphomet_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 4,
+          "Transport": 3
+        }
+      },
+      "BOSS_Bastet": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_Bastet_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_BeardedDragon": {
+        "rarity": 7,
+        "workSuitabilities": {}
+      },
+      "BOSS_BerryGoat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "MonsterFarm": 1,
+          "Seeding": 2
+        }
+      },
+      "BOSS_BerryGoat_Dark": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "MonsterFarm": 1,
+          "Seeding": 2
+        }
+      },
+      "BOSS_BirdDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Transport": 3
+        }
+      },
+      "BOSS_BirdDragon_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 2,
+          "Transport": 3
+        }
+      },
+      "BOSS_BlackCentaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Mining": 6
+        }
+      },
+      "BOSS_BlackFurDragon": {
+        "rarity": 8,
+        "workSuitabilities": {}
+      },
+      "BOSS_BlackGriffon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_BlackGriffon_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_BlackMetalDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 7
+        }
+      },
+      "BOSS_BlackPuppy": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_BlackPuppy_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 2
+        }
+      },
+      "BOSS_BlueDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 4
+        }
+      },
+      "BOSS_BlueDragon_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4
+        }
+      },
+      "BOSS_BluePlatypus": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_BluePlatypus_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_BlueSkyDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Watering": 8
+        }
+      },
+      "BOSS_BlueSkyDragon_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Watering": 8
+        }
+      },
+      "BOSS_BlueThunderHorse": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 5
+        }
+      },
+      "BOSS_BlueWoolRabbit": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_BlueberryFairy": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 1,
+          "ProductMedicine": 3,
+          "Seeding": 3,
+          "Transport": 1
+        }
+      },
+      "BOSS_Boar": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 1
+        }
+      },
+      "BOSS_BrownRabbit": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 3,
+          "Mining": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_CactusDoll": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Seeding": 3,
+          "Transport": 1
+        }
+      },
+      "BOSS_CactusDoll_Dark": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Seeding": 3,
+          "Transport": 1
+        }
+      },
+      "BOSS_CandleGhost": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "Mining": 3,
+          "MonsterFarm": 2
+        }
+      },
+      "BOSS_CandleWitch": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 4,
+          "ProductMedicine": 3
+        }
+      },
+      "BOSS_CaptainPenguin": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 2,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 3,
+          "Watering": 2
+        }
+      },
+      "BOSS_CaptainPenguin_Black": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 3,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 3,
+          "Watering": 2
+        }
+      },
+      "BOSS_Carbunclo": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Seeding": 1
+        }
+      },
+      "BOSS_CatBat": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_CatMage": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_CatMage_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_CatVampire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "ProductMedicine": 3
+        }
+      },
+      "BOSS_ChickenPal": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_ClioneTwins": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_CloverFairy": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Seeding": 1
+        }
+      },
+      "BOSS_ClownRabbit": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 7,
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_ColorfulBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "BOSS_CowPal": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "MonsterFarm": 2
+        }
+      },
+      "BOSS_CubeTurtle": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "BOSS_CubeTurtle_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 6
+        }
+      },
+      "BOSS_CuteButterfly": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "ProductMedicine": 2,
+          "Seeding": 2
+        }
+      },
+      "BOSS_CuteFox": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_CuteMole": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_CuteOrca": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Watering": 1
+        }
+      },
+      "BOSS_DandelionGirl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Seeding": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_DarkAlien": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_DarkCrow": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_DarkFlameFox": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 5,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_DarkMechaDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_DarkMutant": {
+        "rarity": 8,
+        "workSuitabilities": {}
+      },
+      "BOSS_DarkScorpion": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Mining": 5
+        }
+      },
+      "BOSS_DarkScorpion_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Mining": 6
+        }
+      },
+      "BOSS_Deer": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 2
+        }
+      },
+      "BOSS_Deer_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 2
+        }
+      },
+      "BOSS_DomeArmorDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 8
+        }
+      },
+      "BOSS_DreamDemon": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_DrillGame": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "BOSS_Eagle": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_ElecCat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 1,
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_ElecLion": {
+        "rarity": 7,
+        "workSuitabilities": {}
+      },
+      "BOSS_ElecLizard": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 3
+        }
+      },
+      "BOSS_ElecPanda": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "GenerateElectricity": 5,
+          "Handcraft": 4,
+          "Transport": 5
+        }
+      },
+      "BOSS_ElecPanda_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "GenerateElectricity": 5,
+          "Handcraft": 4,
+          "Transport": 5
+        }
+      },
+      "BOSS_ElecPomeranian": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_ElecSnail": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "BOSS_ElecSnail_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 2
+        }
+      },
+      "BOSS_ElecSnail_Ground": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "BOSS_FairyDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3
+        }
+      },
+      "BOSS_FairyDragon_Water": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Watering": 4
+        }
+      },
+      "BOSS_FeatherOstrich": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_FengyunDeeper": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 3
+        }
+      },
+      "BOSS_FengyunDeeper_Electric": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 5
+        }
+      },
+      "BOSS_FireKirin": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "EmitFlame": 4
+        }
+      },
+      "BOSS_FireKirin_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 4
+        }
+      },
+      "BOSS_FlameBambi": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_FlameBuffalo": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "EmitFlame": 3
+        }
+      },
+      "BOSS_FlowerDinosaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Seeding": 3
+        }
+      },
+      "BOSS_FlowerDinosaur_Electric": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 3
+        }
+      },
+      "BOSS_FlowerDoll": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 4,
+          "Seeding": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_FlowerDoll_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "EmitFlame": 4,
+          "Handcraft": 3,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_FlowerPrince": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Handcraft": 6,
+          "ProductMedicine": 6,
+          "Seeding": 8,
+          "Transport": 3
+        }
+      },
+      "BOSS_FlowerRabbit": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "ProductMedicine": 1,
+          "Seeding": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_FluffyBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_FlyingManta": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_FlyingManta_Thunder": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 2,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_FoxExorcist": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 7,
+          "Handcraft": 6,
+          "Transport": 2
+        }
+      },
+      "BOSS_FoxMage": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_FoxMage_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_FrozenBear": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Cool": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "BOSS_Ganesha": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Watering": 1
+        }
+      },
+      "BOSS_Garm": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "BOSS_GhostAnglerfish": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Transport": 2,
+          "Watering": 5
+        }
+      },
+      "BOSS_GhostAnglerfish_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Transport": 2,
+          "Watering": 5
+        }
+      },
+      "BOSS_GhostBeast": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 4
+        }
+      },
+      "BOSS_GhostBlackCat": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "Handcraft": 2,
+          "ProductMedicine": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_GhostDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Transport": 6
+        }
+      },
+      "BOSS_GhostDragon_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Transport": 6
+        }
+      },
+      "BOSS_GhostRabbit": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_GhostRabbit_Grass": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 4,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_GoldenHorse": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "BOSS_Gorilla": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "BOSS_Gorilla_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 3
+        }
+      },
+      "BOSS_GrassDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "ProductMedicine": 1
+        }
+      },
+      "BOSS_GrassGolem": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 5,
+          "Mining": 6,
+          "Seeding": 3,
+          "Transport": 6
+        }
+      },
+      "BOSS_GrassGolem_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 5,
+          "Mining": 6,
+          "Seeding": 3,
+          "Transport": 6
+        }
+      },
+      "BOSS_GrassMammoth": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Mining": 4,
+          "Seeding": 4
+        }
+      },
+      "BOSS_GrassMammoth_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 5,
+          "Mining": 4
+        }
+      },
+      "BOSS_GrassMinotaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 3,
+          "Mining": 2,
+          "Seeding": 3,
+          "Transport": 3
+        }
+      },
+      "BOSS_GrassMinotaur_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 3,
+          "Mining": 3,
+          "Transport": 3
+        }
+      },
+      "BOSS_GrassPanda": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Handcraft": 2,
+          "Seeding": 3,
+          "Transport": 4
+        }
+      },
+      "BOSS_GrassPanda_Electric": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "BOSS_GrassRabbitMan": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Deforest": 3,
+          "Handcraft": 5,
+          "Seeding": 4,
+          "Transport": 3
+        }
+      },
+      "BOSS_GrimGirl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Handcraft": 6,
+          "ProductMedicine": 5,
+          "Transport": 2
+        }
+      },
+      "BOSS_GuardianDog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_HadesBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Transport": 4
+        }
+      },
+      "BOSS_HadesBird_Electric": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 4,
+          "Transport": 5
+        }
+      },
+      "BOSS_HawkBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_Hedgehog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 1
+        }
+      },
+      "BOSS_Hedgehog_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 1
+        }
+      },
+      "BOSS_HerculesBeetle": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 5
+        }
+      },
+      "BOSS_HerculesBeetle_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 5,
+          "Transport": 5
+        }
+      },
+      "BOSS_HoodGhost": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_Horus": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Transport": 3
+        }
+      },
+      "BOSS_Horus_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Transport": 3
+        }
+      },
+      "BOSS_Horus_Water": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Transport": 5,
+          "Watering": 6
+        }
+      },
+      "BOSS_IceCrocodile": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 3,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_IceDeer": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 3,
+          "Deforest": 3
+        }
+      },
+      "BOSS_IceFox": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4,
+          "MonsterFarm": 3
+        }
+      },
+      "BOSS_IceHorse": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 7
+        }
+      },
+      "BOSS_IceHorse_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 7
+        }
+      },
+      "BOSS_IceNarwhal": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 6,
+          "Watering": 5
+        }
+      },
+      "BOSS_IceNarwhal_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 6,
+          "EmitFlame": 5
+        }
+      },
+      "BOSS_IceSeal": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Watering": 3
+        }
+      },
+      "BOSS_IceSeal_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Mining": 4
+        }
+      },
+      "BOSS_IceVeilDragon": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 1,
+          "Mining": 1
+        }
+      },
+      "BOSS_IceWitch": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_JellyfishFairy": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_JellyfishGhost": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_JetDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 8
+        }
+      },
+      "BOSS_KabukiMan": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "EmitFlame": 8,
+          "Handcraft": 6,
+          "Transport": 5
+        }
+      },
+      "BOSS_Kelpie": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "MonsterFarm": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_Kelpie_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_KendoFrog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_KendoFrog_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 2,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_KingAlpaca": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_KingAlpaca_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 4
+        }
+      },
+      "BOSS_KingBahamut": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Mining": 7
+        }
+      },
+      "BOSS_KingBahamut_Dragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Mining": 7
+        }
+      },
+      "BOSS_KingCrab": {
+        "rarity": 5,
+        "workSuitabilities": {}
+      },
+      "BOSS_KingSunfish": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Watering": 4
+        }
+      },
+      "BOSS_KingSunfish_Thunder": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 6,
+          "Watering": 4
+        }
+      },
+      "BOSS_KingWhale": {
+        "rarity": 8,
+        "workSuitabilities": {}
+      },
+      "BOSS_KingWhale_otomo": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "BOSS_Kirin": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "GenerateElectricity": 3
+        }
+      },
+      "BOSS_Kirin_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 6,
+          "Deforest": 3
+        }
+      },
+      "BOSS_Kitsunebi": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 1
+        }
+      },
+      "BOSS_Kitsunebi_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 2
+        }
+      },
+      "BOSS_LanternButler": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 4,
+          "ProductMedicine": 4
+        }
+      },
+      "BOSS_LavaGirl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 1,
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_LazyCatfish": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Mining": 2,
+          "MonsterFarm": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_LazyCatfish_Gold": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 2,
+          "MonsterFarm": 4,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_LazyDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Transport": 3,
+          "Watering": 3
+        }
+      },
+      "BOSS_LazyDragon_Electric": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 4,
+          "Transport": 3
+        }
+      },
+      "BOSS_LeafBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Seeding": 1
+        }
+      },
+      "BOSS_LeafMomonga": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Seeding": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_LeafPrincess": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 3,
+          "ProductMedicine": 3,
+          "Seeding": 3
+        }
+      },
+      "BOSS_LegendDeer": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 7,
+          "Deforest": 7
+        }
+      },
+      "BOSS_LilyQueen": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 5,
+          "ProductMedicine": 5,
+          "Seeding": 7
+        }
+      },
+      "BOSS_LilyQueen_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 5,
+          "ProductMedicine": 5,
+          "Seeding": 7
+        }
+      },
+      "BOSS_LilyQueen_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 5,
+          "ProductMedicine": 7
+        }
+      },
+      "BOSS_LittleBriarRose": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "ProductMedicine": 2,
+          "Seeding": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_LizardMan": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_LizardMan_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_LongCat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BOSS_LotusDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Seeding": 7,
+          "Watering": 5
+        }
+      },
+      "BOSS_Manticore": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 5
+        }
+      },
+      "BOSS_Manticore_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 5
+        }
+      },
+      "BOSS_MedjedBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "ProductMedicine": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_MexicanSalamander": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Seeding": 1
+        }
+      },
+      "BOSS_MimicDog": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Transport": 2
+        }
+      },
+      "BOSS_Monkey": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 1,
+          "Handcraft": 1,
+          "Seeding": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_Monkey_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "EmitFlame": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_Monkey_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 1,
+          "Deforest": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_MonochromeMushroom": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 4,
+          "ProductMedicine": 6,
+          "Seeding": 4
+        }
+      },
+      "BOSS_MonochromeQueen": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 8,
+          "Transport": 2
+        }
+      },
+      "BOSS_MoonChild": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "ProductMedicine": 6,
+          "Transport": 1
+        }
+      },
+      "BOSS_MoonQueen": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 7,
+          "ProductMedicine": 6,
+          "Transport": 3
+        }
+      },
+      "BOSS_MoonQueen_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 7,
+          "ProductMedicine": 6,
+          "Transport": 3
+        }
+      },
+      "BOSS_MopBaby": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Cool": 1
+        }
+      },
+      "BOSS_MopKing": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 3
+        }
+      },
+      "BOSS_Mothman": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 6,
+          "ProductMedicine": 8,
+          "Seeding": 6,
+          "Transport": 2
+        }
+      },
+      "BOSS_MummyPal": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_MushroomDragon": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 2,
+          "MonsterFarm": 3,
+          "Seeding": 3
+        }
+      },
+      "BOSS_MushroomDragon_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 3,
+          "Seeding": 3
+        }
+      },
+      "BOSS_MushroomLady": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 4,
+          "ProductMedicine": 6,
+          "Seeding": 6
+        }
+      },
+      "BOSS_Mutant": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_MysteryMask": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "BOSS_NaughtyCat": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3
+        }
+      },
+      "BOSS_NegativeKoala": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Mining": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_NegativeOctopus": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Transport": 2,
+          "Watering": 1
+        }
+      },
+      "BOSS_NegativeOctopus_Neutral": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Transport": 2,
+          "Watering": 1
+        }
+      },
+      "BOSS_NightBlueHorse": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "BOSS_NightBlueHorse_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 7
+        }
+      },
+      "BOSS_NightFox": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "BOSS_NightLady": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 5,
+          "ProductMedicine": 5,
+          "Transport": 4
+        }
+      },
+      "BOSS_NightLady_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "ProductMedicine": 7,
+          "Transport": 4
+        }
+      },
+      "BOSS_OctopusGirl": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2,
+          "Watering": 2
+        }
+      },
+      "BOSS_OctopusGirl_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2,
+          "Watering": 2
+        }
+      },
+      "BOSS_OniGhostGirl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "BOSS_PandaGirl": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_Penguin": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 1,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_Penguin_Electric": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 2,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "BOSS_PinkCat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_PinkKangaroo": {
+        "rarity": 7,
+        "workSuitabilities": {}
+      },
+      "BOSS_PinkLizard": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 2,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_PinkRabbit": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_PinkRabbit_Grass": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "Seeding": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_PlantSlime": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Seeding": 1
+        }
+      },
+      "BOSS_PlantSlime_Flower": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Seeding": 1
+        }
+      },
+      "BOSS_Plesiosaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Mining": 3,
+          "Seeding": 5
+        }
+      },
+      "BOSS_PoseidonOrca": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 7
+        }
+      },
+      "BOSS_PurpleSpider": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_QueenBee": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 3,
+          "Handcraft": 4,
+          "ProductMedicine": 4,
+          "Seeding": 4
+        }
+      },
+      "BOSS_RaijinDaughter": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 3,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_RaijinDaughter_Water": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Transport": 2
+        }
+      },
+      "BOSS_RedArmorBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Transport": 5
+        }
+      },
+      "BOSS_RedFlowerBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Seeding": 5
+        }
+      },
+      "BOSS_RobinHood": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 3,
+          "ProductMedicine": 1,
+          "Seeding": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_RobinHood_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 3,
+          "ProductMedicine": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_RockBeast": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 5
+        }
+      },
+      "BOSS_RockBeast_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 6,
+          "Mining": 5
+        }
+      },
+      "BOSS_RockCheetah": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_Ronin": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 3,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_Ronin_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 5,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_SaintCentaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Mining": 6
+        }
+      },
+      "BOSS_SakuraSaurus": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Seeding": 5
+        }
+      },
+      "BOSS_SakuraSaurus_Water": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 5
+        }
+      },
+      "BOSS_SamuraiDog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_ScorpionMan": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 4,
+          "ProductMedicine": 2
+        }
+      },
+      "BOSS_ScorpionMan_Electric": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 4,
+          "GenerateElectricity": 3,
+          "ProductMedicine": 2
+        }
+      },
+      "BOSS_Sekhmet": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_Serpent": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "MonsterFarm": 2,
+          "Watering": 3
+        }
+      },
+      "BOSS_Serpent_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3
+        }
+      },
+      "BOSS_SharkKid": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_SharkKid_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "BOSS_SheepBall": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "BOSS_SifuDog": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 3,
+          "Handcraft": 4,
+          "ProductMedicine": 2,
+          "Transport": 3
+        }
+      },
+      "BOSS_SkyDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 2,
+          "Mining": 4,
+          "Transport": 5
+        }
+      },
+      "BOSS_SkyDragon_Grass": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Seeding": 5,
+          "Transport": 4
+        }
+      },
+      "BOSS_SleeveRabbit": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Handcraft": 6
+        }
+      },
+      "BOSS_SmallArmadillo": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 1
+        }
+      },
+      "BOSS_SmallYeti": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 3,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_SnakeGirl": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 6,
+          "ProductMedicine": 5,
+          "Transport": 2
+        }
+      },
+      "BOSS_SnakeQueen": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "ProductMedicine": 1
+        }
+      },
+      "BOSS_SnowPeafowl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 4
+        }
+      },
+      "BOSS_SnowTigerBeastman": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 8,
+          "Deforest": 6,
+          "Mining": 5
+        }
+      },
+      "BOSS_SnowTigerBeastman_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 8,
+          "Deforest": 6,
+          "Mining": 5
+        }
+      },
+      "BOSS_SoldierBee": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 2,
+          "MonsterFarm": 3,
+          "ProductMedicine": 2,
+          "Seeding": 2,
+          "Transport": 2
+        }
+      },
+      "BOSS_StrawHatCat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "MonsterFarm": 3
+        }
+      },
+      "BOSS_StuffedShark": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_StuffedShark_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_SumoDog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 4,
+          "Transport": 3
+        }
+      },
+      "BOSS_Suzaku": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5
+        }
+      },
+      "BOSS_Suzaku_Water": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 6
+        }
+      },
+      "BOSS_SweetsSheep": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_SweetsSheep_Ground": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "MonsterFarm": 1
+        }
+      },
+      "BOSS_SwordCutlassfish": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 4,
+          "Watering": 4
+        }
+      },
+      "BOSS_SwordCutlassfish_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 3,
+          "EmitFlame": 3,
+          "Watering": 2
+        }
+      },
+      "BOSS_TentacleTurtle": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_TentacleTurtle_Ground": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 3,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BOSS_ThiefBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Transport": 5
+        }
+      },
+      "BOSS_ThunderBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "GenerateElectricity": 4,
+          "Transport": 5
+        }
+      },
+      "BOSS_ThunderBird_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 5,
+          "Transport": 5
+        }
+      },
+      "BOSS_ThunderDog": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "BOSS_ThunderDog_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 3
+        }
+      },
+      "BOSS_ThunderDragonMan": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 8,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "BOSS_ThunderDragonMan_BossRush": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 8,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "BOSS_ThunderFluffyBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "GenerateElectricity": 6,
+          "Transport": 3
+        }
+      },
+      "BOSS_TropicalOstrich": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 5,
+          "Seeding": 4
+        }
+      },
+      "BOSS_Umihebi": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 7
+        }
+      },
+      "BOSS_Umihebi_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 7
+        }
+      },
+      "BOSS_VenusFlytrap": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 4,
+          "Seeding": 6,
+          "Transport": 2
+        }
+      },
+      "BOSS_VioletFairy": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "MonsterFarm": 2,
+          "ProductMedicine": 3,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "BOSS_VolcanicMonster": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 5
+        }
+      },
+      "BOSS_VolcanicMonster_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Mining": 5
+        }
+      },
+      "BOSS_VolcanicTurtle": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 4
+        }
+      },
+      "BOSS_VolcanoDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 5
+        }
+      },
+      "BOSS_VolcanoDragon_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Mining": 5
+        }
+      },
+      "BOSS_WaterLizard": {
+        "rarity": 7,
+        "workSuitabilities": {}
+      },
+      "BOSS_WeaselDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Cool": 2
+        }
+      },
+      "BOSS_WeaselDragon_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "EmitFlame": 4
+        }
+      },
+      "BOSS_Werewolf": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Handcraft": 2
+        }
+      },
+      "BOSS_Werewolf_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Handcraft": 4
+        }
+      },
+      "BOSS_WhiteAlienDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "BOSS_WhiteDeer": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 7
+        }
+      },
+      "BOSS_WhiteDeer_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 8
+        }
+      },
+      "BOSS_WhiteMoth": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 3,
+          "MonsterFarm": 3,
+          "ProductMedicine": 3
+        }
+      },
+      "BOSS_WhiteMoth_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "MonsterFarm": 4,
+          "ProductMedicine": 3
+        }
+      },
+      "BOSS_WhiteShieldDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 6
+        }
+      },
+      "BOSS_WhiteTiger": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Deforest": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "BOSS_WhiteTiger_Ground": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Handcraft": 2,
+          "Mining": 5,
+          "Transport": 4
+        }
+      },
+      "BOSS_WindChimes": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 2
+        }
+      },
+      "BOSS_WindChimes_Ice": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 2,
+          "Handcraft": 3,
+          "Transport": 3
+        }
+      },
+      "BOSS_WingGolem": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 7,
+          "Transport": 7
+        }
+      },
+      "BOSS_WingGolem_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 7,
+          "Transport": 7
+        }
+      },
+      "BOSS_WizardOwl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "BOSS_WoolFox": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 2
+        }
+      },
+      "BOSS_WorldTreeDragon": {
+        "rarity": 8,
+        "workSuitabilities": {}
+      },
+      "BOSS_YakushimaBoss001": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Transport": 4
+        }
+      },
+      "BOSS_Yeti": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 5,
+          "Handcraft": 3,
+          "Transport": 6
+        }
+      },
+      "BOSS_Yeti_Grass": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 5,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 6
+        }
+      },
+      "BadCatGirl": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 2,
+          "Handcraft": 4,
+          "Transport": 3
+        }
+      },
+      "Baphomet": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "Baphomet_Dark": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 4,
+          "Transport": 3
+        }
+      },
+      "Baphomet_Dark_Oilrig": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 1,
+          "Transport": 2
+        }
+      },
+      "Bastet": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "Bastet_Ice": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Cool": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "BeardedDragon": {
+        "rarity": 0,
+        "workSuitabilities": {}
+      },
+      "BerryGoat": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "MonsterFarm": 1,
+          "Seeding": 2
+        }
+      },
+      "BerryGoat_Dark": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "MonsterFarm": 1,
+          "Seeding": 2
+        }
+      },
+      "BirdDragon": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Transport": 3
+        }
+      },
+      "BirdDragon_Ice": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 2,
+          "Transport": 3
+        }
+      },
+      "BlackCentaur": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Mining": 6
+        }
+      },
+      "BlackFurDragon": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "BlackGriffon": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BlackMetalDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 7
+        }
+      },
+      "BlackPuppy": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "BlackPuppy_Ice": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 2
+        }
+      },
+      "BlueDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Watering": 4
+        }
+      },
+      "BlueDragon_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4
+        }
+      },
+      "BluePlatypus_Fire": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "BlueSkyDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Watering": 8
+        }
+      },
+      "BlueThunderHorse": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "GenerateElectricity": 5
+        }
+      },
+      "BlueWoolRabbit": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "BlueberryFairy": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 1,
+          "ProductMedicine": 3,
+          "Seeding": 3,
+          "Transport": 1
+        }
+      },
+      "Blueplatypus": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "Boar": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Mining": 1
+        }
+      },
+      "Boss_Anubis": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "Mining": 6,
+          "Transport": 4
+        }
+      },
+      "BrownRabbit": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 3,
+          "Mining": 2,
+          "Transport": 1
+        }
+      },
+      "CactusDoll": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Seeding": 3,
+          "Transport": 1
+        }
+      },
+      "CactusDoll_Dark": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Seeding": 3,
+          "Transport": 1
+        }
+      },
+      "CandleGhost": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 2,
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "Mining": 3,
+          "MonsterFarm": 2
+        }
+      },
+      "CandleWitch": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 4,
+          "ProductMedicine": 3
+        }
+      },
+      "CaptainPenguin": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Cool": 2,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 3,
+          "Watering": 2
+        }
+      },
+      "CaptainPenguin_Black": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "GenerateElectricity": 3,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 3,
+          "Watering": 2
+        }
+      },
+      "Carbunclo": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Seeding": 1
+        }
+      },
+      "CatBat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "CatMage": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "CatMage_Fire": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "CatVampire": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "ProductMedicine": 3
+        }
+      },
+      "ChickenPal": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "ClioneTwins": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "CloverFairy": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Seeding": 1
+        }
+      },
+      "ClownRabbit": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "EmitFlame": 7,
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "ColorfulBird": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "Cowpal": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "MonsterFarm": 2
+        }
+      },
+      "CubeTurtle": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "CubeTurtle_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 6
+        }
+      },
+      "CuteButterfly": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 2,
+          "ProductMedicine": 2,
+          "Seeding": 2
+        }
+      },
+      "CuteFox": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "CuteMole": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "CuteOrca": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Watering": 1
+        }
+      },
+      "DandelionGirl": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Seeding": 2,
+          "Transport": 2
+        }
+      },
+      "DarkAlien": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Transport": 2
+        }
+      },
+      "DarkAlien_Oilrig": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "Transport": 2
+        }
+      },
+      "DarkCrow": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "MonsterFarm": 1
+        }
+      },
+      "DarkFlameFox": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 5,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "DarkMechaDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "DarkMutant": {
+        "rarity": 5,
+        "workSuitabilities": {}
+      },
+      "DarkScorpion": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Mining": 5
+        }
+      },
+      "DarkScorpion_Ground": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Mining": 6
+        }
+      },
+      "Deer": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 2
+        }
+      },
+      "Deer_Ground": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Deforest": 2
+        }
+      },
+      "DomeArmorDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Mining": 8
+        }
+      },
+      "DreamDemon": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "DrillGame": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "Eagle": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "ElecCat": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "GenerateElectricity": 1,
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "ElecLion": {
+        "rarity": 0,
+        "workSuitabilities": {}
+      },
+      "ElecLizard": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "GenerateElectricity": 3
+        }
+      },
+      "ElecPanda": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "GenerateElectricity": 5,
+          "Handcraft": 4,
+          "Transport": 5
+        }
+      },
+      "ElecPomeranian": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "GenerateElectricity": 2,
+          "Transport": 1
+        }
+      },
+      "ElecSnail": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "ElecSnail_Fire": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "EmitFlame": 2
+        }
+      },
+      "ElecSnail_Ground": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "FairyDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 3
+        }
+      },
+      "FairyDragon_Water": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Watering": 4
+        }
+      },
+      "FeatherOstrich": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "FengyunDeeper": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 3
+        }
+      },
+      "FengyunDeeper_Electric": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 5
+        }
+      },
+      "FireKirin": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "EmitFlame": 4
+        }
+      },
+      "FireKirin_Dark": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 4
+        }
+      },
+      "FlameBambi": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "EmitFlame": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "FlameBuffalo": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "EmitFlame": 3
+        }
+      },
+      "FlowerDinosaur": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Seeding": 3
+        }
+      },
+      "FlowerDinosaur_Electric": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 3
+        }
+      },
+      "FlowerDoll": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 4,
+          "Seeding": 4,
+          "Transport": 2
+        }
+      },
+      "FlowerDoll_Fire": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 3,
+          "EmitFlame": 4,
+          "Handcraft": 3,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "FlowerPrince": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Handcraft": 6,
+          "ProductMedicine": 6,
+          "Seeding": 8,
+          "Transport": 3
+        }
+      },
+      "FlowerRabbit": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "ProductMedicine": 1,
+          "Seeding": 2,
+          "Transport": 1
+        }
+      },
+      "FluffyBird": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Cool": 2,
+          "Transport": 1
+        }
+      },
+      "FlyingManta": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "FlyingManta_Thunder": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "GenerateElectricity": 2,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "FoxExorcist": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "EmitFlame": 7,
+          "Handcraft": 6,
+          "Transport": 2
+        }
+      },
+      "FoxMage": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "Transport": 2
+        }
+      },
+      "FoxMage_Dark": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 4,
+          "Transport": 2
+        }
+      },
+      "FrozenBear": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Cool": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "GYM_BlackGriffon": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "GYM_BlackGriffon_2": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "GYM_BlackGriffon_2_Avatar": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "GYM_BlueSkyDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Watering": 8
+        }
+      },
+      "GYM_BlueSkyDragon_2": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Watering": 8
+        }
+      },
+      "GYM_ElecPanda": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "GenerateElectricity": 3,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "GYM_ElecPanda_2": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "GenerateElectricity": 3,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "GYM_ElecPanda_Otomo": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "GenerateElectricity": 5,
+          "Handcraft": 4,
+          "Transport": 5
+        }
+      },
+      "GYM_Horus": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Transport": 3
+        }
+      },
+      "GYM_Horus_2": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Transport": 3
+        }
+      },
+      "GYM_LilyQueen": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "ProductMedicine": 3,
+          "Seeding": 3
+        }
+      },
+      "GYM_LilyQueen_2": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "ProductMedicine": 3,
+          "Seeding": 3
+        }
+      },
+      "GYM_MoonQueen": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "GYM_MoonQueen_2": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "GYM_MoonQueen_2_Servant": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "GYM_SnowTigerBeastman": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Cool": 8,
+          "Deforest": 2,
+          "Mining": 2
+        }
+      },
+      "GYM_SnowTigerBeastman_2": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Cool": 8,
+          "Deforest": 2,
+          "Mining": 2
+        }
+      },
+      "GYM_ThunderDragonMan": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 8,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "GYM_ThunderDragonMan_2": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 8,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "GYM_WorldTreeDragon": {
+        "rarity": 8,
+        "workSuitabilities": {}
+      },
+      "GYM_WorldTreeDragon_2": {
+        "rarity": 8,
+        "workSuitabilities": {}
+      },
+      "Ganesha": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Watering": 1
+        }
+      },
+      "Garm": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "GhostAnglerfish": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Transport": 2,
+          "Watering": 5
+        }
+      },
+      "GhostAnglerfish_Fire": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Transport": 2,
+          "Watering": 5
+        }
+      },
+      "GhostBeast": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 4
+        }
+      },
+      "GhostBlackCat": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "Handcraft": 2,
+          "ProductMedicine": 1,
+          "Transport": 1
+        }
+      },
+      "GhostDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Transport": 6
+        }
+      },
+      "GhostDragon_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Transport": 6
+        }
+      },
+      "GhostRabbit": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Handcraft": 4,
+          "Transport": 2
+        }
+      },
+      "GhostRabbit_Grass": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Handcraft": 4,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "GoldenHorse": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "Gorilla": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "Gorilla_Ground": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 3
+        }
+      },
+      "GrassDragon": {
+        "rarity": 0,
+        "workSuitabilities": {
+          "ProductMedicine": 1
+        }
+      },
+      "GrassGolem": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 5,
+          "Mining": 6,
+          "Seeding": 3,
+          "Transport": 6
+        }
+      },
+      "GrassGolem_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 5,
+          "Mining": 6,
+          "Seeding": 3,
+          "Transport": 6
+        }
+      },
+      "GrassMammoth": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Mining": 4,
+          "Seeding": 4
+        }
+      },
+      "GrassMammoth_Ice": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 5,
+          "Mining": 4
+        }
+      },
+      "GrassMinotaur": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 3,
+          "Mining": 2,
+          "Seeding": 3,
+          "Transport": 3
+        }
+      },
+      "GrassMinotaur_Ice": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 3,
+          "Mining": 3,
+          "Transport": 3
+        }
+      },
+      "GrassPanda": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Handcraft": 2,
+          "Seeding": 3,
+          "Transport": 4
+        }
+      },
+      "GrassPanda_Electric": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "GrassPanda_Electric_Tower": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "GenerateElectricity": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "GrassRabbitMan": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Deforest": 3,
+          "Handcraft": 5,
+          "Seeding": 4,
+          "Transport": 3
+        }
+      },
+      "GrimGirl": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Handcraft": 6,
+          "ProductMedicine": 5,
+          "Transport": 2
+        }
+      },
+      "GuardianDog": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "HadesBird": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Transport": 4
+        }
+      },
+      "HadesBird_Electric": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "GenerateElectricity": 4,
+          "Transport": 5
+        }
+      },
+      "HadesBird_Oilrig": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Transport": 3
+        }
+      },
+      "HawkBird": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "Hedgehog": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "GenerateElectricity": 1
+        }
+      },
+      "Hedgehog_Ice": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Cool": 1
+        }
+      },
+      "HerculesBeetle": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 5
+        }
+      },
+      "HerculesBeetle_Ground": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 5,
+          "Transport": 5
+        }
+      },
+      "HoodGhost": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "Horus": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Transport": 3
+        }
+      },
+      "Horus_Oilrig": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 3,
+          "Transport": 3
+        }
+      },
+      "Horus_Water": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Transport": 5,
+          "Watering": 6
+        }
+      },
+      "IceCrocodile": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Cool": 3,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "IceDeer": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Cool": 3,
+          "Deforest": 3
+        }
+      },
+      "IceFox": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 4,
+          "MonsterFarm": 3
+        }
+      },
+      "IceHorse": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Cool": 7
+        }
+      },
+      "IceHorse_Dark": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Collection": 7
+        }
+      },
+      "IceNarwhal": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 6,
+          "Watering": 5
+        }
+      },
+      "IceNarwhal_Fire": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 6,
+          "EmitFlame": 5
+        }
+      },
+      "IceSeal": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Watering": 3
+        }
+      },
+      "IceSeal_Ground": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Mining": 4
+        }
+      },
+      "IceVeilDragon": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Cool": 1,
+          "Mining": 1
+        }
+      },
+      "IceWitch": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "JellyfishFairy": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "JellyfishGhost": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "JetDragon": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Collection": 8
+        }
+      },
+      "KabukiMan": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 5,
+          "EmitFlame": 8,
+          "Handcraft": 6,
+          "Transport": 5
+        }
+      },
+      "Kelpie": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "MonsterFarm": 1,
+          "Watering": 1
+        }
+      },
+      "Kelpie_Fire": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "EmitFlame": 1,
+          "MonsterFarm": 1
+        }
+      },
+      "KendoFrog": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "KendoFrog_Dark": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 2,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "KingAlpaca": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "KingAlpaca_ice": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 4
+        }
+      },
+      "KingBahamut": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Mining": 7
+        }
+      },
+      "KingBahamut_Dragon": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "EmitFlame": 6,
+          "Mining": 7
+        }
+      },
+      "KingCrab": {
+        "rarity": 3,
+        "workSuitabilities": {}
+      },
+      "KingSunfish": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Watering": 4
+        }
+      },
+      "KingSunfish_Thunder": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 6,
+          "Watering": 4
+        }
+      },
+      "KingWhale": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "Kirin": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "GenerateElectricity": 3
+        }
+      },
+      "Kirin_ice": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Cool": 6,
+          "Deforest": 3
+        }
+      },
+      "Kitsunebi": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "EmitFlame": 1
+        }
+      },
+      "Kitsunebi_Ice": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Cool": 2
+        }
+      },
+      "LanternButler": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Handcraft": 4,
+          "ProductMedicine": 4
+        }
+      },
+      "LavaGirl": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "EmitFlame": 1,
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "LazyCatfish": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Mining": 2,
+          "MonsterFarm": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "LazyCatfish_Gold": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Mining": 2,
+          "MonsterFarm": 4,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "LazyDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Transport": 3,
+          "Watering": 3
+        }
+      },
+      "LazyDragon_Electric": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 4,
+          "Transport": 3
+        }
+      },
+      "LazyDragon_Electric_Tower": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 6,
+          "Transport": 4
+        }
+      },
+      "LeafBird": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Seeding": 1
+        }
+      },
+      "LeafMomonga": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Seeding": 1,
+          "Transport": 1
+        }
+      },
+      "LeafPrincess": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 3,
+          "ProductMedicine": 3,
+          "Seeding": 3
+        }
+      },
+      "LegendDeer": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 7,
+          "Deforest": 7
+        }
+      },
+      "LilyQueen": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 5,
+          "ProductMedicine": 5,
+          "Seeding": 7
+        }
+      },
+      "LilyQueen_Dark": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 5,
+          "ProductMedicine": 7
+        }
+      },
+      "LittleBriarRose": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "ProductMedicine": 2,
+          "Seeding": 2,
+          "Transport": 1
+        }
+      },
+      "LizardMan": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "LizardMan_Fire": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 1,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "LizardMan_Oilrig": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "LongCat": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "LotusDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Seeding": 7,
+          "Watering": 5
+        }
+      },
+      "Manticore": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 5
+        }
+      },
+      "Manticore_Dark": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 5
+        }
+      },
+      "MedjedBird": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "ProductMedicine": 1,
+          "Transport": 1
+        }
+      },
+      "MexicanSalamander": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Seeding": 1
+        }
+      },
+      "MimicDog": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Transport": 2
+        }
+      },
+      "Monkey": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 1,
+          "Handcraft": 1,
+          "Seeding": 1,
+          "Transport": 1
+        }
+      },
+      "Monkey_Fire": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "EmitFlame": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "Monkey_Ice": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Cool": 1,
+          "Deforest": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "MonochromeMushroom": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 4,
+          "ProductMedicine": 6,
+          "Seeding": 4
+        }
+      },
+      "MonochromeQueen": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 8,
+          "Transport": 2
+        }
+      },
+      "MoonChild": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "ProductMedicine": 6,
+          "Transport": 1
+        }
+      },
+      "MoonQueen": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 7,
+          "ProductMedicine": 6,
+          "Transport": 3
+        }
+      },
+      "MopBaby": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Cool": 1
+        }
+      },
+      "MopKing": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 3
+        }
+      },
+      "Mothman": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 6,
+          "ProductMedicine": 8,
+          "Seeding": 6,
+          "Transport": 2
+        }
+      },
+      "MummyPal": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "MushroomDragon": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 2,
+          "MonsterFarm": 3,
+          "Seeding": 3
+        }
+      },
+      "MushroomDragon_Dark": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 3,
+          "Seeding": 3
+        }
+      },
+      "MushroomLady": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 4,
+          "ProductMedicine": 6,
+          "Seeding": 6
+        }
+      },
+      "Mutant": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 4,
+          "Transport": 2
+        }
+      },
+      "MysteryMask": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "NaughtyCat": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 3
+        }
+      },
+      "NegativeKoala": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "Mining": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "NegativeOctopus": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Transport": 2,
+          "Watering": 1
+        }
+      },
+      "NegativeOctopus_Neutral": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Transport": 2,
+          "Watering": 1
+        }
+      },
+      "NightBlueHorse": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "NightBlueHorse_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 7
+        }
+      },
+      "NightFox": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "NightLady": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Handcraft": 5,
+          "ProductMedicine": 5,
+          "Transport": 4
+        }
+      },
+      "NightLady_Dark": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "ProductMedicine": 7,
+          "Transport": 4
+        }
+      },
+      "OctopusGIrl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2,
+          "Watering": 2
+        }
+      },
+      "OctopusGirl_Neutral": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2,
+          "Watering": 2
+        }
+      },
+      "OniGhostGirl": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "POLICE_HawkBird": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "POLICE_ThunderDog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "PREDATOR_AmaterasuWolf": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 3
+        }
+      },
+      "PREDATOR_Baphomet_Dark": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 1,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_BirdDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Transport": 3
+        }
+      },
+      "PREDATOR_CandleGhost": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 2,
+          "EmitFlame": 3,
+          "Handcraft": 3,
+          "Mining": 3,
+          "MonsterFarm": 2
+        }
+      },
+      "PREDATOR_DarkScorpion": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Mining": 5
+        }
+      },
+      "PREDATOR_DrillGame": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "PREDATOR_FairyDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Deforest": 3
+        }
+      },
+      "PREDATOR_FeatherOstrich": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 2
+        }
+      },
+      "PREDATOR_FlowerDinosaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Seeding": 3
+        }
+      },
+      "PREDATOR_FlowerRabbit_Quest": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Seeding": 1,
+          "Transport": 1
+        }
+      },
+      "PREDATOR_Garm": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "PREDATOR_Garm_Quest": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "PREDATOR_GhostBeast": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 4
+        }
+      },
+      "PREDATOR_GoldenHorse": {
+        "rarity": 0,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "PREDATOR_Gorilla": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Handcraft": 2,
+          "Transport": 3
+        }
+      },
+      "PREDATOR_GrassMammoth_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 5,
+          "Mining": 4
+        }
+      },
+      "PREDATOR_GrassMinotaur_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 3,
+          "Mining": 3,
+          "Transport": 3
+        }
+      },
+      "PREDATOR_GrassPanda": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Deforest": 4,
+          "Handcraft": 2,
+          "Seeding": 3,
+          "Transport": 4
+        }
+      },
+      "PREDATOR_GrimGirl": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "Handcraft": 6,
+          "ProductMedicine": 5,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_HadesBird_Electric": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 3,
+          "Transport": 3
+        }
+      },
+      "PREDATOR_Horus_Water": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Transport": 5,
+          "Watering": 6
+        }
+      },
+      "PREDATOR_LazyDragon": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Transport": 3,
+          "Watering": 3
+        }
+      },
+      "PREDATOR_Manticore_Dark": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Deforest": 3,
+          "EmitFlame": 5
+        }
+      },
+      "PREDATOR_MonochromeQueen": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 8,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_MummyPal": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Handcraft": 5,
+          "ProductMedicine": 4,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_MushroomDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 2,
+          "MonsterFarm": 3,
+          "Seeding": 3
+        }
+      },
+      "PREDATOR_MysteryMask": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "PREDATOR_NightBlueHorse": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 5
+        }
+      },
+      "PREDATOR_PandaGirl": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_PinkLizard": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 2,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_PinkLizard_Quest": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 2,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_PurpleSpider": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 2,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_RedArmorBird": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Transport": 5
+        }
+      },
+      "PREDATOR_RedFlowerBird": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Seeding": 5
+        }
+      },
+      "PREDATOR_Ronin_Dark": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 5,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_ScorpionMan": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 4,
+          "ProductMedicine": 2
+        }
+      },
+      "PREDATOR_SifuDog": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 3,
+          "Handcraft": 4,
+          "ProductMedicine": 2,
+          "Transport": 3
+        }
+      },
+      "PREDATOR_SnakeGirl": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 6,
+          "ProductMedicine": 5,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_Suzaku": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5
+        }
+      },
+      "PREDATOR_ThunderDog": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "PREDATOR_Umihebi_Fire": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "EmitFlame": 7
+        }
+      },
+      "PREDATOR_Umihebi_Fire_Quest": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "EmitFlame": 7
+        }
+      },
+      "PREDATOR_VolcanicMonster_Ice": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Mining": 5
+        }
+      },
+      "PREDATOR_VolcanoDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 5
+        }
+      },
+      "PREDATOR_Werewolf_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Handcraft": 4
+        }
+      },
+      "PREDATOR_WhiteShieldDragon_Quest": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Mining": 1,
+          "Transport": 2
+        }
+      },
+      "PREDATOR_WhiteTiger_Ground": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Handcraft": 2,
+          "Mining": 5,
+          "Transport": 4
+        }
+      },
+      "PREDATOR_Yeti": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 5,
+          "Handcraft": 3,
+          "Transport": 6
+        }
+      },
+      "PandaGirl": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "Penguin": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Cool": 1,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "Penguin_Electric": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "GenerateElectricity": 2,
+          "Handcraft": 1,
+          "Transport": 1,
+          "Watering": 1
+        }
+      },
+      "PinkCat": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "PinkKangaroo": {
+        "rarity": 0,
+        "workSuitabilities": {}
+      },
+      "PinkLizard": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 3,
+          "Mining": 2,
+          "ProductMedicine": 3,
+          "Transport": 2
+        }
+      },
+      "PinkRabbit": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 1
+        }
+      },
+      "PinkRabbit_Grass": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Handcraft": 2,
+          "Seeding": 2,
+          "Transport": 1
+        }
+      },
+      "PlantSlime": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Seeding": 1
+        }
+      },
+      "PlantSlime_Flower": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Seeding": 1
+        }
+      },
+      "Plesiosaur": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Mining": 3,
+          "Seeding": 5
+        }
+      },
+      "PoseidonOrca": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Watering": 7
+        }
+      },
+      "PurpleSpider": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "ProductMedicine": 2,
+          "Transport": 2
+        }
+      },
+      "QueenBee": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 3,
+          "Handcraft": 4,
+          "ProductMedicine": 4,
+          "Seeding": 4
+        }
+      },
+      "Quest_Farmer03_PinkCat": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "Quest_Farmer03_SheepBall": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "RAID_DarkMechaDragon": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "RAID_DarkMechaDragon_2": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "RAID_KingBahamut_Dragon": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "RAID_KingBahamut_Dragon_2": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "RAID_LegendDeer": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "RAID_LegendDeer_2": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "RAID_NightLady": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "RAID_NightLady_Dark": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "RAID_NightLady_Dark_2": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "RAID_YakushimaBoss001_Green": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss001_Green_2": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_2": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_Hand_Left": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_Hand_Left_2": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_Hand_Right": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_Hand_Right_2": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_Head": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RAID_YakushimaBoss002_Head_2": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "RaijinDaughter": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "GenerateElectricity": 3,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "RaijinDaughter_Water": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "GenerateElectricity": 1,
+          "Handcraft": 1,
+          "ProductMedicine": 1,
+          "Transport": 2
+        }
+      },
+      "RedArmorBird": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "EmitFlame": 4,
+          "Transport": 5
+        }
+      },
+      "RedFlowerBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Seeding": 5
+        }
+      },
+      "RobinHood": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 3,
+          "ProductMedicine": 1,
+          "Seeding": 2,
+          "Transport": 2
+        }
+      },
+      "RobinHood_Ground": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 3,
+          "ProductMedicine": 2,
+          "Transport": 2
+        }
+      },
+      "RockBeast": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Mining": 5
+        }
+      },
+      "RockBeast_Ice": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 6,
+          "Mining": 5
+        }
+      },
+      "RockCheetah": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "Handcraft": 1,
+          "Mining": 1,
+          "Transport": 1
+        }
+      },
+      "Ronin": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 3,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "Ronin_Dark": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 5,
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 2
+        }
+      },
+      "SUMMON_DarkAlien": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "Transport": 2
+        }
+      },
+      "SUMMON_DarkAlien_MAX": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 2,
+          "Transport": 2
+        }
+      },
+      "SUMMON_WhiteAlienDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Mining": 3
+        }
+      },
+      "SUMMON_WhiteAlienDragon_MAX": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Mining": 3
+        }
+      },
+      "SaintCentaur": {
+        "rarity": 20,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Mining": 6
+        }
+      },
+      "SakuraSaurus": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Seeding": 5
+        }
+      },
+      "SakuraSaurus_Water": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 5
+        }
+      },
+      "SamuraiDog": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 1,
+          "Transport": 1
+        }
+      },
+      "ScorpionMan": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 4,
+          "ProductMedicine": 2
+        }
+      },
+      "ScorpionMan_Electric": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 4,
+          "GenerateElectricity": 3,
+          "ProductMedicine": 2
+        }
+      },
+      "Sekhmet": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Handcraft": 6,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "Serpent": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "MonsterFarm": 2,
+          "Watering": 3
+        }
+      },
+      "Serpent_Ground": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3
+        }
+      },
+      "SharkKid": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Handcraft": 2,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "SharkKid_Fire": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Handcraft": 2,
+          "Transport": 1
+        }
+      },
+      "SheepBall": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Handcraft": 1,
+          "MonsterFarm": 1,
+          "Transport": 1
+        }
+      },
+      "SifuDog": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 3,
+          "Handcraft": 4,
+          "ProductMedicine": 2,
+          "Transport": 3
+        }
+      },
+      "SkyDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 2,
+          "Mining": 4,
+          "Transport": 5
+        }
+      },
+      "SkyDragon_Grass": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Seeding": 5,
+          "Transport": 4
+        }
+      },
+      "SleeveRabbit": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Handcraft": 6
+        }
+      },
+      "SmallArmadillo": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Mining": 1
+        }
+      },
+      "SmallYeti": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Cool": 3,
+          "Handcraft": 2,
+          "Mining": 3,
+          "Transport": 2
+        }
+      },
+      "SnakeGirl": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 6,
+          "Handcraft": 6,
+          "ProductMedicine": 5,
+          "Transport": 2
+        }
+      },
+      "SnakeQueen": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 1,
+          "ProductMedicine": 1
+        }
+      },
+      "SnowPeafowl": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 4
+        }
+      },
+      "SnowTigerBeastMan": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 8,
+          "Deforest": 6,
+          "Mining": 5
+        }
+      },
+      "SoldierBee": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Deforest": 2,
+          "Handcraft": 2,
+          "MonsterFarm": 3,
+          "ProductMedicine": 2,
+          "Seeding": 2,
+          "Transport": 2
+        }
+      },
+      "StrawHatCat": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 2,
+          "MonsterFarm": 3
+        }
+      },
+      "StuffedShark": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "StuffedShark_Fire": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "EmitFlame": 2,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "SumoDog": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Mining": 4,
+          "Transport": 3
+        }
+      },
+      "Suzaku": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "EmitFlame": 5
+        }
+      },
+      "Suzaku_Water": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Watering": 6
+        }
+      },
+      "SweetsSheep": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "MonsterFarm": 1
+        }
+      },
+      "SweetsSheep_Ground": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "MonsterFarm": 1
+        }
+      },
+      "SwordCutlassFish": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Deforest": 4,
+          "Watering": 4
+        }
+      },
+      "SwordCutlassFish_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Deforest": 3,
+          "EmitFlame": 3,
+          "Watering": 2
+        }
+      },
+      "TentacleTurtle": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Mining": 1,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "TentacleTurtle_Ground": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Mining": 3,
+          "Transport": 1,
+          "Watering": 2
+        }
+      },
+      "ThiefBird": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 5,
+          "Transport": 5
+        }
+      },
+      "ThunderBird": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 2,
+          "GenerateElectricity": 4,
+          "Transport": 5
+        }
+      },
+      "ThunderBird_Ice": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 5,
+          "Transport": 5
+        }
+      },
+      "ThunderDog": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "GenerateElectricity": 4
+        }
+      },
+      "ThunderDog_Ice": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Cool": 3
+        }
+      },
+      "ThunderDragonMan": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "GenerateElectricity": 8,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "ThunderFluffyBird": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 3,
+          "GenerateElectricity": 6,
+          "Transport": 3
+        }
+      },
+      "TropicalOstrich": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 5,
+          "Seeding": 4
+        }
+      },
+      "Umihebi": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Watering": 7
+        }
+      },
+      "Umihebi_Fire": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "EmitFlame": 7
+        }
+      },
+      "VenusFlytrap": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Handcraft": 4,
+          "Seeding": 6,
+          "Transport": 2
+        }
+      },
+      "VioletFairy": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Handcraft": 3,
+          "MonsterFarm": 2,
+          "ProductMedicine": 3,
+          "Seeding": 3,
+          "Transport": 2
+        }
+      },
+      "VolcanicMonster_Ice": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Mining": 5
+        }
+      },
+      "VolcanicTurtle": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 4
+        }
+      },
+      "Volcanicmonster": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 5
+        }
+      },
+      "VolcanoDragon": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 5
+        }
+      },
+      "VolcanoDragon_Ice": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Mining": 5
+        }
+      },
+      "WaterLizard": {
+        "rarity": 0,
+        "workSuitabilities": {}
+      },
+      "WeaselDragon": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Cool": 2
+        }
+      },
+      "WeaselDragon_Fire": {
+        "rarity": 5,
+        "workSuitabilities": {
+          "Collection": 3,
+          "EmitFlame": 4
+        }
+      },
+      "Werewolf": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Handcraft": 2
+        }
+      },
+      "Werewolf_Ice": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Handcraft": 4
+        }
+      },
+      "WhiteAlienDragon": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Mining": 4
+        }
+      },
+      "WhiteDeer": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 7
+        }
+      },
+      "WhiteDeer_Dark": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Deforest": 8
+        }
+      },
+      "WhiteMoth": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 3,
+          "MonsterFarm": 3,
+          "ProductMedicine": 3
+        }
+      },
+      "WhiteMoth_Neutral": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "MonsterFarm": 4,
+          "ProductMedicine": 3
+        }
+      },
+      "WhiteShieldDragon": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 6
+        }
+      },
+      "WhiteTiger": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 4,
+          "Deforest": 4,
+          "Handcraft": 3,
+          "Transport": 4
+        }
+      },
+      "WhiteTiger_Ground": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Deforest": 6,
+          "Handcraft": 2,
+          "Mining": 5,
+          "Transport": 4
+        }
+      },
+      "WindChimes": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "Handcraft": 1,
+          "Transport": 2
+        }
+      },
+      "WindChimes_Ice": {
+        "rarity": 2,
+        "workSuitabilities": {
+          "Collection": 2,
+          "Cool": 2,
+          "Handcraft": 3,
+          "Transport": 3
+        }
+      },
+      "WingGolem": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 4,
+          "Mining": 7,
+          "Transport": 7
+        }
+      },
+      "WingGolem_Fire": {
+        "rarity": 10,
+        "workSuitabilities": {
+          "EmitFlame": 5,
+          "Mining": 7,
+          "Transport": 7
+        }
+      },
+      "WingGolem_Oilrig": {
+        "rarity": 9,
+        "workSuitabilities": {
+          "Collection": 3,
+          "Mining": 4,
+          "Transport": 4
+        }
+      },
+      "WizardOwl": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "WoolFox": {
+        "rarity": 1,
+        "workSuitabilities": {
+          "Collection": 1,
+          "MonsterFarm": 2
+        }
+      },
+      "WorldTreeDragon": {
+        "rarity": 10,
+        "workSuitabilities": {}
+      },
+      "YakushimaBoss001": {
+        "rarity": 6,
+        "workSuitabilities": {
+          "Transport": 4
+        }
+      },
+      "YakushimaBoss001_Small": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster001": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster001_Blue": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster001_Pink": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster001_Purple": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster001_Rainbow": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster001_Red": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Transport": 1
+        }
+      },
+      "YakushimaMonster002": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Deforest": 1
+        }
+      },
+      "YakushimaMonster003": {
+        "rarity": 3,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "YakushimaMonster003_Purple": {
+        "rarity": 4,
+        "workSuitabilities": {
+          "Collection": 1
+        }
+      },
+      "Yeti": {
+        "rarity": 7,
+        "workSuitabilities": {
+          "Cool": 5,
+          "Deforest": 5,
+          "Handcraft": 3,
+          "Transport": 6
+        }
+      },
+      "Yeti_Grass": {
+        "rarity": 8,
+        "workSuitabilities": {
+          "Deforest": 5,
+          "Handcraft": 3,
+          "Seeding": 3,
+          "Transport": 6
+        }
+      }
+    },
+    "skills": {},
+    "items": {}
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "collectionsSha256": "96c8b23b1bd84f40bed0a00436aeab9dec1ff9e8ec7ee00a749d443c9836f0c3",
+    "counts": {
+      "pals": 753,
+      "skills": 0,
+      "items": 0
+    }
+  }
+}
