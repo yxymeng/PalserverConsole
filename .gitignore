@@ -21,7 +21,9 @@ build/
 
 # Local runtime state and secrets
 runtime/
-/data/
+data/
+!backend/palserver_console/metadata/data/
+!backend/palserver_console/metadata/data/world-metadata-v1.json
 tmp-m8-prod-data/
 tmp-*/
 .env
