@@ -25,6 +25,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   reparseRequests = 0;
   const worldListUrls: URL[] = [];
   const rosterUrls: URL[] = [];
+  const inventoryUrls: URL[] = [];
   let reparseStatusReads = 0;
   let activeSnapshotId = "world";
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
@@ -82,6 +83,18 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : sorted;
       return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, passiveSkills: palSkills.passive, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
+    if (path === "/api/world/inventories") {
+      const requestUrl = new URL(route.request().url());
+      inventoryUrls.push(requestUrl);
+      const scope = requestUrl.searchParams.get("scope") || "all";
+      const items = scope === "player" ? [{ itemId: "Wood", name: "木材", category: "材料", rarity: "普通", metadataKnown: true, metadataLabel: null, totalQuantity: 3, locationCount: 1 }] : scope === "base" ? [{ itemId: "Wood", name: "木材", category: "材料", rarity: "普通", metadataKnown: true, metadataLabel: null, totalQuantity: 9, locationCount: 2 }, { itemId: "FutureOre", name: null, category: null, rarity: null, metadataKnown: false, metadataLabel: "资料未收录", totalQuantity: 4, locationCount: 1 }] : [{ itemId: "Wood", name: "木材", category: "材料", rarity: "普通", metadataKnown: true, metadataLabel: null, totalQuantity: 12, locationCount: 3 }, { itemId: "FutureOre", name: null, category: null, rarity: null, metadataKnown: false, metadataLabel: "资料未收录", totalQuantity: 4, locationCount: 1 }];
+      return route.fulfill({ json: { items, categories: ["材料"], page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
+    }
+    if (path === "/api/world/inventories/Wood") {
+      const scope = new URL(route.request().url()).searchParams.get("scope") || "all";
+      const locations = scope === "player" ? [{ id: 1, locationType: "player", locationLabel: "玩家：Alice", ownerId: "player-1", ownerName: "Alice", baseId: null, baseName: null, slotIndex: 0, quantity: 3, containerId: "bag-1" }] : [{ id: 1, locationType: "player", locationLabel: "玩家：Alice", ownerId: "player-1", ownerName: "Alice", baseId: null, baseName: null, slotIndex: 0, quantity: 3, containerId: "bag-1" }, { id: 2, locationType: "base", locationLabel: "据点：据点一号", ownerId: null, ownerName: null, baseId: "base-1", baseName: "据点一号", slotIndex: 1, quantity: 7, containerId: "base-bag" }, { id: 3, locationType: "base", locationLabel: "据点：据点一号", ownerId: null, ownerName: null, baseId: "base-1", baseName: "据点一号", slotIndex: 2, quantity: 2, containerId: "base-bag" }];
+      return route.fulfill({ json: { itemId: "Wood", locations, page: 1, pageSize: 100, total: locations.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } } } });
+    }
     const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
     if (path in lists) {
       worldListUrls.push(new URL(route.request().url()));
@@ -113,6 +126,21 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(page.locator(".world-snapshot-bar")).toContainText("存档记录");
   await expect(page.locator(".world-snapshot-bar")).toContainText("解析完成");
   await expect(page.locator(".world-snapshot-bar")).toContainText("不会修改真实 .sav");
+  await tabs.getByRole("tab", { name: "仓库" }).click();
+  await expect(page.locator(".inventory-workspace")).toContainText("按物品汇总");
+  await expect(page.locator(".inventory-workspace")).toContainText("木材");
+  await page.locator(".inventory-item-summary").filter({ hasText: "木材" }).click();
+  await expect(page.locator(".inventory-locations")).toContainText("玩家：Alice");
+  await expect(page.locator(".inventory-locations")).toContainText("据点：据点一号");
+  await expect(page.locator(".inventory-locations")).toContainText("槽位 1");
+  await expect(page.locator(".inventory-locations details").nth(1)).not.toHaveAttribute("open", "");
+  await expect(page.locator(".inventory-locations details code").nth(1)).not.toBeVisible();
+  await page.locator(".inventory-locations").getByText("技术信息").first().click();
+  await expect(page.locator(".inventory-locations")).toContainText("containerId: bag-1");
+  await page.getByLabel("库存范围").getByRole("button", { name: "玩家" }).click();
+  await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("scope") === "player")).toBeTruthy();
+  await expect(page.locator(".inventory-item-summary")).toHaveCount(1);
+  await expect(page.locator(".inventory-item-summary")).toContainText("3");
   await tabs.getByRole("tab", { name: "玩家" }).click();
   await expect(page.locator(".world-player-avatar")).toHaveText("A");
   await expect(page.locator(".world-list-panel")).toContainText("测试工会");
@@ -128,9 +156,11 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer).toContainText("主人");
   await drawer.getByRole("button", { name: /Alice/ }).click();
   await expect(drawer).toContainText("队伍帕鲁");
-  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
+  await drawer.getByRole("button", { name: "在仓库中查看" }).click();
+  await expect(page.locator(".inventory-context")).toContainText("玩家库存：Alice");
+  await expect(page.locator(".inventory-workspace")).toContainText("3");
+  await tabs.getByRole("tab", { name: "帕鲁" }).click();
 
-  await page.getByRole("tab", { name: "帕鲁" }).click();
   await expect(page.locator(".pal-roster")).toContainText("FuturePal");
   await expect(page.locator(".pal-roster")).toContainText("据点工作");
   const palRow = page.locator(".pal-roster-row").filter({ hasText: "小羊" });
@@ -201,7 +231,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.getByRole("tab", { name: "据点" }).click();
   await page.getByRole("button", { name: "据点一号" }).click();
   await expect(drawer).toContainText("工作帕鲁");
-  await expect(drawer).toContainText("可明确关联的库存");
+  await expect(drawer).toContainText("据点库存");
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
   await page.getByLabel("状态筛选").selectOption("guilded");
   await page.getByLabel("排序方式").selectOption("id");

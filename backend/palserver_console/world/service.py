@@ -24,6 +24,8 @@ from .cache import (
     entity_detail,
     inspect_storage,
     query_cache,
+    query_inventory,
+    query_inventory_locations,
     query_pal_care_summary,
     query_pal_passive_skill_options,
     query_pal_roster,
@@ -504,6 +506,93 @@ class WorldSnapshotService:
             "careSummary": query_pal_care_summary(cache),
             "passiveSkills": query_pal_passive_skill_options(cache),
             "metadata": query_world_metadata_status(cache),
+            "source": state["source"],
+            "observedAt": state["observedAt"],
+            "sourceObservedAt": state["sourceObservedAt"],
+            "collectedAt": state["collectedAt"],
+            "parsedAt": state["parsedAt"],
+            "snapshotId": state["snapshotId"],
+            "stale": state["stale"],
+            "parseStatus": state["parseStatus"],
+            "errorCode": state["errorCode"],
+            "dataCoverage": state["dataCoverage"],
+        }
+
+    def list_inventory(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        search: str | None,
+        category: str | None,
+        scope: str,
+        owner_id: str | None,
+        base_id: str | None,
+        sort: str,
+        snapshot_id: str | None = None,
+    ) -> dict[str, object]:
+        current, cache = self._current_snapshot_cache(snapshot_id)
+        items, total, categories = query_inventory(
+            cache,
+            page=page,
+            page_size=page_size,
+            search=search,
+            category=category,
+            scope=scope,
+            owner_id=owner_id,
+            base_id=base_id,
+            sort=sort,
+        )
+        state = self._status_for_snapshot(current)
+        return {
+            "items": items,
+            "categories": categories,
+            "page": page,
+            "pageSize": page_size,
+            "total": total,
+            "metadata": query_world_metadata_status(cache),
+            "source": state["source"],
+            "observedAt": state["observedAt"],
+            "sourceObservedAt": state["sourceObservedAt"],
+            "collectedAt": state["collectedAt"],
+            "parsedAt": state["parsedAt"],
+            "snapshotId": state["snapshotId"],
+            "stale": state["stale"],
+            "parseStatus": state["parseStatus"],
+            "errorCode": state["errorCode"],
+            "dataCoverage": state["dataCoverage"],
+        }
+
+    def get_inventory(
+        self,
+        item_id: str,
+        *,
+        page: int,
+        page_size: int,
+        scope: str,
+        owner_id: str | None,
+        base_id: str | None,
+        snapshot_id: str | None = None,
+    ) -> dict[str, object]:
+        current, cache = self._current_snapshot_cache(snapshot_id)
+        locations, total = query_inventory_locations(
+            cache,
+            item_id,
+            page=page,
+            page_size=page_size,
+            scope=scope,
+            owner_id=owner_id,
+            base_id=base_id,
+        )
+        if total == 0:
+            raise WorldDataError("INVENTORY_ITEM_NOT_FOUND", "物品不存在于当前仓库筛选结果。")
+        state = self._status_for_snapshot(current)
+        return {
+            "itemId": item_id,
+            "locations": locations,
+            "page": page,
+            "pageSize": page_size,
+            "total": total,
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],

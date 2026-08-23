@@ -48,14 +48,22 @@ class PalSpeciesMetadata:
 
 
 @dataclass(frozen=True)
+class ItemMetadata:
+    name: str
+    category: str
+    rarity: str
+
+
+@dataclass(frozen=True)
 class WorldMetadataBundle:
     data_version: str
     source_revision: str
     pals: dict[str, PalSpeciesMetadata]
     skills: dict[str, dict[str, object]]
-    items: dict[str, dict[str, object]]
+    items: dict[str, ItemMetadata]
     _pals_casefold: dict[str, PalSpeciesMetadata] = field(repr=False)
     _skills_casefold: dict[str, dict[str, object]] = field(repr=False)
+    _items_casefold: dict[str, ItemMetadata] = field(repr=False)
 
     @property
     def status(self) -> MetadataStatus:
@@ -76,6 +84,9 @@ class WorldMetadataBundle:
 
     def skill(self, skill_id: str) -> dict[str, object] | None:
         return self.skills.get(skill_id) or self._skills_casefold.get(skill_id.casefold())
+
+    def item(self, item_id: str) -> ItemMetadata | None:
+        return self.items.get(item_id) or self._items_casefold.get(item_id.casefold())
 
 class WorldMetadataError(ValueError):
     def __init__(self, code: str, message: str) -> None:
@@ -225,14 +236,25 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
             )
         pals[character_id] = PalSpeciesMetadata(rarity, suitabilities, partner_skill)
     skills = _object_collection(skills_raw, "skills")
+    items: dict[str, ItemMetadata] = {}
+    for item_id, raw in items_raw.items():
+        if not isinstance(item_id, str) or not item_id or not isinstance(raw, Mapping):
+            raise WorldMetadataError("WORLD_METADATA_INVALID", "Item metadata entry is invalid.")
+        _require_keys(raw, {"name", "category", "rarity"}, f"item/{item_id}")
+        items[item_id] = ItemMetadata(
+            name=_required_text(raw, "name"),
+            category=_required_text(raw, "category"),
+            rarity=_required_text(raw, "rarity"),
+        )
     return WorldMetadataBundle(
         data_version=data_version,
         source_revision=source_revision,
         pals=pals,
         skills=skills,
-        items=_object_collection(items_raw, "items"),
+        items=items,
         _pals_casefold={name.casefold(): value for name, value in pals.items()},
         _skills_casefold={name.casefold(): value for name, value in skills.items()},
+        _items_casefold={name.casefold(): value for name, value in items.items()},
     )
 
 

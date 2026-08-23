@@ -160,6 +160,86 @@ def router(deps: AppDependencies) -> APIRouter:
             response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
             return error_response(response_status, error.code, str(error))
 
+    @api.get("/api/world/inventories", tags=["world"], response_model=None)
+    def world_inventory(
+        request: Request,
+        page: int = 1,
+        pageSize: int = 60,
+        search: str | None = None,
+        category: str | None = None,
+        scope: str = "all",
+        ownerId: str | None = None,
+        baseId: str | None = None,
+        sort: str = "name",
+        snapshotId: str | None = None,
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        if page < 1 or pageSize < 1 or pageSize > 60:
+            return error_response(422, "INVALID_INVENTORY_PAGE", "仓库分页参数不正确。")
+        if search is not None and len(search) > 100:
+            return error_response(422, "INVALID_WORLD_SEARCH", "搜索文字不能超过 100 个字符。")
+        if category is not None and len(category) > 100:
+            return error_response(422, "INVALID_INVENTORY_CATEGORY", "物品分类筛选条件不正确。")
+        if scope not in {"all", "player", "base"}:
+            return error_response(422, "INVALID_INVENTORY_SCOPE", "仓库范围筛选条件不正确。")
+        if sort not in {"name", "quantity"}:
+            return error_response(422, "INVALID_INVENTORY_SORT", "仓库排序方式不正确。")
+        try:
+            return deps.world.list_inventory(
+                page=page,
+                page_size=pageSize,
+                search=search,
+                category=category,
+                scope=scope,
+                owner_id=ownerId,
+                base_id=baseId,
+                sort=sort,
+                snapshot_id=snapshotId,
+            )
+        except WorldDataError as error:
+            response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
+            return error_response(response_status, error.code, str(error))
+
+    @api.get("/api/world/inventories/{item_id}", tags=["world"], response_model=None)
+    def world_inventory_item(
+        item_id: str,
+        request: Request,
+        page: int = 1,
+        pageSize: int = 100,
+        scope: str = "all",
+        ownerId: str | None = None,
+        baseId: str | None = None,
+        snapshotId: str | None = None,
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        if page < 1 or pageSize < 1 or pageSize > 100:
+            return error_response(422, "INVALID_INVENTORY_PAGE", "仓库位置分页参数不正确。")
+        if scope not in {"all", "player", "base"}:
+            return error_response(422, "INVALID_INVENTORY_SCOPE", "仓库范围筛选条件不正确。")
+        try:
+            return deps.world.get_inventory(
+                item_id,
+                page=page,
+                page_size=pageSize,
+                scope=scope,
+                owner_id=ownerId,
+                base_id=baseId,
+                snapshot_id=snapshotId,
+            )
+        except WorldDataError as error:
+            response_status = (
+                404
+                if error.code == "INVENTORY_ITEM_NOT_FOUND"
+                else 409
+                if error.code == "SNAPSHOT_REPLACED"
+                else 503
+            )
+            return error_response(response_status, error.code, str(error))
+
     @api.get("/api/world/{resource}/{entity_id}", tags=["world"], response_model=None)
     def world_entity(
         resource: str, entity_id: str, request: Request, snapshotId: str | None = None

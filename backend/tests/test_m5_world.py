@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 import palserver_console.world.cache as world_cache
 from palserver_console.config import AppSettings, ProfileError, ServerProfileService
 from palserver_console.main import create_app
-from palserver_console.metadata import WorldMetadataError
+from palserver_console.metadata import ItemMetadata, WorldMetadataBundle, WorldMetadataError
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import read_save_properties, verify_stable_parse
 from palserver_console.world.cache import (
@@ -28,6 +28,8 @@ from palserver_console.world.cache import (
     build_world_cache,
     entity_detail,
     query_cache,
+    query_inventory,
+    query_inventory_locations,
     query_pal_care_summary,
     query_pal_passive_skill_options,
     query_pal_roster,
@@ -358,6 +360,148 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
         str(uuid.UUID(int=101)),
         str(uuid.UUID(int=102)),
     }
+
+
+def test_inventory_aggregates_slots_and_preserves_unknown_items(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    level, players = _synthetic_properties()
+    containers = level["worldSaveData"]["value"]["ItemContainerSaveData"]["value"]
+    base_id = uuid.UUID(int=101)
+    base_container = uuid.UUID(int=302)
+    containers.append(
+        {
+            "key": {"ID": _property(base_container)},
+            "value": {
+                "BelongInfo": _property({"BaseId": _property(base_id)}),
+                "Slots": _property(
+                    {
+                        "values": [
+                            {
+                                "RawData": _property(
+                                    {"slot_index": 0, "count": 7, "item": {"static_id": "Wood"}}
+                                )
+                            },
+                            {
+                                "RawData": _property(
+                                    {"slot_index": 1, "count": 2, "item": {"static_id": "Wood"}}
+                                )
+                            },
+                            {
+                                "RawData": _property(
+                                    {
+                                        "slot_index": 2,
+                                        "count": 4,
+                                        "item": {"static_id": "FutureOre"},
+                                    }
+                                )
+                            },
+                            {
+                                "RawData": _property(
+                                    {"slot_index": 3, "count": 0, "item": {"static_id": "Empty"}}
+                                )
+                            },
+                        ]
+                    },
+                    "ArrayProperty",
+                ),
+            },
+        }
+    )
+    metadata = WorldMetadataBundle(
+        data_version="test-items",
+        source_revision="a" * 40,
+        pals={},
+        skills={},
+        items={"Wood": ItemMetadata(name="木材", category="材料", rarity="普通")},
+        _pals_casefold={},
+        _skills_casefold={},
+        _items_casefold={"wood": ItemMetadata(name="木材", category="材料", rarity="普通")},
+    )
+    monkeypatch.setattr(world_cache, "load_world_metadata", lambda: metadata)
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    items, total, categories = query_inventory(
+        cache,
+        page=1,
+        page_size=1,
+        search=None,
+        category=None,
+        scope="all",
+        owner_id=None,
+        base_id=None,
+        sort="quantity",
+    )
+    assert total == 2
+    assert categories == ["材料"]
+    assert items == [
+        {
+            "itemId": "Wood",
+            "name": "木材",
+            "category": "材料",
+            "rarity": "普通",
+            "metadataKnown": True,
+            "metadataLabel": None,
+            "totalQuantity": 12,
+            "locationCount": 3,
+        }
+    ]
+    locations, location_total = query_inventory_locations(
+        cache,
+        "Wood",
+        page=1,
+        page_size=100,
+        scope="all",
+        owner_id=None,
+        base_id=None,
+    )
+    assert location_total == 3
+    assert sum(int(item["quantity"]) for item in locations) == items[0]["totalQuantity"]
+    assert {item["locationType"] for item in locations} == {"player", "base"}
+    assert all(item["containerId"] for item in locations)
+
+    player_items, player_total, _ = query_inventory(
+        cache,
+        page=1,
+        page_size=60,
+        search="木材",
+        category="材料",
+        scope="player",
+        owner_id=str(uuid.UUID(int=1)),
+        base_id=None,
+        sort="name",
+    )
+    assert player_total == 1
+    assert player_items[0]["totalQuantity"] == 3
+    unknown_items, unknown_total, _ = query_inventory(
+        cache,
+        page=1,
+        page_size=60,
+        search="FutureOre",
+        category=None,
+        scope="base",
+        owner_id=None,
+        base_id=str(base_id),
+        sort="name",
+    )
+    assert unknown_total == 1
+    assert unknown_items[0]["metadataKnown"] is False
+    assert unknown_items[0]["metadataLabel"] == "资料未收录"
+    empty_items, empty_total, empty_categories = query_inventory(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        category=None,
+        scope="player",
+        owner_id="missing-player",
+        base_id=None,
+        sort="name",
+    )
+    assert empty_items == []
+    assert empty_total == 0
+    assert empty_categories == []
 
 
 def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
@@ -1061,6 +1205,10 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
         response = client.get("/api/world/bases?page=1&pageSize=1")
         rejected = client.get("/api/world/pals?pageSize=201")
         replaced = client.get("/api/world/pals?snapshotId=superseded")
+        inventory = client.get("/api/world/inventories?pageSize=60")
+        inventory_detail = client.get("/api/world/inventories/Wood?pageSize=100")
+        inventory_replaced = client.get("/api/world/inventories?snapshotId=superseded")
+        inventory_invalid_scope = client.get("/api/world/inventories?scope=unknown")
         roster = client.get("/api/world/pals/roster?pageSize=60")
         aptitude_roster = client.get(
             "/api/world/pals/roster?minRarity=5&minHpIv=90&minAverageIv=80"
@@ -1087,6 +1235,27 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert rejected.json()["errorCode"] == "INVALID_WORLD_PAGE"
     assert replaced.status_code == 409
     assert replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
+    assert inventory.status_code == 200
+    assert inventory.json()["total"] == 1
+    assert inventory.json()["items"] == [
+        {
+            "itemId": "Wood",
+            "name": None,
+            "category": None,
+            "rarity": None,
+            "metadataKnown": False,
+            "metadataLabel": "资料未收录",
+            "totalQuantity": 3,
+            "locationCount": 1,
+        }
+    ]
+    assert inventory_detail.status_code == 200
+    assert inventory_detail.json()["locations"][0]["locationType"] == "player"
+    assert inventory_detail.json()["locations"][0]["containerId"]
+    assert inventory_replaced.status_code == 409
+    assert inventory_replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
+    assert inventory_invalid_scope.status_code == 422
+    assert inventory_invalid_scope.json()["errorCode"] == "INVALID_INVENTORY_SCOPE"
     assert roster.status_code == 200
     assert roster.json()["pageSize"] == 60
     assert roster.json()["metadata"]["status"] == "ready"

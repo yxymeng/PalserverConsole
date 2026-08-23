@@ -216,6 +216,44 @@ export type WorldInventoryListItem = {
   id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;
   ownerId: string | null; guildId: string | null; baseId: string | null;
 };
+export type WorldInventoryScope = "all" | "player" | "base";
+export type WorldInventoryItem = {
+  itemId: string;
+  name: string | null;
+  category: string | null;
+  rarity: string | null;
+  metadataKnown: boolean;
+  metadataLabel: "资料未收录" | null;
+  totalQuantity: number;
+  locationCount: number;
+};
+export type WorldInventoryLocation = {
+  id: number;
+  locationType: "player" | "base" | "unassigned";
+  locationLabel: string;
+  ownerId: string | null;
+  ownerName: string | null;
+  baseId: string | null;
+  baseName: string | null;
+  slotIndex: number;
+  quantity: number;
+  containerId: string | null;
+};
+export type WorldInventoryResponse = WorldSnapshotContext & {
+  items: WorldInventoryItem[];
+  categories: string[];
+  page: number;
+  pageSize: number;
+  total: number;
+  metadata: WorldMetadataStatus;
+};
+export type WorldInventoryDetailResponse = WorldSnapshotContext & {
+  itemId: string;
+  locations: WorldInventoryLocation[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
 export type WorldContainerReference = {
   id: string; kind: string; ownerId: string | null; guildId: string | null;
   baseId: string | null; slotCount: number;

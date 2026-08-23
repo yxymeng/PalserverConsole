@@ -7,6 +7,7 @@ import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { PalRoster } from "./PalRoster";
+import { InventoryWorkspace, type InventoryContext } from "./InventoryWorkspace";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 import { waitForWorldReparse } from "./worldReparse";
 
@@ -19,7 +20,7 @@ const WORKSPACES: { key: WorkspaceKey; label: string; icon: typeof Database; cou
   { key: "overview", label: "总览", icon: LayoutDashboard, planned: true },
   { key: "players", label: "玩家", icon: Users, countKey: "players", resource: "players" },
   { key: "pals", label: "帕鲁名册", icon: PawPrint, countKey: "pals", resource: "pals" },
-  { key: "inventories", label: "仓库", icon: Archive, countKey: "inventory_items", planned: true },
+  { key: "inventories", label: "仓库", icon: Archive, countKey: "inventory_items" },
   { key: "bases", label: "据点", icon: Warehouse, countKey: "bases", resource: "bases" },
   { key: "guilds", label: "公会", icon: Users, countKey: "guilds", resource: "guilds" },
 ];
@@ -49,6 +50,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<WorldStatus | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceKey>("overview");
   const [resource, setResource] = useState<PrimaryWorldResource>("players");
+  const [inventoryContext, setInventoryContext] = useState<InventoryContext>({ scope: "all" });
   const [result, setResult] = useState<WorldResponse | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
@@ -141,6 +143,13 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setSelected(null);
   }
 
+  function openInventory(context: InventoryContext) {
+    setInventoryContext(context);
+    setWorkspace("inventories");
+    setResult(null);
+    setSelected(null);
+  }
+
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     setPage(1);
@@ -210,7 +219,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
       {WORKSPACES.map(({ key, label, icon: Icon, countKey, planned }) => <button key={key} className={workspace === key ? "active" : ""} type="button" role="tab" id={`world-workspace-tab-${key}`} aria-selected={workspace === key} aria-controls={`world-workspace-${key}`} onClick={() => chooseWorkspace(key)}><Icon size={17} /><span>{label}</span>{countKey && <strong>{status?.counts[countKey] ?? "-"}</strong>}{planned && <em>后续</em>}</button>)}
     </div>
     <main id={`world-workspace-${workspace}`} className="world-workspace" role="tabpanel" aria-labelledby={`world-workspace-tab-${workspace}`}>
-      {workspace === "overview" ? <WorldWorkspacePlaceholder workspace="overview" onChooseResource={chooseResource} /> : workspace === "inventories" ? <WorldWorkspacePlaceholder workspace="inventories" onChooseResource={chooseResource} /> : workspace === "pals" ? <PalRoster snapshotId={status?.snapshotId} onSnapshotReplaced={refreshSnapshot} /> : <div className="world-browser">
+      {workspace === "overview" ? <WorldWorkspacePlaceholder workspace="overview" onChooseResource={chooseResource} /> : workspace === "inventories" ? <InventoryWorkspace snapshotId={status?.snapshotId} context={inventoryContext} onSnapshotReplaced={refreshSnapshot} onContextChange={setInventoryContext} onClearContext={() => setInventoryContext({ scope: "all" })} /> : workspace === "pals" ? <PalRoster snapshotId={status?.snapshotId} onSnapshotReplaced={refreshSnapshot} /> : <div className="world-browser">
       <section className="world-list-panel" aria-label={`${RESOURCE_LABELS[resource]}列表`}>
         <form className="world-toolbar" onSubmit={submitSearch}>
           <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
@@ -236,7 +245,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
         <section className="audit-footer"><span>共 {result?.total || 0} 条，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
       </section>
       {selected && <button className="world-drawer-backdrop" type="button" aria-label="关闭详情遮罩" onClick={() => setSelected(null)} />}
-      <EntityDrawer detail={selected} loading={detailLoading} onClose={() => setSelected(null)} onNavigate={(target, id) => void openDetail(target, id)} />
+      <EntityDrawer detail={selected} loading={detailLoading} onClose={() => setSelected(null)} onNavigate={(target, id) => void openDetail(target, id)} onShowInventory={openInventory} />
       </div>}
     </main>
   </div>;
@@ -271,11 +280,11 @@ function WorldSnapshotBar({ status, message, reparseError, reparsing, onReparse 
   </section>;
 }
 
-function WorldWorkspacePlaceholder({ workspace, onChooseResource }: { workspace: "overview" | "inventories"; onChooseResource: (resource: PrimaryWorldResource) => void }) {
+function WorldWorkspacePlaceholder({ workspace, onChooseResource }: { workspace: "overview"; onChooseResource: (resource: PrimaryWorldResource) => void }) {
   const overview = workspace === "overview";
   return <section className="world-shell-placeholder">
     <div className="world-shell-placeholder-icon">{overview ? <LayoutDashboard size={22} /> : <Archive size={22} />}</div>
-    <div><h2>{overview ? "总览聚合将在后续 ticket 交付" : "仓库聚合将在后续 ticket 交付"}</h2><p>{overview ? "当前先保留世界资产台的稳定导航与快照上下文。实体浏览仍可使用，但不会把旧列表伪装成最终总览。" : "物品总量、分类和位置聚合尚未实现；当前不会展示不完整的库存结果。"}</p></div>
+    <div><h2>总览聚合将在后续 ticket 交付</h2><p>当前先保留世界资产台的稳定导航与快照上下文。实体浏览仍可使用，但不会把旧列表伪装成最终总览。</p></div>
     {overview && <div className="world-shell-links" aria-label="可用世界实体浏览"><span>当前可用的只读实体浏览</span><div><button className="quiet-button" type="button" onClick={() => onChooseResource("players")}>玩家</button><button className="quiet-button" type="button" onClick={() => onChooseResource("pals")}>帕鲁名册</button><button className="quiet-button" type="button" onClick={() => onChooseResource("bases")}>据点</button><button className="quiet-button" type="button" onClick={() => onChooseResource("guilds")}>公会</button></div></div>}
   </section>;
 }
@@ -284,17 +293,17 @@ function WorldTableSkeleton({ columns }: { columns: number }) {
   return <div className="world-table-skeleton" aria-hidden="true">{Array.from({ length: 5 }, (_, row) => <div className="world-table-row" style={{ "--world-columns": columns } as CSSProperties} key={row}>{Array.from({ length: columns }, (_, column) => <span className="world-skeleton-line" key={column} />)}</div>)}</div>;
 }
 
-function EntityDrawer({ detail, loading, onClose, onNavigate }: { detail: EntityDetail | null; loading: boolean; onClose: () => void; onNavigate: (resource: PrimaryWorldResource, id: string) => void }) {
+function EntityDrawer({ detail, loading, onClose, onNavigate, onShowInventory }: { detail: EntityDetail | null; loading: boolean; onClose: () => void; onNavigate: (resource: PrimaryWorldResource, id: string) => void; onShowInventory: (context: InventoryContext) => void }) {
   if (!detail) return <aside className="world-entity-drawer empty" aria-label="世界实体详情"><Database size={24} /><h2>{loading ? "正在读取详情..." : "选择一个实体"}</h2><p>从左侧列表选择玩家、帕鲁、公会或据点，查看属性和可用关联。</p></aside>;
 
   const { data, resource } = detail;
   return <aside className="world-entity-drawer" role="dialog" aria-modal="false" aria-label="世界实体详情">
     <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
     <div className="world-detail-properties">
-      {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} />}
-      {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} />}
-      {resource === "guilds" && <GuildDetail data={data} onNavigate={onNavigate} />}
-      {resource === "bases" && <BaseDetail data={data} onNavigate={onNavigate} />}
+      {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
+      {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
+      {resource === "guilds" && <GuildDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
+      {resource === "bases" && <BaseDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
     </div>
   </aside>;
 }
@@ -320,14 +329,14 @@ function genderLabel(item: WorldRow): string | null {
   return gender === "male" ? "雄性" : gender === "female" ? "雌性" : null;
 }
 
-function PlayerDetail({ data, onNavigate }: DetailProps) {
+function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps) {
   return <>
     <PropertyGrid data={data} fields={[["等级", "level"], ["公会 ID", "guildId"], ["Player ID", "id"], ["实例", "instanceId"]]} />
     <RelationButton title="所属公会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
     <RelationList title="拥有帕鲁" rows={rowsOf(data, "pals")} resource="pals" onNavigate={onNavigate} />
     <RelationList title="队伍帕鲁" rows={rowsOf(data, "partyPals")} resource="pals" onNavigate={onNavigate} />
     <RelationList title="储存帕鲁" rows={rowsOf(data, "storagePals")} resource="pals" onNavigate={onNavigate} />
-    <DataList title="玩家库存" rows={rowsOf(data, "inventory")} />
+    <InventoryButton title="玩家库存" data={data} scope="player" onShowInventory={onShowInventory} />
   </>;
 }
 
@@ -352,17 +361,17 @@ function GuildDetail({ data, onNavigate }: DetailProps) {
   </>;
 }
 
-function BaseDetail({ data, onNavigate }: DetailProps) {
+function BaseDetail({ data, onNavigate, onShowInventory }: DetailProps) {
   return <>
     <PropertyGrid data={data} fields={[["Base ID", "id"], ["X", "x"], ["Y", "y"], ["Z", "z"], ["工作容器", "workerContainerId"]]} />
     <RelationButton title="所属公会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
     <RelationList title="工作帕鲁" rows={rowsOf(data, "workers")} resource="pals" onNavigate={onNavigate} />
-    <DataList title="可明确关联的库存" rows={rowsOf(data, "inventory")} />
+    <InventoryButton title="据点库存" data={data} scope="base" onShowInventory={onShowInventory} />
     <RawDetail value={data.detail} />
   </>;
 }
 
-type DetailProps = { data: WorldRow; onNavigate: (resource: PrimaryWorldResource, id: string) => void };
+type DetailProps = { data: WorldRow; onNavigate: (resource: PrimaryWorldResource, id: string) => void; onShowInventory: (context: InventoryContext) => void };
 
 function PropertyGrid({ data, fields }: { data: WorldRow; fields: [string, string][] }) {
   return <dl className="world-detail-grid">{fields.map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{valueOf(data, key)}</dd></div>)}</dl>;
@@ -376,8 +385,11 @@ function RelationList({ title, rows, resource, onNavigate }: { title: string; ro
   return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item, index) => item.id ? <button className="world-relation-link" type="button" key={String(item.id)} onClick={() => onNavigate(resource, String(item.id))}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && <PalGenderIcon item={item} />}</span><small>{String(item.id)}</small></button> : <p key={index}>{entityName(item, resource)}</p>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
 }
 
-function DataList({ title, rows }: { title: string; rows: WorldRow[] }) {
-  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-data-list">{rows.map((item, index) => <p key={String(item.id || index)}>{entityName(item, "bases")}<small>{valueOf(item, "quantity") !== "不可用" ? ` × ${valueOf(item, "quantity")}` : valueOf(item, "containerId")}</small></p>)}</div> : <p className="muted">暂无可明确关联的数据</p>}</section>;
+function InventoryButton({ title, data, scope, onShowInventory }: { title: string; data: WorldRow; scope: "player" | "base"; onShowInventory: DetailProps["onShowInventory"] }) {
+  const id = valueOf(data, "id");
+  if (id === "不可用") return null;
+  const name = entityName(data, scope === "player" ? "players" : "bases");
+  return <section className="world-relation-section"><h3>{title}</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ scope, [scope === "player" ? "ownerId" : "baseId"]: id, label: `${scope === "player" ? "玩家库存" : "据点库存"}：${name}` })}><span className="world-relation-name">在仓库中查看</span><small>仅显示该归属范围</small></button></section>;
 }
 
 function RawDetail({ value }: { value: unknown }) {

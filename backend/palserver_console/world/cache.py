@@ -16,7 +16,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 8
+CACHE_SCHEMA_VERSION = 9
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
@@ -142,6 +142,10 @@ CREATE TABLE inventory_items (
     container_id TEXT NOT NULL,
     slot_index INTEGER NOT NULL,
     item_id TEXT NOT NULL,
+    item_name TEXT,
+    item_category TEXT,
+    item_rarity TEXT,
+    metadata_known INTEGER NOT NULL DEFAULT 0,
     quantity INTEGER NOT NULL,
     owner_kind TEXT NOT NULL,
     owner_id TEXT,
@@ -150,7 +154,9 @@ CREATE TABLE inventory_items (
 );
 CREATE INDEX inventory_items_container_idx ON inventory_items(container_id, slot_index);
 CREATE INDEX inventory_items_item_idx ON inventory_items(item_id);
+CREATE INDEX inventory_items_owner_idx ON inventory_items(owner_id);
 CREATE INDEX inventory_items_base_idx ON inventory_items(base_id);
+CREATE INDEX inventory_items_category_idx ON inventory_items(item_category);
 """
 
 
@@ -260,7 +266,7 @@ def build_world_cache(
         characters, player_profiles, player_group, instance_locations, world_metadata
     )
     item_container_rows, item_rows = _item_containers(
-        item_containers, player_profiles, base_rows
+        item_containers, player_profiles, base_rows, world_metadata
     )
 
     counts = {
@@ -313,9 +319,10 @@ def build_world_cache(
         )
         connection.executemany(
             """INSERT INTO inventory_items(
-                container_id, slot_index, item_id, quantity, owner_kind,
+                container_id, slot_index, item_id, item_name, item_category, item_rarity,
+                metadata_known, quantity, owner_kind,
                 owner_id, guild_id, base_id
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)""",
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             item_rows,
         )
         connection.execute(f"PRAGMA user_version = {CACHE_SCHEMA_VERSION}")
@@ -532,6 +539,199 @@ def query_cache(
         return public_rows, total
     finally:
         connection.close()
+
+
+def query_inventory(
+    path: Path,
+    *,
+    page: int,
+    page_size: int,
+    search: str | None,
+    category: str | None,
+    scope: str,
+    owner_id: str | None,
+    base_id: str | None,
+    sort: str,
+) -> tuple[list[dict[str, object]], int, list[str]]:
+    """Aggregate immutable item slots before they leave the server."""
+
+    if scope not in {"all", "player", "base"} or sort not in {"name", "quantity"}:
+        raise ValueError("Unknown inventory query.")
+    clauses, parameters = _inventory_filters(
+        search=search,
+        category=category,
+        scope=scope,
+        owner_id=owner_id,
+        base_id=base_id,
+    )
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    order = {
+        "name": (
+            "CASE WHEN itemName IS NULL OR itemName = '' THEN 1 ELSE 0 END, "
+            "COALESCE(itemName, itemId) COLLATE NOCASE, itemId"
+        ),
+        "quantity": "totalQuantity DESC, COALESCE(itemName, itemId) COLLATE NOCASE, itemId",
+    }[sort]
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        total = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM (SELECT 1 FROM inventory_items AS ii"
+                f"{where} GROUP BY ii.item_id)",
+                parameters,
+            ).fetchone()[0]
+        )
+        rows = connection.execute(
+            "SELECT ii.item_id AS itemId, MAX(ii.item_name) AS itemName, "
+            "MAX(ii.item_category) AS category, MAX(ii.item_rarity) AS rarity, "
+            "MAX(ii.metadata_known) AS metadataKnown, SUM(ii.quantity) AS totalQuantity, "
+            "COUNT(*) AS locationCount FROM inventory_items AS ii"
+            f"{where} GROUP BY ii.item_id ORDER BY {order} LIMIT ? OFFSET ?",
+            (*parameters, page_size, (page - 1) * page_size),
+        ).fetchall()
+        category_clauses, category_parameters = _inventory_filters(
+            search=None,
+            category=None,
+            scope=scope,
+            owner_id=owner_id,
+            base_id=base_id,
+        )
+        category_where = (
+            f" WHERE {' AND '.join([*category_clauses, 'ii.item_category IS NOT NULL'])}"
+            if category_clauses
+            else " WHERE ii.item_category IS NOT NULL"
+        )
+        categories = [
+            str(row[0])
+            for row in connection.execute(
+                "SELECT DISTINCT ii.item_category FROM inventory_items AS ii"
+                f"{category_where} ORDER BY ii.item_category COLLATE NOCASE",
+                category_parameters,
+            ).fetchall()
+            if isinstance(row[0], str) and row[0]
+        ]
+    finally:
+        connection.close()
+    return [_inventory_public_row(dict(row)) for row in rows], total, categories
+
+
+def query_inventory_locations(
+    path: Path,
+    item_id: str,
+    *,
+    page: int,
+    page_size: int,
+    scope: str,
+    owner_id: str | None,
+    base_id: str | None,
+) -> tuple[list[dict[str, object]], int]:
+    if scope not in {"all", "player", "base"}:
+        raise ValueError("Unknown inventory query.")
+    clauses, parameters = _inventory_filters(
+        search=None,
+        category=None,
+        scope=scope,
+        owner_id=owner_id,
+        base_id=base_id,
+    )
+    clauses.append("ii.item_id = ?")
+    parameters.append(item_id)
+    where = " WHERE " + " AND ".join(clauses)
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        total = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM inventory_items AS ii" + where, parameters
+            ).fetchone()[0]
+        )
+        rows = connection.execute(
+            "SELECT ii.id, ii.container_id AS containerId, ii.slot_index AS slotIndex, "
+            "ii.quantity, ii.owner_kind AS ownerKind, ii.owner_id AS ownerId, "
+            "ii.base_id AS baseId, "
+            "p.name AS ownerName, b.name AS baseName FROM inventory_items AS ii "
+            "LEFT JOIN players AS p ON p.id = ii.owner_id "
+            "LEFT JOIN bases AS b ON b.id = ii.base_id"
+            f"{where} ORDER BY ii.owner_kind, COALESCE(p.name, b.name, ''), ii.slot_index, ii.id "
+            "LIMIT ? OFFSET ?",
+            (*parameters, page_size, (page - 1) * page_size),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [_inventory_location_public_row(dict(row)) for row in rows], total
+
+
+def _inventory_filters(
+    *,
+    search: str | None,
+    category: str | None,
+    scope: str,
+    owner_id: str | None,
+    base_id: str | None,
+) -> tuple[list[str], list[object]]:
+    clauses: list[str] = []
+    parameters: list[object] = []
+    if scope == "player":
+        clauses.append("ii.owner_kind = 'player_inventory'")
+    elif scope == "base":
+        clauses.append("ii.owner_kind = 'base_inventory'")
+    if owner_id:
+        clauses.append("ii.owner_id = ?")
+        parameters.append(owner_id)
+    if base_id:
+        clauses.append("ii.base_id = ?")
+        parameters.append(base_id)
+    if category:
+        clauses.append("ii.item_category = ?")
+        parameters.append(category)
+    if search:
+        clauses.append("(ii.item_id LIKE ? OR ii.item_name LIKE ?)")
+        parameters.extend([f"%{search}%", f"%{search}%"])
+    return clauses, parameters
+
+
+def _inventory_public_row(row: Mapping[str, object]) -> dict[str, object]:
+    metadata_known = bool(row.get("metadataKnown"))
+    return {
+        "itemId": _text(row.get("itemId")) or "",
+        "name": _text(row.get("itemName")),
+        "category": _text(row.get("category")),
+        "rarity": _text(row.get("rarity")),
+        "metadataKnown": metadata_known,
+        "metadataLabel": None if metadata_known else "资料未收录",
+        "totalQuantity": _integer(row.get("totalQuantity")) or 0,
+        "locationCount": _integer(row.get("locationCount")) or 0,
+    }
+
+
+def _inventory_location_public_row(row: Mapping[str, object]) -> dict[str, object]:
+    owner_kind = _text(row.get("ownerKind")) or "unassigned"
+    owner_id = _text(row.get("ownerId"))
+    base_id = _text(row.get("baseId"))
+    owner_name = _text(row.get("ownerName"))
+    base_name = _text(row.get("baseName"))
+    if owner_kind == "player_inventory":
+        label = f"玩家：{owner_name or owner_id or '资料未收录'}"
+        location_type = "player"
+    elif owner_kind == "base_inventory":
+        label = f"据点：{base_name or base_id or '资料未收录'}"
+        location_type = "base"
+    else:
+        label = "未关联容器"
+        location_type = "unassigned"
+    return {
+        "id": _integer(row.get("id")) or 0,
+        "locationType": location_type,
+        "locationLabel": label,
+        "ownerId": owner_id,
+        "ownerName": owner_name,
+        "baseId": base_id,
+        "baseName": base_name,
+        "slotIndex": _integer(row.get("slotIndex")) or 0,
+        "quantity": _integer(row.get("quantity")) or 0,
+        "containerId": _text(row.get("containerId")),
+    }
 
 
 def query_pal_roster(
@@ -1506,6 +1706,7 @@ def _item_containers(
     entries: list[Any],
     profiles: Mapping[str, Mapping[str, Any]],
     bases: Sequence[tuple[Any, ...]],
+    world_metadata: WorldMetadataBundle | None,
 ) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     owner_by_container: dict[str, str] = {}
     for player_id, profile in profiles.items():
@@ -1526,8 +1727,12 @@ def _item_containers(
         guild_id = (
             _nullable_id(_property(belong.get("GroupId"))) if isinstance(belong, Mapping) else None
         )
-        owner_id = owner_by_container.get(container_id)
-        base_id = container_id if container_id in base_ids else None
+        owner_id = owner_by_container.get(container_id) or _belong_id(
+            belong, "PlayerUId", "PlayerUid", "player_uid", "owner_id"
+        )
+        base_id = _belong_id(belong, "BaseId", "BaseCampId", "base_id", "base_camp_id")
+        if base_id not in base_ids:
+            base_id = container_id if container_id in base_ids else None
         kind = "player_inventory" if owner_id else ("base_inventory" if base_id else "unassigned")
         slots = _list_property(value.get("Slots"))
         containers.append((container_id, kind, owner_id, guild_id, base_id, len(slots)))
@@ -1542,11 +1747,16 @@ def _item_containers(
             quantity = _integer(raw.get("count")) or 0
             if not item_id or quantity <= 0:
                 continue
+            metadata = world_metadata.item(item_id) if world_metadata else None
             items.append(
                 (
                     container_id,
                     _integer(raw.get("slot_index")) or 0,
                     item_id,
+                    metadata.name if metadata else None,
+                    metadata.category if metadata else None,
+                    metadata.rarity if metadata else None,
+                    metadata is not None,
                     quantity,
                     kind,
                     owner_id,
@@ -1555,6 +1765,14 @@ def _item_containers(
                 )
             )
     return containers, items
+
+
+def _belong_id(value: object, *keys: str) -> str | None:
+    belong = _mapping(value)
+    for key in keys:
+        if identifier := _nullable_id(_property(belong.get(key))):
+            return identifier
+    return None
 
 
 def _validate_cache(connection: sqlite3.Connection, expected: Mapping[str, int]) -> None:
