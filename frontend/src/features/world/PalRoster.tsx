@@ -2,7 +2,7 @@ import { AlertCircle, ChevronDown, CircleAlert, Crown, HeartPulse, LoaderCircle,
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
-import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldRow } from "../../api/contracts";
+import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldPalSkill, WorldPalSkills, WorldRow } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { mergePalRosterPage } from "./palRosterState";
@@ -14,11 +14,12 @@ type Sort = "balanced" | "name" | "level" | "rarity" | "averageIv" | "workSuitab
 type AptitudeFilters = {
   minLevel: string; minRank: string; minRarity: string;
   minHpIv: string; minAttackIv: string; minDefenseIv: string; minAverageIv: string;
-  workSuitabilities: string[]; minWorkLevel: string;
+  workSuitabilities: string[]; passiveSkills: string[]; minWorkLevel: string;
 };
 
 const PAGE_SIZE = 60;
-const EMPTY_APTITUDE_FILTERS: AptitudeFilters = { minLevel: "", minRank: "", minRarity: "", minHpIv: "", minAttackIv: "", minDefenseIv: "", minAverageIv: "", workSuitabilities: [], minWorkLevel: "1" };
+const EMPTY_APTITUDE_FILTERS: AptitudeFilters = { minLevel: "", minRank: "", minRarity: "", minHpIv: "", minAttackIv: "", minDefenseIv: "", minAverageIv: "", workSuitabilities: [], passiveSkills: [], minWorkLevel: "1" };
+const EMPTY_PAL_SKILLS: WorldPalSkills = { passive: [], equipped: [], learned: [], partner: null };
 const workSuitabilityLabels: Record<string, string> = {
   EmitFlame: "生火", Watering: "浇水", Seeding: "播种", GenerateElectricity: "发电",
   Handcraft: "手工作业", Collection: "采集", Deforest: "伐木", Mining: "采矿",
@@ -30,6 +31,10 @@ const locationLabels: Record<WorldPalRosterItem["locationType"], string> = {
   storage: "终端存放",
   base: "据点工作",
   unassigned: "未识别归属",
+};
+const elementLabels: Record<string, string> = {
+  Normal: "无", Fire: "火", Water: "水", Grass: "草", Electric: "雷",
+  Ice: "冰", Ground: "地面", Dark: "暗", Dragon: "龙",
 };
 
 export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: string | null | undefined; onSnapshotReplaced: () => Promise<string | null> }) {
@@ -43,6 +48,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
   const [items, setItems] = useState<WorldPalRosterItem[]>([]);
   const [total, setTotal] = useState(0);
   const [careSummary, setCareSummary] = useState<WorldPalRosterResponse["careSummary"] | null>(null);
+  const [passiveSkillOptions, setPassiveSkillOptions] = useState<WorldPalSkill[]>([]);
   const [metadata, setMetadata] = useState<WorldMetadataStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -51,6 +57,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
   const requestRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
   const returnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const aptitudeFiltersRef = useRef<HTMLDetailsElement | null>(null);
 
   const loadPage = useCallback(async (page: number, append: boolean, requestedSnapshotId = snapshotId, retried = false) => {
     requestRef.current?.abort();
@@ -77,10 +84,12 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
         query.set("workSuitability", appliedAptitude.workSuitabilities.join(","));
         query.set("minWorkLevel", appliedAptitude.minWorkLevel || "1");
       }
+      if (appliedAptitude.passiveSkills.length) query.set("passiveSkill", appliedAptitude.passiveSkills.join(","));
       const result = await requestJson<WorldPalRosterResponse>(`/api/world/pals/roster?${query}`, { signal: controller.signal });
       if (sequence !== requestSequence.current || result.snapshotId !== requestedSnapshotId) return;
       setTotal(result.total);
       setCareSummary(result.careSummary);
+      setPassiveSkillOptions(result.passiveSkills || []);
       setMetadata(result.metadata);
       setItems((current) => mergePalRosterPage(current, result, requestedSnapshotId, append));
     } catch (caught) {
@@ -113,6 +122,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
     setItems([]);
     setTotal(0);
     setCareSummary(null);
+    setPassiveSkillOptions([]);
     setMetadata(null);
     setDrawer(null);
     void loadPage(1, false);
@@ -143,7 +153,15 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
   function submitSearch(event: FormEvent) {
     event.preventDefault();
     setAppliedSearch(search.trim());
-    setAppliedAptitude({ ...draftAptitude, workSuitabilities: [...draftAptitude.workSuitabilities] });
+    setAppliedAptitude({
+      ...draftAptitude,
+      workSuitabilities: [...draftAptitude.workSuitabilities],
+      passiveSkills: [...draftAptitude.passiveSkills],
+    });
+    if (window.matchMedia("(max-width: 760px)").matches && aptitudeFiltersRef.current?.open) {
+      aptitudeFiltersRef.current.open = false;
+      aptitudeFiltersRef.current.querySelector("summary")?.focus();
+    }
   }
 
   function clearFilters() {
@@ -171,7 +189,13 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
     setAppliedAptitude(remove);
   }
 
-  const hasAptitudeFilters = Object.entries(appliedAptitude).some(([key, value]) => key === "workSuitabilities" ? (value as string[]).length > 0 : key !== "minWorkLevel" && Boolean(value));
+  function removePassiveSkill(skillId: string) {
+    const remove = (current: AptitudeFilters) => ({ ...current, passiveSkills: current.passiveSkills.filter((id) => id !== skillId) });
+    setDraftAptitude(remove);
+    setAppliedAptitude(remove);
+  }
+
+  const hasAptitudeFilters = Object.entries(appliedAptitude).some(([key, value]) => ["workSuitabilities", "passiveSkills"].includes(key) ? (value as string[]).length > 0 : key !== "minWorkLevel" && Boolean(value));
   const hasFilters = Boolean(appliedSearch) || marker !== "all" || care !== "all" || sort !== "balanced" || hasAptitudeFilters;
   const canLoadMore = items.length < total;
   return <section className="pal-roster" aria-label="帕鲁名册">
@@ -189,14 +213,15 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
       </div>
       <label className="world-control"><span>排序</span><select aria-label="帕鲁名册排序" value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="balanced">均衡</option><option value="name">名称</option><option value="level">等级</option><option value="rarity">物种稀有度</option><option value="averageIv">平均个体值</option><option value="workSuitability">工作适应性</option></select></label>
       {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除已应用筛选</button>}
-      <details className="pal-aptitude-filters">
-        <summary><span>资质与工作适应性</span><small>最低值筛选 · 多项工作必须全部具备</small><ChevronDown size={16} aria-hidden="true" /></summary>
+      <details ref={aptitudeFiltersRef} className="pal-aptitude-filters">
+        <summary><span>资质、工作与被动技能</span><small>多项工作和被动技能均须全部具备</small><ChevronDown size={16} aria-hidden="true" /></summary>
         <div className="pal-aptitude-filter-grid">
           {([
             ["minLevel", "最低等级", 0], ["minRank", "最低星级", 0], ["minRarity", "最低物种稀有度", 0],
             ["minHpIv", "最低生命个体值", 0], ["minAttackIv", "最低攻击个体值", 0], ["minDefenseIv", "最低防御个体值", 0], ["minAverageIv", "最低平均个体值", 0],
           ] as const).map(([key, label, min]) => <label key={key}><span>{label}</span><input aria-label={label} type="number" min={min} max={key.includes("Iv") ? 100 : undefined} inputMode="numeric" value={draftAptitude[key]} onChange={(event) => updateAptitude(key, event.target.value)} placeholder="不限" /></label>)}
           <fieldset className="pal-work-filter"><legend>工作适应性</legend><p>所选项目必须全部达到同一最低等级。</p><label className="pal-work-level"><span>每项至少</span><select aria-label="最低工作等级" value={draftAptitude.minWorkLevel} onChange={(event) => updateAptitude("minWorkLevel", event.target.value)}>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 级</option>)}</select></label><div>{Object.entries(workSuitabilityLabels).map(([type, label]) => <label key={type}><input type="checkbox" checked={draftAptitude.workSuitabilities.includes(type)} onChange={() => updateAptitude("workSuitabilities", draftAptitude.workSuitabilities.includes(type) ? draftAptitude.workSuitabilities.filter((name) => name !== type) : [...draftAptitude.workSuitabilities, type])} /><span>{label}</span></label>)}</div></fieldset>
+          <fieldset className="pal-passive-filter"><legend>被动技能</legend><p>所选被动技能必须全部具备。</p>{passiveSkillOptions.length ? <div>{passiveSkillOptions.map((skill) => <label key={skill.id}><input type="checkbox" checked={draftAptitude.passiveSkills.includes(skill.id)} onChange={() => updateAptitude("passiveSkills", draftAptitude.passiveSkills.includes(skill.id) ? draftAptitude.passiveSkills.filter((id) => id !== skill.id) : [...draftAptitude.passiveSkills, skill.id])} /><span>{skillDisplayName(skill)}</span>{skill.rank !== null && <small>阶级 {skill.rank}</small>}</label>)}</div> : <p className="pal-passive-empty">当前快照没有可筛选的被动技能。</p>}</fieldset>
           <button className="primary-button pal-aptitude-apply" type="submit">应用资质筛选</button>
         </div>
       </details>
@@ -209,10 +234,11 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
       {sort !== "balanced" && <button type="button" onClick={() => setSort("balanced")}>排序：{{ name: "名称", level: "等级", rarity: "物种稀有度", averageIv: "平均个体值", workSuitability: "工作适应性" }[sort]}<X size={13} /></button>}
       {(["minLevel", "minRank", "minRarity", "minHpIv", "minAttackIv", "minDefenseIv", "minAverageIv"] as const).map((key) => appliedAptitude[key] && <button type="button" key={key} onClick={() => removeAppliedAptitude(key)}>{{ minLevel: "等级", minRank: "星级", minRarity: "稀有度", minHpIv: "生命个体值", minAttackIv: "攻击个体值", minDefenseIv: "防御个体值", minAverageIv: "平均个体值" }[key]} ≥ {appliedAptitude[key]}<X size={13} /></button>)}
       {appliedAptitude.workSuitabilities.map((type) => <button type="button" key={type} onClick={() => removeWorkSuitability(type)}>{workSuitabilityLabels[type] || type} ≥ {appliedAptitude.minWorkLevel || "1"} 级<X size={13} /></button>)}
+      {appliedAptitude.passiveSkills.map((id) => <button type="button" key={id} onClick={() => removePassiveSkill(id)}>{skillDisplayName(passiveSkillOptions.find((skill) => skill.id === id) || { id, name: null, description: null, sourceName: null, rank: null, element: null, power: null, cooldown: null, metadataKnown: false })}<X size={13} /></button>)}
     </div>}
     {error && <p className="form-error" role="alert">名册读取失败；已保留当前结果。<code>{error}</code></p>}
     <div className="pal-roster-table" aria-busy={loading} aria-live="polite">
-      <div className="pal-roster-head"><span>帕鲁</span><span>等级 / 星级</span><span>资质</span><span>工作适应性</span><span>个体标记</span><span>照护状态</span><span>归属</span></div>
+      <div className="pal-roster-head"><span>帕鲁</span><span>等级 / 星级</span><span>资质</span><span>工作适应性</span><span>被动技能</span><span>个体标记</span><span>照护状态</span><span>归属</span></div>
       {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "没有符合条件的帕鲁" : "当前没有可用世界快照"}</strong><p>{snapshotId ? "尝试清除已应用筛选，或使用其他名称和 ID 搜索。" : "完成只读解析后可浏览名册。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除已应用筛选</button>}</div>}
     </div>
     {canLoadMore && <button className="quiet-button pal-roster-more" type="button" disabled={loadingMore} onClick={() => void loadPage(Math.floor(items.length / PAGE_SIZE) + 1, true)}>{loadingMore ? <><LoaderCircle className="spin" size={17} />正在加载</> : `加载更多（还有 ${total - items.length} 条）`}</button>}
@@ -228,6 +254,7 @@ function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (ite
     <span className="pal-roster-level" data-label="等级 / 星级"><strong>Lv. {item.level ?? "—"}</strong><small>{pal.rank && pal.rank > 0 ? <><Star size={13} fill="currentColor" />{pal.rank} 星</> : "0 星"}</small></span>
     <PalAptitudeSummary aptitude={item.aptitude} />
     <PalWorkSummary aptitude={item.aptitude} />
+    <PalPassiveSummary skills={item.skills} />
     <PalRosterTraits item={item} />
     <PalCareBadge care={item.care} />
     <span className="pal-roster-location" data-label="归属"><strong>{locationLabels[item.locationType]}</strong><small>{location}</small></span>
@@ -241,6 +268,11 @@ function PalAptitudeSummary({ aptitude }: { aptitude: WorldPalAptitude }) {
 
 function PalWorkSummary({ aptitude }: { aptitude: WorldPalAptitude }) {
   return <span className="pal-work-summary" data-label="工作适应性">{aptitude.workSuitabilities.length ? aptitude.workSuitabilities.slice(0, 3).map((work) => <em key={work.type}>{workSuitabilityLabels[work.type] || work.type} {work.level}</em>) : <small>{aptitude.metadataKnown ? "无工作适应性" : "资料未收录"}</small>}</span>;
+}
+
+function PalPassiveSummary({ skills }: { skills?: WorldPalSkills }) {
+  const passiveSkills = skills?.passive || [];
+  return <span className="pal-passive-summary" data-label="被动技能">{passiveSkills.length ? passiveSkills.slice(0, 2).map((skill) => <em key={skill.id}>{skillDisplayName(skill)}</em>) : <small>无被动技能</small>}</span>;
 }
 
 function PalCareSummary({ summary }: { summary: WorldPalRosterResponse["careSummary"] }) {
@@ -314,15 +346,25 @@ function PalRosterDetail({ data, pal }: { data: WorldPalDetail | WorldPalRosterI
   const location = "locationType" in data ? locationLabels[data.locationType] : value(record.locationType) || value(record.assignment);
   const care = (data as WorldPalDetail | WorldPalRosterItem).care;
   const aptitude = (data as WorldPalDetail | WorldPalRosterItem).aptitude;
+  const skills = (data as WorldPalDetail | WorldPalRosterItem).skills || EMPTY_PAL_SKILLS;
   return <div className="pal-roster-detail">
     <section className="world-relation-section pal-care-detail"><h3>照护状态 <small>来自存档快照</small></h3><PalCareDetail care={care} /></section>
     <dl className="world-detail-grid"><div><dt>等级</dt><dd>{value(record.level)}</dd></div><div><dt>星级</dt><dd>{pal.rank ?? 0}</dd></div><div><dt>归属</dt><dd>{location}</dd></div><div><dt>主人</dt><dd>{value(record.ownerName) || value((record.owner as WorldRow | undefined)?.name)}</dd></div><div><dt>据点</dt><dd>{value(record.baseName) || value((record.base as WorldRow | undefined)?.name)}</dd></div><div><dt>物种稀有度</dt><dd>{aptitude.speciesRarity ?? "资料未收录"}</dd></div></dl>
     <section className="world-relation-section pal-aptitude-detail"><h3>个体值 <small>生命 / 攻击 / 防御</small></h3><dl><div><dt>生命</dt><dd>{formatIv(aptitude.ivs.hp)}</dd></div><div><dt>攻击</dt><dd>{formatIv(aptitude.ivs.attack)}</dd></div><div><dt>防御</dt><dd>{formatIv(aptitude.ivs.defense)}</dd></div><div><dt>平均</dt><dd>{formatIv(aptitude.ivs.average)}</dd></div></dl></section>
     <section className="world-relation-section pal-work-detail"><h3>工作适应性</h3>{aptitude.workSuitabilities.length ? <ul>{aptitude.workSuitabilities.map((work) => <li key={work.type}><span>{workSuitabilityLabels[work.type] || work.type}</span><strong>{work.level} 级</strong></li>)}</ul> : <p>{aptitude.metadataKnown ? "无工作适应性" : <><code>{pal.characterId}</code> · 资料未收录</>}</p>}</section>
+    <PalSkillSection title="被动技能" skills={skills.passive} kind="passive" />
+    <PalSkillSection title="已装备主动技能" skills={skills.equipped} kind="active" />
+    <PalSkillSection title="已学会主动技能" skills={skills.learned} kind="active" />
+    <PalSkillSection title="伙伴技能" skills={skills.partner ? [skills.partner] : []} kind="partner" />
     <section className="world-relation-section"><h3>个体标记</h3><p>{palTraitLabels(record).join(" · ") || "普通"}</p></section>
     <section className="world-relation-section pal-technical-ids"><h3>技术信息</h3><p>Character ID <code>{pal.characterId}</code></p><p>内部 ID <code>{value(record.id)}</code></p></section>
     <details className="world-relation-section world-raw-detail"><summary>原始记录</summary><pre className="world-detail-json">{JSON.stringify(record.detail || record, null, 2)}</pre></details>
   </div>;
+}
+
+function PalSkillSection({ title, skills, kind }: { title: string; skills: WorldPalSkill[]; kind: "passive" | "active" | "partner" }) {
+  const emptyLabel = kind === "partner" ? "资料未收录" : kind === "passive" ? "无被动技能" : "无记录";
+  return <section className="world-relation-section pal-skill-section"><h3>{title}</h3>{skills.length ? <ul>{skills.map((skill) => <li key={skill.id}><div><strong>{skill.metadataKnown ? skillDisplayName(skill) : "资料未收录"}</strong><code>{skill.id}</code>{skill.metadataKnown && !skill.name && <small>中文资料未收录</small>}{skill.sourceName && !skill.metadataKnown && <small>{skill.sourceName}</small>}{skill.description && <p>{skill.description}</p>}</div>{kind === "passive" && skill.rank !== null && <span>阶级 {skill.rank}</span>}{kind === "active" && <small>{activeSkillFacts(skill)}</small>}</li>)}</ul> : <p>{emptyLabel}</p>}</section>;
 }
 
 function PalCareDetail({ care }: { care: WorldPalCare }) {
@@ -353,4 +395,15 @@ function value(value: unknown): string {
 function formatIv(value: number | null): string {
   if (value === null) return "数据不可用";
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
+function skillDisplayName(skill: WorldPalSkill): string {
+  return skill.name || skill.sourceName || skill.id;
+}
+
+function activeSkillFacts(skill: WorldPalSkill): string {
+  const element = skill.element === null ? "属性数据不可用" : `属性 ${elementLabels[skill.element] || skill.element}`;
+  const power = skill.power === null ? "威力数据不可用" : `威力 ${skill.power}`;
+  const cooldown = skill.cooldown === null ? "冷却数据不可用" : `冷却 ${skill.cooldown} 秒`;
+  return `${element} · ${power} · ${cooldown}`;
 }

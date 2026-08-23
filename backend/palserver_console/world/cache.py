@@ -16,7 +16,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 7
+CACHE_SCHEMA_VERSION = 8
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
@@ -94,6 +94,10 @@ CREATE TABLE pals (
     sanity REAL,
     disease TEXT,
     activity TEXT,
+    passive_skills_json TEXT NOT NULL DEFAULT '[]',
+    equipped_skills_json TEXT NOT NULL DEFAULT '[]',
+    learned_skills_json TEXT NOT NULL DEFAULT '[]',
+    partner_skill_json TEXT,
     detail_json TEXT NOT NULL
 );
 CREATE INDEX pals_character_idx ON pals(character_id);
@@ -298,8 +302,7 @@ def build_world_cache(
             "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)", player_rows
         )
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pals VALUES(" + ", ".join("?" for _ in range(30)) + ")",
             pal_rows,
         )
         connection.executemany("INSERT INTO guilds VALUES(?, ?, ?, ?, ?)", group_rows)
@@ -549,6 +552,7 @@ def query_pal_roster(
     min_average_iv: float | None = None,
     work_suitabilities: Sequence[str] = (),
     min_work_level: int = 1,
+    passive_skills: Sequence[str] = (),
 ) -> tuple[list[dict[str, object]], int]:
     """Query the immutable cache in a stable roster order without loading all Pals."""
 
@@ -557,6 +561,7 @@ def query_pal_roster(
         or sort not in {"balanced", "name", "level", "rarity", "averageIv", "workSuitability"}
         or care not in {"all", "attention"}
         or any(name not in _WORK_SUITABILITY_TYPES for name in work_suitabilities)
+        or any(not name.strip() for name in passive_skills)
     ):
         raise ValueError("Unknown Pal roster query.")
     clauses: list[str] = []
@@ -587,6 +592,11 @@ def query_pal_roster(
     for suitability in dict.fromkeys(work_suitabilities):
         clauses.append(f"json_extract(p.work_suitability_json, '$.{suitability}') >= ?")
         parameters.append(min_work_level)
+    for passive_skill in dict.fromkeys(passive_skills):
+        clauses.append(
+            "EXISTS(SELECT 1 FROM json_each(p.passive_skills_json) WHERE value = ?)"
+        )
+        parameters.append(passive_skill)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     name_order = "COALESCE(NULLIF(p.nickname, ''), p.character_id) COLLATE NOCASE, p.id"
     order = {
@@ -637,6 +647,30 @@ def query_pal_roster(
         return public_rows, total
     finally:
         connection.close()
+
+
+def query_pal_passive_skill_options(path: Path) -> list[dict[str, object]]:
+    """List passives observed in this immutable snapshot for advanced filtering."""
+
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        rows = connection.execute(
+            "SELECT passive_skills_json, detail_json FROM pals WHERE passive_skills_json != '[]'"
+        ).fetchall()
+    finally:
+        connection.close()
+    options: dict[str, dict[str, object]] = {}
+    for row in rows:
+        skill_details = _mapping(_mapping(_json_loads(row["detail_json"])).get("skills"))
+        details = _skill_list(skill_details.get("passive"))
+        detail_by_id = {str(item["id"]): item for item in details if item.get("id")}
+        for skill_id in _json_list(row["passive_skills_json"]):
+            options.setdefault(skill_id, detail_by_id.get(skill_id, _unknown_skill(skill_id)))
+    return sorted(
+        options.values(),
+        key=lambda item: (not bool(item.get("metadataKnown")), str(item.get("name") or item["id"])),
+    )
 
 
 def entity_detail(path: Path, resource: str, entity_id: str) -> dict[str, object] | None:
@@ -1006,6 +1040,13 @@ def _characters(
         )
         work_suitabilities = species.work_suitabilities if species else {}
         care = _pal_care_fields(save_parameter, character_id)
+        passive_skill_ids = _save_skill_ids(save_parameter, "PassiveSkillList")
+        equipped_skill_ids = _save_skill_ids(save_parameter, "EquipWaza", "EquippedWaza")
+        learned_skill_ids = _save_skill_ids(save_parameter, "MasteredWaza", "MasteredWazaList")
+        passive_skills = _skill_presentations(passive_skill_ids, world_metadata, "passive")
+        equipped_skills = _skill_presentations(equipped_skill_ids, world_metadata, "active")
+        learned_skills = _skill_presentations(learned_skill_ids, world_metadata, "active")
+        partner_skill = _partner_skill_presentation(species.partner_skill if species else None)
         pals.append(
             (
                 instance_id,
@@ -1033,6 +1074,10 @@ def _characters(
                 care["sanity"],
                 care["disease"],
                 care["activity"],
+                _json(passive_skill_ids),
+                _json(equipped_skill_ids),
+                _json(learned_skill_ids),
+                _json(partner_skill),
                 _json(
                     {
                         "gender": gender,
@@ -1056,11 +1101,86 @@ def _characters(
                             "metadata_known": species is not None,
                         },
                         "care": care,
+                        "skills": {
+                            "passive": passive_skills,
+                            "equipped": equipped_skills,
+                            "learned": learned_skills,
+                            "partner": partner_skill,
+                        },
                     }
                 ),
             )
         )
     return players, pals
+
+
+def _save_skill_ids(save_parameter: Mapping[str, Any], *keys: str) -> list[str]:
+    result: list[str] = []
+    for key in keys:
+        value = save_parameter.get(key)
+        if value is None:
+            continue
+        for entry in _list_property(value):
+            skill_id = _skill_id(entry)
+            if skill_id and skill_id not in result:
+                result.append(skill_id)
+    return result
+
+
+def _skill_id(value: Any) -> str | None:
+    raw = _property(value)
+    if isinstance(raw, Mapping):
+        for key in ("WazaID", "SkillID", "PassiveSkillID", "ID", "id"):
+            if key in raw:
+                return _skill_id(raw[key])
+        return None
+    scalar = _scalar(raw)
+    text = _text(scalar)
+    if not text:
+        return None
+    normalized = text.rsplit("::", 1)[-1].strip()
+    return normalized if normalized and normalized.casefold() != "none" else None
+
+
+def _skill_presentations(
+    skill_ids: Sequence[str], world_metadata: WorldMetadataBundle | None, kind: str
+) -> list[dict[str, object]]:
+    result: list[dict[str, object]] = []
+    for skill_id in skill_ids:
+        metadata = world_metadata.skill(skill_id) if world_metadata else None
+        if metadata is not None and metadata.get("kind") != kind:
+            metadata = None
+        name = _text(metadata.get("name")) if metadata else None
+        result.append(
+            {
+                "id": skill_id,
+                "name": name,
+                "description": _text(metadata.get("description")) if metadata else None,
+                "sourceName": _text(metadata.get("sourceName")) if metadata else None,
+                "rank": _integer(metadata.get("rank")) if metadata else None,
+                "element": _text(metadata.get("element")) if metadata else None,
+                "power": _number(metadata.get("power")) if metadata else None,
+                "cooldown": _number(metadata.get("cooldown")) if metadata else None,
+                "metadataKnown": metadata is not None,
+            }
+        )
+    return result
+
+
+def _partner_skill_presentation(partner: Mapping[str, str] | None) -> dict[str, object] | None:
+    if partner is None:
+        return None
+    return {
+        "id": partner["id"],
+        "name": None,
+        "description": _text(partner.get("description")),
+        "sourceName": partner["sourceName"],
+        "rank": None,
+        "element": None,
+        "power": None,
+        "cooldown": None,
+        "metadataKnown": True,
+    }
 
 
 def _pal_care_fields(
@@ -1204,7 +1324,64 @@ def _pal_public_row(row: dict[str, Any]) -> dict[str, object]:
         else "资料未收录",
     }
     result["care"] = _pal_care_status(result)
+    skill_data = _mapping(_mapping(result.get("detail")).get("skills"))
+    result["skills"] = {
+        "passive": _skill_list(skill_data.get("passive")),
+        "equipped": _skill_list(skill_data.get("equipped")),
+        "learned": _skill_list(skill_data.get("learned")),
+        "partner": _skill_record(skill_data.get("partner")),
+    }
     return result
+
+
+def _skill_list(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [record for item in value if (record := _skill_record(item)) is not None]
+
+
+def _skill_record(value: object) -> dict[str, object] | None:
+    record = _mapping(value)
+    skill_id = _text(record.get("id"))
+    if not skill_id:
+        return None
+    return {
+        "id": skill_id,
+        "name": _text(record.get("name")),
+        "description": _text(record.get("description")),
+        "sourceName": _text(record.get("sourceName")),
+        "rank": _integer(record.get("rank")),
+        "element": _text(record.get("element")),
+        "power": _number(record.get("power")),
+        "cooldown": _number(record.get("cooldown")),
+        "metadataKnown": bool(record.get("metadataKnown")),
+    }
+
+
+def _unknown_skill(skill_id: str) -> dict[str, object]:
+    return {
+        "id": skill_id,
+        "name": None,
+        "description": None,
+        "sourceName": None,
+        "rank": None,
+        "element": None,
+        "power": None,
+        "cooldown": None,
+        "metadataKnown": False,
+    }
+
+
+def _json_loads(value: object) -> object:
+    try:
+        return json.loads(str(value))
+    except (TypeError, ValueError):
+        return {}
+
+
+def _json_list(value: object) -> list[str]:
+    parsed = _json_loads(value)
+    return [item for item in parsed if isinstance(item, str)] if isinstance(parsed, list) else []
 
 
 def _pal_care_status(row: Mapping[str, object]) -> dict[str, object]:

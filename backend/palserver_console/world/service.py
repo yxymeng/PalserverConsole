@@ -25,6 +25,7 @@ from .cache import (
     inspect_storage,
     query_cache,
     query_pal_care_summary,
+    query_pal_passive_skill_options,
     query_pal_roster,
     query_world_metadata_status,
     read_cache_metadata,
@@ -471,6 +472,7 @@ class WorldSnapshotService:
         min_average_iv: float | None = None,
         work_suitabilities: tuple[str, ...] = (),
         min_work_level: int = 1,
+        passive_skills: tuple[str, ...] = (),
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -491,6 +493,7 @@ class WorldSnapshotService:
             min_average_iv=min_average_iv,
             work_suitabilities=work_suitabilities,
             min_work_level=min_work_level,
+            passive_skills=passive_skills,
         )
         state = self._status_for_snapshot(current)
         return {
@@ -499,6 +502,7 @@ class WorldSnapshotService:
             "pageSize": page_size,
             "total": total,
             "careSummary": query_pal_care_summary(cache),
+            "passiveSkills": query_pal_passive_skill_options(cache),
             "metadata": query_world_metadata_status(cache),
             "source": state["source"],
             "observedAt": state["observedAt"],

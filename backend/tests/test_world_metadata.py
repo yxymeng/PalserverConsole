@@ -16,7 +16,7 @@ def test_pinned_world_metadata_loads_with_declared_collections() -> None:
         "status": "ready",
         "schema": "palserver-console-world-metadata",
         "schemaVersion": 1,
-        "dataVersion": "2026.08.22.1",
+        "dataVersion": "2026.08.23.1",
         "sourceRevision": "18b9554168ecf684c5f1e1e4d8e583083b942eb9",
         "errorCode": None,
     }
@@ -28,7 +28,22 @@ def test_pinned_world_metadata_loads_with_declared_collections() -> None:
         "MonsterFarm": 1,
         "Transport": 1,
     }
-    assert bundle.skills == {}
+    legend = bundle.skill("Legend")
+    assert legend is not None
+    assert legend["kind"] == "passive"
+    assert legend["name"] == "传说"
+    assert legend["rank"] == 4
+    assert bundle.skill("aircanon") == {
+        "kind": "active",
+        "name": None,
+        "description": None,
+        "sourceName": "Air Cannon",
+        "rank": None,
+        "element": "Normal",
+        "power": 40,
+        "cooldown": 2.0,
+    }
+    assert len(bundle.skills) == 2_280
     assert bundle.items == {}
 
 

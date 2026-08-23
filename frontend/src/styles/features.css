@@ -247,13 +247,18 @@
 .pal-aptitude-filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 11px 0 2px; }
 .pal-aptitude-filter-grid > label { display: grid; gap: 5px; min-width: 0; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
 .pal-aptitude-filter-grid > label input, .pal-work-level select { width: 100%; min-height: 40px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); color: var(--foreground); background: var(--surface); font: inherit; }
-.pal-work-filter { grid-column: 1 / -1; min-width: 0; margin: 2px 0 0; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
-.pal-work-filter legend { padding: 0 5px; color: var(--foreground); font-size: 12px; font-weight: 700; }
-.pal-work-filter > p { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
+.pal-work-filter, .pal-passive-filter { grid-column: 1 / -1; min-width: 0; margin: 2px 0 0; padding: 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
+.pal-work-filter legend, .pal-passive-filter legend { padding: 0 5px; color: var(--foreground); font-size: 12px; font-weight: 700; }
+.pal-work-filter > p, .pal-passive-filter > p { margin: 0 0 10px; color: var(--muted); font-size: 11px; }
 .pal-work-filter > div { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
-.pal-work-filter > div label { display: flex; min-height: 36px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: var(--surface-subtle); font-size: 11px; cursor: pointer; }
-.pal-work-filter > div label:has(input:checked) { border-color: color-mix(in srgb, var(--primary) 42%, var(--border)); color: var(--primary); background: var(--primary-surface); }
-.pal-work-filter input { accent-color: var(--primary); }
+.pal-passive-filter > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+.pal-work-filter > div label, .pal-passive-filter > div label { display: flex; min-height: 40px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted-strong); background: var(--surface-subtle); font-size: 11px; cursor: pointer; }
+.pal-passive-filter > div label { min-width: 0; }
+.pal-passive-filter > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-passive-filter > div small { margin-left: auto; color: var(--muted); white-space: nowrap; }
+.pal-work-filter > div label:has(input:checked), .pal-passive-filter > div label:has(input:checked) { border-color: color-mix(in srgb, var(--primary) 42%, var(--border)); color: var(--primary); background: var(--primary-surface); }
+.pal-work-filter input, .pal-passive-filter input { accent-color: var(--primary); }
+.pal-passive-empty { margin-bottom: 0 !important; }
 .pal-work-level { display: grid; grid-template-columns: auto 96px; align-items: center; gap: 8px; width: fit-content; margin: 0 0 10px; color: var(--muted-strong); font-size: 12px; font-weight: 650; }
 .pal-aptitude-apply { grid-column: 1 / -1; justify-self: end; }
 .pal-applied-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -273,7 +278,7 @@
 .pal-roster-markers button:hover { background: var(--surface-hover); }
 .pal-roster-markers button.active { color: var(--primary); background: var(--primary-surface); }
 .pal-roster-table { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-.pal-roster-head, .pal-roster-row { display: grid; grid-template-columns: minmax(190px, 1.4fr) 82px minmax(145px, 1fr) minmax(128px, .9fr) minmax(88px, .65fr) minmax(108px, .75fr) minmax(118px, .85fr); align-items: center; gap: 10px; padding: 12px 14px; }
+.pal-roster-head, .pal-roster-row { display: grid; grid-template-columns: minmax(190px, 1.4fr) 82px minmax(145px, 1fr) minmax(128px, .9fr) minmax(128px, .9fr) minmax(88px, .65fr) minmax(108px, .75fr) minmax(118px, .85fr); align-items: center; gap: 10px; padding: 12px 14px; }
 .pal-roster-head { color: var(--muted); background: var(--surface-muted); font-size: 12px; font-weight: 650; }
 .pal-roster-row { min-height: 64px; border-top: 1px solid var(--border); color: var(--foreground); font-size: 13px; transition: background-color .16s ease; }
 .pal-roster-row:hover { background: color-mix(in srgb, var(--primary) 7%, var(--surface)); }
@@ -288,9 +293,10 @@
 .pal-aptitude-summary strong { font-size: 12px; }
 .pal-aptitude-summary small { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .pal-aptitude-summary.unavailable { color: var(--muted-strong); }
-.pal-work-summary { display: flex; flex-wrap: wrap; gap: 4px; }
-.pal-work-summary em { padding: 3px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 10px; font-style: normal; font-weight: 650; }
-.pal-work-summary small { color: var(--muted); font-size: 11px; }
+.pal-work-summary, .pal-passive-summary { display: flex; flex-wrap: wrap; gap: 4px; }
+.pal-work-summary em, .pal-passive-summary em { padding: 3px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 10px; font-style: normal; font-weight: 650; }
+.pal-passive-summary em { border-color: color-mix(in srgb, var(--primary) 28%, var(--border)); color: var(--primary); background: var(--primary-surface); }
+.pal-work-summary small, .pal-passive-summary small { color: var(--muted); font-size: 11px; }
 .pal-roster-traits { display: flex; flex-wrap: wrap; gap: 4px; color: var(--muted); font-size: 12px; }
 .pal-roster-traits em { padding: 3px 7px; border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border)); border-radius: 999px; color: var(--primary); background: var(--primary-surface); font-style: normal; font-weight: 650; }
 .pal-care-badge { display: inline-flex; width: fit-content; align-items: center; gap: 4px; padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 12px; font-weight: 650; }
@@ -312,6 +318,13 @@
 .pal-work-detail ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px; margin: 0; padding: 1px; background: var(--border); list-style: none; }
 .pal-work-detail li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 10px; background: var(--surface-subtle); font-size: 12px; }
 .pal-work-detail li strong { color: var(--primary); }
+.pal-skill-section ul { display: grid; gap: 1px; margin: 0; padding: 1px; background: var(--border); list-style: none; }
+.pal-skill-section li { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding: 10px; background: var(--surface-subtle); }
+.pal-skill-section li > div { display: grid; min-width: 0; gap: 4px; }
+.pal-skill-section li strong { color: var(--foreground); font-size: 13px; }
+.pal-skill-section li code { width: fit-content; color: var(--muted-strong); font-size: 11px; }
+.pal-skill-section li small, .pal-skill-section li > span { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.pal-skill-section li p { margin: 0; color: var(--muted-strong); font-size: 12px; line-height: 1.5; }
 .pal-technical-ids p { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 8px; }
 .pal-roster-location { display: grid; gap: 2px; }
 .pal-roster-location strong { font-size: 12px; }
@@ -564,7 +577,10 @@
   .pal-metadata-warning { grid-template-columns: auto minmax(0, 1fr); }
   .pal-metadata-warning code { grid-column: 1 / -1; }
   .pal-aptitude-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .pal-work-filter > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pal-work-filter > div, .pal-passive-filter > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pal-aptitude-filters[open] { position: fixed; z-index: 75; inset: 0; overflow: auto; padding: 16px; border: 0; border-radius: 0; background: var(--background); }
+  .pal-aptitude-filters[open] summary { position: sticky; z-index: 1; top: -16px; margin: -16px -16px 10px; padding: 16px; border-bottom: 1px solid var(--border); background: var(--background); }
+  .pal-aptitude-filters[open] .pal-aptitude-filter-grid { padding-top: 0; }
   .pal-aptitude-apply { width: 100%; }
   .pal-roster-head { display: none; }
   .pal-roster-row { grid-template-columns: minmax(0, 1fr) auto; gap: 10px; padding: 14px; }

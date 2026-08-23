@@ -29,6 +29,7 @@ from palserver_console.world.cache import (
     entity_detail,
     query_cache,
     query_pal_care_summary,
+    query_pal_passive_skill_options,
     query_pal_roster,
     read_cache_metadata,
     validate_cache_file,
@@ -428,7 +429,9 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
     assert total == 2
     assert boss["ownerName"] == "测试玩家"
     assert boss["baseName"] == "据点甲"
-    assert boss["detail"] == {
+    detail = cast(dict[str, Any], boss["detail"])
+    skills = detail.pop("skills")
+    assert detail == {
         "gender": "EPalGenderType::Male",
         "rank": 3,
         "isBoss": True,
@@ -462,6 +465,25 @@ def test_pal_list_includes_owner_base_names_and_display_traits(tmp_path: Path) -
             "activity_recorded": True,
         },
     }
+    assert skills == {
+        "passive": [],
+        "equipped": [],
+        "learned": [],
+        "partner": {
+            "id": "Fluffy Shield",
+            "name": None,
+            "description": (
+                "When activated, equips to the player and becomes a shield. "
+                "Sometimes drops Wool when assigned to Ranch."
+            ),
+            "sourceName": "Fluffy Shield",
+            "rank": None,
+            "element": None,
+            "power": None,
+            "cooldown": None,
+            "metadataKnown": True,
+        },
+    }
 
 
 def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: Path) -> None:
@@ -487,15 +509,14 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
                     float(index % 101), float(index % 101), float(index % 101), float(index % 101),
                     "{}" if index == 1_599 else '{"Handcraft":1}',
                     0 if index == 1_599 else 1,
-                    None, None, None, None, None, "{}",
+                        None, None, None, None, None, "[]", "[]", "[]", "null", "{}",
             )
             for index in range(start, stop)
         ]
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pals VALUES(" + ", ".join("?" for _ in range(30)) + ")",
             rows(0, 1_600),
         )
     first_1600, total_1600 = query_pal_roster(
@@ -516,8 +537,7 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(
-            "INSERT INTO pals VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pals VALUES(" + ", ".join("?" for _ in range(30)) + ")",
             rows(1_600, 5_000),
         )
     level_page, total_5000 = query_pal_roster(
@@ -604,6 +624,91 @@ def test_pal_roster_exposes_and_filters_aptitude_with_all_work_semantics(tmp_pat
         min_work_level=3,
     )
     assert none == [] and none_total == 0
+
+
+def test_pal_skills_keep_unknowns_and_filter_by_all_selected_passives(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    characters = level["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    save_parameter = characters[1]["value"]["RawData"]["value"]["object"]["SaveParameter"]["value"]
+    save_parameter["PassiveSkillList"] = _property(
+        [_property("Legend", "NameProperty"), _property("MoveSpeed_up_2", "NameProperty")],
+        "ArrayProperty",
+    )
+    save_parameter["EquipWaza"] = _property(
+        [{"WazaID": _property("EPalWazaID::AirCanon", "EnumProperty")}], "ArrayProperty"
+    )
+    save_parameter["MasteredWaza"] = _property(
+        [
+            _property("EPalWazaID::PowerShot", "EnumProperty"),
+            _property("UnknownWaza", "NameProperty"),
+        ],
+        "ArrayProperty",
+    )
+    cache = tmp_path / "world-cache-skills.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    rows, total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="balanced",
+        passive_skills=("Legend", "MoveSpeed_up_2"),
+    )
+    assert total == 1
+    skills = cast(dict[str, Any], rows[0]["skills"])
+    assert skills["passive"] == [
+        {
+            "id": "Legend",
+            "name": "传说",
+            "description": "攻击 +20%，防御 +20%，移动速度提升20%",
+            "sourceName": "Legend",
+            "rank": 4,
+            "element": None,
+            "power": None,
+            "cooldown": None,
+            "metadataKnown": True,
+        },
+        {
+            "id": "MoveSpeed_up_2",
+            "name": "运动健将",
+            "description": "移动速度提升20%",
+            "sourceName": "Runner",
+            "rank": 3,
+            "element": None,
+            "power": None,
+            "cooldown": None,
+            "metadataKnown": True,
+        },
+    ]
+    assert skills["equipped"][0]["id"] == "AirCanon"
+    assert skills["equipped"][0]["element"] == "Normal"
+    assert skills["equipped"][0]["power"] == 40
+    assert skills["equipped"][0]["cooldown"] == 2.0
+    assert skills["equipped"][0]["metadataKnown"] is True
+    assert skills["learned"][1] == {
+        "id": "UnknownWaza",
+        "name": None,
+        "description": None,
+        "sourceName": None,
+        "rank": None,
+        "element": None,
+        "power": None,
+        "cooldown": None,
+        "metadataKnown": False,
+    }
+    assert [item["name"] for item in query_pal_passive_skill_options(cache)] == ["传说", "运动健将"]
+    no_match, no_match_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="balanced",
+        passive_skills=("Legend", "UnknownPassive"),
+    )
+    assert no_match == [] and no_match_total == 0
 
 
 def test_missing_world_metadata_keeps_unknown_pal_records_read_only(
@@ -936,6 +1041,11 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     database = Database(settings.database_path)
     database.migrate()
     level, players = _synthetic_properties()
+    characters = level["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    boss_save = characters[1]["value"]["RawData"]["value"]["object"]["SaveParameter"]["value"]
+    boss_save["PassiveSkillList"] = _property(
+        [_property("Legend", "NameProperty")], "ArrayProperty"
+    )
     cache_root = settings.data_dir / "cache"
     cache_root.mkdir(parents=True)
     cache = cache_root / "world-cache-fixture.sqlite"
@@ -960,6 +1070,10 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
         invalid_work = client.get(
             "/api/world/pals/roster?workSuitability=UnknownWork&minWorkLevel=1"
         )
+        passive_roster = client.get("/api/world/pals/roster?passiveSkill=Legend")
+        invalid_passive = client.get(
+            "/api/world/pals/roster?passiveSkill=Legend,Legend"
+        )
         roster_replaced = client.get("/api/world/pals/roster?snapshotId=superseded")
         pal_detail = client.get(f"/api/world/pals/{uuid.UUID(int=401)}")
 
@@ -977,6 +1091,7 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert roster.json()["pageSize"] == 60
     assert roster.json()["metadata"]["status"] == "ready"
     assert roster.json()["items"][0]["aptitude"]["metadataKnown"] is True
+    assert roster.json()["passiveSkills"][0]["name"] == "传说"
     assert aptitude_roster.status_code == 200
     assert aptitude_roster.json()["total"] == 1
     assert aptitude_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"
@@ -984,6 +1099,11 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert invalid_aptitude.json()["errorCode"] == "INVALID_PAL_APTITUDE_FILTER"
     assert invalid_work.status_code == 422
     assert invalid_work.json()["errorCode"] == "INVALID_PAL_WORK_FILTER"
+    assert passive_roster.status_code == 200
+    assert passive_roster.json()["total"] == 1
+    assert passive_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"
+    assert invalid_passive.status_code == 422
+    assert invalid_passive.json()["errorCode"] == "INVALID_PAL_PASSIVE_FILTER"
     assert roster_replaced.status_code == 409
     assert roster_replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
     assert pal_detail.status_code == 200

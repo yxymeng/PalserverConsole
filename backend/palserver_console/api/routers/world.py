@@ -96,6 +96,7 @@ def router(deps: AppDependencies) -> APIRouter:
         minAverageIv: float | None = None,
         workSuitability: str | None = None,
         minWorkLevel: int = 1,
+        passiveSkill: str | None = None,
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
@@ -130,6 +131,11 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(
                 422, "INVALID_PAL_WORK_FILTER", "工作适应性或最低工作等级不正确。"
             )
+        passive_skills = tuple(
+            name.strip() for name in (passiveSkill or "").split(",") if name.strip()
+        )
+        if len(passive_skills) > 12 or len(set(passive_skills)) != len(passive_skills):
+            return error_response(422, "INVALID_PAL_PASSIVE_FILTER", "被动技能筛选条件不正确。")
         try:
             return deps.world.list_pal_roster(
                 page=page,
@@ -147,6 +153,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 min_average_iv=minAverageIv,
                 work_suitabilities=work_suitabilities,
                 min_work_level=minWorkLevel,
+                passive_skills=passive_skills,
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:

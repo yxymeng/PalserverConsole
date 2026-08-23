@@ -138,6 +138,7 @@ export type WorldPalRosterItem = WorldPalListItem & {
   isLucky: boolean;
   locationType: "player" | "party" | "storage" | "base" | "unassigned";
   aptitude: WorldPalAptitude;
+  skills: WorldPalSkills;
   care: WorldPalCare;
 };
 export type WorldPalAptitude = {
@@ -146,6 +147,23 @@ export type WorldPalAptitude = {
   workSuitabilities: { type: string; level: number }[];
   metadataKnown: boolean;
   metadataLabel: "资料未收录" | null;
+};
+export type WorldPalSkill = {
+  id: string;
+  name: string | null;
+  description: string | null;
+  sourceName: string | null;
+  rank: number | null;
+  element: string | null;
+  power: number | null;
+  cooldown: number | null;
+  metadataKnown: boolean;
+};
+export type WorldPalSkills = {
+  passive: WorldPalSkill[];
+  equipped: WorldPalSkill[];
+  learned: WorldPalSkill[];
+  partner: WorldPalSkill | null;
 };
 export type WorldMetadataStatus = {
   status: "ready" | "unavailable";
@@ -184,6 +202,7 @@ export type WorldPalRosterResponse = WorldSnapshotContext & {
   pageSize: number;
   total: number;
   careSummary: WorldPalCareSummary;
+  passiveSkills: WorldPalSkill[];
   metadata: WorldMetadataStatus;
 };
 export type WorldGuildListItem = {
@@ -214,6 +233,7 @@ export type WorldPalDetail = WorldPalListItem & {
   container: WorldContainerReference | null;
   care: WorldPalCare;
   aptitude: WorldPalAptitude;
+  skills: WorldPalSkills;
   metadata: WorldMetadataStatus;
 };
 export type WorldGuildDetail = WorldGuildListItem & {

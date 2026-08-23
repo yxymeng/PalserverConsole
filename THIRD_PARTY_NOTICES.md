@@ -96,7 +96,8 @@ applies to these adapted layout definitions.
 - Source: https://github.com/deafdudecomputers/PalworldSaveTools
 - Fixed revision: `18b9554168ecf684c5f1e1e4d8e583083b942eb9`.
 - Purpose: character catalog, selected local WebP portrait source, and the species
-  `max_full_stomach`, rarity, and work-suitability values used by read-only world views.
+  `max_full_stomach`, rarity, work-suitability, and partner-skill source values used
+  by read-only world views.
 - License reported by the source repository: MIT License.
 - Import behavior: `scripts/sync-pal-catalog.ps1` checks out the fixed revision,
   copies only the required WebP files, and retains the source license at
@@ -106,26 +107,32 @@ applies to these adapted layout definitions.
   `max_full_stomach` mapping in `world/pal_care_species.py`.
 - `backend/tools/generate_world_metadata.py` verifies the same pinned
   `characters.json` SHA-256
-  (`83373a0e6dab7f3feac88a08928356b955e07804e0da94b2d452e641ab2609f2`)
-  and generates data version `2026.08.22.1` of the shared offline metadata
-  bundle. The bundle records schema version 1, source revision, generation
-  method, per-collection counts, and a SHA-256 integrity value. Its initial Pal
-  consumer imports only species rarity and positive work-suitability levels;
-  the shared `skills` and `items` collections remain empty until a separately
-  licensed source is approved.
+  (`83373a0e6dab7f3feac88a08928356b955e07804e0da94b2d452e641ab2609f2`) and
+  `skills.json` SHA-256
+  (`b9172f389bf56a307194d25b70aca23f8610ef81de32bb44bda827f65b83add1`). It
+  generates data version `2026.08.23.1` of the shared offline metadata bundle,
+  including 2,280 passive and active skill records. The bundle records schema
+  version 1, fixed source revisions and input hashes, generation method,
+  per-collection counts, and a SHA-256 integrity value. Active and partner skill
+  fields unavailable from the fixed sources remain explicitly unavailable; the
+  `items` collection remains empty.
 - Application runtime loads only this bundled local metadata. It does not fetch
   metadata from the network or send save contents to this or any other source.
 
 We thank the PalworldSaveTools maintainers for making this catalog available.
 
-## zaigie/palworld-server-tool Chinese character mapping
+## zaigie/palworld-server-tool Chinese Pal and passive-skill mapping
 
 - Source: https://github.com/zaigie/palworld-server-tool
 - Fixed revision: `f45a48ef25ce08a5311a27e55b17062ba0bb4362`.
-- Purpose: Simplified Chinese labels for Pal and captured human/NPC Character IDs.
+- Purpose: Simplified Chinese labels for Pal and captured human/NPC Character IDs,
+  plus passive-skill names and descriptions from `web/src/assets/skill.json`.
 - License: Apache License 2.0.
 - The source license is retained at
   `frontend/public/assets/pals/LICENSE-palworld-server-tool.txt`.
+- `backend/tools/generate_world_metadata.py` verifies the fixed `skill.json`
+  SHA-256 (`88f80d0349de940cebed4225da327c8d3ad5e7aa43e502dbd025d64c9489f1c9`)
+  before adding it to the local, offline metadata bundle.
 
 We thank the palworld-server-tool maintainers for maintaining the localization mapping.
 

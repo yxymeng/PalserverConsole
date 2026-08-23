@@ -44,6 +44,7 @@ class MetadataStatus(TypedDict):
 class PalSpeciesMetadata:
     rarity: int
     work_suitabilities: dict[str, int]
+    partner_skill: dict[str, str] | None
 
 
 @dataclass(frozen=True)
@@ -54,6 +55,7 @@ class WorldMetadataBundle:
     skills: dict[str, dict[str, object]]
     items: dict[str, dict[str, object]]
     _pals_casefold: dict[str, PalSpeciesMetadata] = field(repr=False)
+    _skills_casefold: dict[str, dict[str, object]] = field(repr=False)
 
     @property
     def status(self) -> MetadataStatus:
@@ -72,6 +74,8 @@ class WorldMetadataBundle:
             return direct
         return self._pals_casefold.get(character_id.casefold())
 
+    def skill(self, skill_id: str) -> dict[str, object] | None:
+        return self.skills.get(skill_id) or self._skills_casefold.get(skill_id.casefold())
 
 class WorldMetadataError(ValueError):
     def __init__(self, code: str, message: str) -> None:
@@ -121,6 +125,7 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
             "generatedBy",
             "collections",
             "integrity",
+            "sources",
         },
         "root",
     )
@@ -139,6 +144,7 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
     _required_text(source, "path")
     _required_text(source, "licenseFile")
     _required_text(payload, "generatedBy")
+    _validate_sources(_required_mapping(payload, "sources"))
     _require_equal(source, "license", "MIT")
     if not _is_hex_digest(source_revision, 40) or not _is_hex_digest(source_sha256, 64):
         raise WorldMetadataError("WORLD_METADATA_INVALID", "Metadata source digest is invalid.")
@@ -173,7 +179,7 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
     for character_id, raw in pals_raw.items():
         if not isinstance(character_id, str) or not character_id or not isinstance(raw, Mapping):
             raise WorldMetadataError("WORLD_METADATA_INVALID", "Pal metadata entry is invalid.")
-        _require_keys(raw, {"rarity", "workSuitabilities"}, f"pal/{character_id}")
+        _require_keys(raw, {"rarity", "workSuitabilities", "partnerSkill"}, f"pal/{character_id}")
         rarity = raw.get("rarity")
         suitability_raw = raw.get("workSuitabilities")
         if (
@@ -200,14 +206,33 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
                     f"Pal work suitability is invalid: {character_id}/{suitability}.",
                 )
             suitabilities[suitability] = level
-        pals[character_id] = PalSpeciesMetadata(rarity, suitabilities)
+        partner_raw = raw.get("partnerSkill")
+        if partner_raw is None:
+            partner_skill = None
+        elif (
+            isinstance(partner_raw, Mapping)
+            and set(partner_raw) == {"id", "sourceName", "description"}
+            and all(isinstance(partner_raw.get(key), str) for key in partner_raw)
+        ):
+            partner_skill = {
+                "id": str(partner_raw["id"]),
+                "sourceName": str(partner_raw["sourceName"]),
+                "description": str(partner_raw["description"]),
+            }
+        else:
+            raise WorldMetadataError(
+                "WORLD_METADATA_INVALID", f"Pal partner skill is invalid: {character_id}."
+            )
+        pals[character_id] = PalSpeciesMetadata(rarity, suitabilities, partner_skill)
+    skills = _object_collection(skills_raw, "skills")
     return WorldMetadataBundle(
         data_version=data_version,
         source_revision=source_revision,
         pals=pals,
-        skills=_object_collection(skills_raw, "skills"),
+        skills=skills,
         items=_object_collection(items_raw, "items"),
         _pals_casefold={name.casefold(): value for name, value in pals.items()},
+        _skills_casefold={name.casefold(): value for name, value in skills.items()},
     )
 
 
@@ -256,3 +281,33 @@ def _object_collection(value: Mapping[str, Any], name: str) -> dict[str, dict[st
             )
         result[key] = cast(dict[str, object], dict(item))
     return result
+
+
+def _validate_sources(sources: Mapping[str, Any]) -> None:
+    if not sources:
+        raise WorldMetadataError("WORLD_METADATA_INVALID", "Metadata sources are missing.")
+    for name, source in sources.items():
+        if not isinstance(name, str) or not isinstance(source, Mapping):
+            raise WorldMetadataError("WORLD_METADATA_INVALID", "Metadata source is invalid.")
+        _require_keys(source, {"repository", "revision", "license", "files"}, f"sources/{name}")
+        _required_text(source, "repository")
+        revision = _required_text(source, "revision")
+        _required_text(source, "license")
+        if not _is_hex_digest(revision, 40):
+            raise WorldMetadataError(
+                "WORLD_METADATA_INVALID", "Metadata source revision is invalid."
+            )
+        files_raw = _required_mapping(source, "files")
+        if not files_raw:
+            raise WorldMetadataError("WORLD_METADATA_INVALID", "Metadata source files are missing.")
+        for file_name, file_info in files_raw.items():
+            if not isinstance(file_name, str) or not isinstance(file_info, Mapping):
+                raise WorldMetadataError(
+                    "WORLD_METADATA_INVALID", "Metadata source file is invalid."
+                )
+            _require_keys(file_info, {"path", "sha256"}, f"sources/{name}/{file_name}")
+            _required_text(file_info, "path")
+            if not _is_hex_digest(_required_text(file_info, "sha256"), 64):
+                raise WorldMetadataError(
+                    "WORLD_METADATA_INVALID", "Metadata source digest is invalid."
+                )
