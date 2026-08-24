@@ -457,7 +457,7 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
         base_id=None,
     )
     assert location_total == 3
-    assert sum(int(item["quantity"]) for item in locations) == items[0]["totalQuantity"]
+    assert sum(cast(int, item["quantity"]) for item in locations) == items[0]["totalQuantity"]
     assert {item["locationType"] for item in locations} == {"player", "base"}
     assert all(item["containerId"] for item in locations)
 
