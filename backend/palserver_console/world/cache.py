@@ -1367,12 +1367,14 @@ def _skill_presentations(
     return result
 
 
-def _partner_skill_presentation(partner: Mapping[str, str] | None) -> dict[str, object] | None:
+def _partner_skill_presentation(
+    partner: Mapping[str, object] | None,
+) -> dict[str, object] | None:
     if partner is None:
         return None
     return {
         "id": partner["id"],
-        "name": None,
+        "name": _text(partner.get("name")),
         "description": _text(partner.get("description")),
         "sourceName": partner["sourceName"],
         "rank": None,

@@ -44,7 +44,7 @@ class MetadataStatus(TypedDict):
 class PalSpeciesMetadata:
     rarity: int
     work_suitabilities: dict[str, int]
-    partner_skill: dict[str, str] | None
+    partner_skill: dict[str, object] | None
 
 
 @dataclass(frozen=True)
@@ -222,11 +222,16 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
             partner_skill = None
         elif (
             isinstance(partner_raw, Mapping)
-            and set(partner_raw) == {"id", "sourceName", "description"}
-            and all(isinstance(partner_raw.get(key), str) for key in partner_raw)
+            and set(partner_raw) == {"id", "name", "sourceName", "description"}
+            and all(
+                isinstance(partner_raw.get(key), str)
+                for key in ("id", "sourceName", "description")
+            )
+            and (partner_raw.get("name") is None or isinstance(partner_raw.get("name"), str))
         ):
             partner_skill = {
                 "id": str(partner_raw["id"]),
+                "name": partner_raw["name"],
                 "sourceName": str(partner_raw["sourceName"]),
                 "description": str(partner_raw["description"]),
             }
