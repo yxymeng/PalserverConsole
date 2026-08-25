@@ -182,7 +182,7 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_WORLD_SEARCH", "搜索文字不能超过 100 个字符。")
         if category is not None and len(category) > 100:
             return error_response(422, "INVALID_INVENTORY_CATEGORY", "物品分类筛选条件不正确。")
-        if scope not in {"all", "player", "base"}:
+        if scope not in {"inventory", "all", "player", "base", "world"}:
             return error_response(422, "INVALID_INVENTORY_SCOPE", "仓库范围筛选条件不正确。")
         if sort not in {"name", "quantity"}:
             return error_response(422, "INVALID_INVENTORY_SORT", "仓库排序方式不正确。")
@@ -211,6 +211,8 @@ def router(deps: AppDependencies) -> APIRouter:
         scope: str = "all",
         ownerId: str | None = None,
         baseId: str | None = None,
+        locationType: str | None = None,
+        groupId: str | None = None,
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
@@ -218,8 +220,21 @@ def router(deps: AppDependencies) -> APIRouter:
             return denied
         if page < 1 or pageSize < 1 or pageSize > 100:
             return error_response(422, "INVALID_INVENTORY_PAGE", "仓库位置分页参数不正确。")
-        if scope not in {"all", "player", "base"}:
+        if scope not in {"inventory", "all", "player", "base", "world"}:
             return error_response(422, "INVALID_INVENTORY_SCOPE", "仓库范围筛选条件不正确。")
+        if locationType is not None and locationType not in {
+            "player",
+            "base",
+            "world",
+            "unassigned",
+        }:
+            return error_response(
+                422, "INVALID_INVENTORY_LOCATION_TYPE", "仓库存放分组不正确。"
+            )
+        if (locationType in {"player", "base"}) != bool(groupId):
+            return error_response(
+                422, "INVALID_INVENTORY_LOCATION_GROUP", "仓库存放分组 ID 不正确。"
+            )
         try:
             return deps.world.get_inventory(
                 item_id,
@@ -228,6 +243,8 @@ def router(deps: AppDependencies) -> APIRouter:
                 scope=scope,
                 owner_id=ownerId,
                 base_id=baseId,
+                location_type=locationType,
+                group_id=groupId,
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:

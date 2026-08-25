@@ -662,6 +662,17 @@
 .inventory-locations { display: grid; gap: 8px; margin: 0 16px 14px 66px; padding: 13px; border: 1px solid color-mix(in srgb, var(--primary) 25%, var(--border)); border-radius: var(--radius-sm); background: var(--surface); }
 .inventory-locations h3 { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 1px; color: var(--foreground); font-size: 13px; }
 .inventory-locations h3 small { color: var(--muted); font-weight: 500; }
+.inventory-location-group { overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); }
+.inventory-location-group[data-expanded="true"] { border-color: color-mix(in srgb, var(--primary) 34%, var(--border)); background: var(--surface); }
+.inventory-location-group-summary { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; width: 100%; min-height: 46px; align-items: center; gap: 12px; padding: 9px 11px; border: 0; color: var(--foreground); background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.inventory-location-group-summary:hover { background: var(--surface-hover); }
+.inventory-location-group-summary:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: -3px; }
+.inventory-location-group-summary > span { display: flex; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 5px 9px; }
+.inventory-location-group-summary small { color: var(--muted); font-size: 11px; }
+.inventory-location-group-summary > strong { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inventory-location-group-summary svg { color: var(--muted); transition: transform .16s ease; }
+.inventory-location-group[data-expanded="true"] .inventory-location-group-summary svg { transform: rotate(180deg); color: var(--primary); }
+.inventory-location-details { display: grid; gap: 7px; padding: 0 9px 9px; }
 .inventory-location { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 14px; padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); font-size: 13px; }
 .inventory-location > span { display: grid; min-width: 0; gap: 2px; }
 .inventory-location > span strong, .inventory-location > span small, .inventory-location code { overflow-wrap: anywhere; }
@@ -669,7 +680,11 @@
 .inventory-location > strong { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .inventory-location details { grid-column: 1 / -1; color: var(--muted); font-size: 11px; }
 .inventory-location summary { cursor: pointer; }
-.inventory-location details code { display: block; margin-top: 6px; color: var(--muted-strong); }
+.inventory-location details dl { display: grid; gap: 5px; margin: 7px 0 0; }
+.inventory-location details dl > div { display: grid; grid-template-columns: minmax(116px, auto) minmax(0, 1fr); gap: 8px; }
+.inventory-location details dt { color: var(--muted); }
+.inventory-location details dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--muted-strong); }
+.inventory-location details code { color: inherit; }
 .inventory-more { justify-self: start; margin: 2px 0 0; }
 .inventory-footer { margin-top: 0; }
 
@@ -690,5 +705,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .inventory-chevron { transition: none; }
+  .inventory-chevron, .inventory-location-group-summary svg { transition: none; }
 }

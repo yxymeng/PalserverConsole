@@ -216,7 +216,7 @@ export type WorldInventoryListItem = {
   id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;
   ownerId: string | null; guildId: string | null; baseId: string | null;
 };
-export type WorldInventoryScope = "all" | "player" | "base";
+export type WorldInventoryScope = "inventory" | "player" | "base" | "world" | "all";
 export type WorldInventoryItem = {
   itemId: string;
   name: string | null;
@@ -229,7 +229,7 @@ export type WorldInventoryItem = {
 };
 export type WorldInventoryLocation = {
   id: number;
-  locationType: "player" | "base" | "unassigned";
+  locationType: "player" | "base" | "world" | "unassigned";
   locationLabel: string;
   ownerId: string | null;
   ownerName: string | null;
@@ -238,6 +238,17 @@ export type WorldInventoryLocation = {
   slotIndex: number;
   quantity: number;
   containerId: string | null;
+  mapObjectType: string | null;
+  mapObjectInstanceId: string | null;
+  worldPosition: { x: number; y: number; z: number } | null;
+};
+export type WorldInventoryLocationGroup = {
+  locationType: WorldInventoryLocation["locationType"];
+  groupId: string | null;
+  label: string;
+  quantitySum: number;
+  locationCount: number;
+  containerCount: number;
 };
 export type WorldInventoryResponse = WorldSnapshotContext & {
   items: WorldInventoryItem[];
@@ -249,6 +260,7 @@ export type WorldInventoryResponse = WorldSnapshotContext & {
 };
 export type WorldInventoryDetailResponse = WorldSnapshotContext & {
   itemId: string;
+  groups: WorldInventoryLocationGroup[];
   locations: WorldInventoryLocation[];
   page: number;
   pageSize: number;

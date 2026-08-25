@@ -49,7 +49,7 @@ class PalSpeciesMetadata:
 
 @dataclass(frozen=True)
 class ItemMetadata:
-    name: str
+    name: str | None
     category: str
     rarity: str
 
@@ -245,9 +245,12 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
     for item_id, raw in items_raw.items():
         if not isinstance(item_id, str) or not item_id or not isinstance(raw, Mapping):
             raise WorldMetadataError("WORLD_METADATA_INVALID", "Item metadata entry is invalid.")
-        _require_keys(raw, {"name", "category", "rarity"}, f"item/{item_id}")
+        if set(raw) not in ({"category", "rarity"}, {"name", "category", "rarity"}):
+            raise WorldMetadataError(
+                "WORLD_METADATA_INVALID", f"Metadata object keys are invalid: item/{item_id}."
+            )
         items[item_id] = ItemMetadata(
-            name=_required_text(raw, "name"),
+            name=_required_text(raw, "name") if "name" in raw else None,
             category=_required_text(raw, "category"),
             rarity=_required_text(raw, "rarity"),
         )

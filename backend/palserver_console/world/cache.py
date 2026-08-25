@@ -16,7 +16,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 9
+CACHE_SCHEMA_VERSION = 10
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
@@ -150,13 +150,19 @@ CREATE TABLE inventory_items (
     owner_kind TEXT NOT NULL,
     owner_id TEXT,
     guild_id TEXT,
-    base_id TEXT
+    base_id TEXT,
+    map_object_type TEXT,
+    map_object_instance_id TEXT,
+    world_x REAL,
+    world_y REAL,
+    world_z REAL
 );
 CREATE INDEX inventory_items_container_idx ON inventory_items(container_id, slot_index);
 CREATE INDEX inventory_items_item_idx ON inventory_items(item_id);
 CREATE INDEX inventory_items_owner_idx ON inventory_items(owner_id);
 CREATE INDEX inventory_items_base_idx ON inventory_items(base_id);
 CREATE INDEX inventory_items_category_idx ON inventory_items(item_category);
+CREATE INDEX inventory_items_location_type_idx ON inventory_items(owner_kind);
 """
 
 
@@ -249,6 +255,7 @@ def build_world_cache(
     character_containers = _list_property(world.get("CharacterContainerSaveData"))
     groups = _list_property(world.get("GroupSaveDataMap"))
     base_camps = _list_property(world.get("BaseCampSaveData"))
+    map_objects = _list_property(world.get("MapObjectSaveData"))
     game_time_ticks = _game_time_ticks(world)
 
     group_rows, player_group = _groups(groups)
@@ -266,7 +273,11 @@ def build_world_cache(
         characters, player_profiles, player_group, instance_locations, world_metadata
     )
     item_container_rows, item_rows = _item_containers(
-        item_containers, player_profiles, base_rows, world_metadata
+        item_containers,
+        player_profiles,
+        base_rows,
+        world_metadata,
+        _map_object_item_containers(map_objects),
     )
 
     counts = {
@@ -321,8 +332,9 @@ def build_world_cache(
             """INSERT INTO inventory_items(
                 container_id, slot_index, item_id, item_name, item_category, item_rarity,
                 metadata_known, quantity, owner_kind,
-                owner_id, guild_id, base_id
-            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                owner_id, guild_id, base_id, map_object_type,
+                map_object_instance_id, world_x, world_y, world_z
+            ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             item_rows,
         )
         connection.execute(f"PRAGMA user_version = {CACHE_SCHEMA_VERSION}")
@@ -555,7 +567,10 @@ def query_inventory(
 ) -> tuple[list[dict[str, object]], int, list[str]]:
     """Aggregate immutable item slots before they leave the server."""
 
-    if scope not in {"all", "player", "base"} or sort not in {"name", "quantity"}:
+    if scope not in {"inventory", "all", "player", "base", "world"} or sort not in {
+        "name",
+        "quantity",
+    }:
         raise ValueError("Unknown inventory query.")
     clauses, parameters = _inventory_filters(
         search=search,
@@ -625,8 +640,57 @@ def query_inventory_locations(
     scope: str,
     owner_id: str | None,
     base_id: str | None,
+    location_type: str | None = None,
+    group_id: str | None = None,
 ) -> tuple[list[dict[str, object]], int]:
-    if scope not in {"all", "player", "base"}:
+    if scope not in {"inventory", "all", "player", "base", "world"}:
+        raise ValueError("Unknown inventory query.")
+    clauses, parameters = _inventory_filters(
+        search=None,
+        category=None,
+        scope=scope,
+        owner_id=owner_id,
+        base_id=base_id,
+    )
+    clauses.append("ii.item_id = ?")
+    parameters.append(item_id)
+    _add_inventory_group_filter(clauses, parameters, location_type, group_id)
+    where = " WHERE " + " AND ".join(clauses)
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
+    try:
+        total = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM inventory_items AS ii" + where, parameters
+            ).fetchone()[0]
+        )
+        rows = connection.execute(
+            "SELECT ii.id, ii.container_id AS containerId, ii.slot_index AS slotIndex, "
+            "ii.quantity, ii.owner_kind AS ownerKind, ii.owner_id AS ownerId, "
+            "ii.base_id AS baseId, ii.map_object_type AS mapObjectType, "
+            "ii.map_object_instance_id AS mapObjectInstanceId, "
+            "ii.world_x AS worldX, ii.world_y AS worldY, ii.world_z AS worldZ, "
+            "p.name AS ownerName, b.name AS baseName FROM inventory_items AS ii "
+            "LEFT JOIN players AS p ON p.id = ii.owner_id "
+            "LEFT JOIN bases AS b ON b.id = ii.base_id"
+            f"{where} ORDER BY ii.owner_kind, COALESCE(p.name, b.name, ''), ii.slot_index, ii.id "
+            "LIMIT ? OFFSET ?",
+            (*parameters, page_size, (page - 1) * page_size),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [_inventory_location_public_row(dict(row)) for row in rows], total
+
+
+def query_inventory_location_groups(
+    path: Path,
+    item_id: str,
+    *,
+    scope: str,
+    owner_id: str | None,
+    base_id: str | None,
+) -> list[dict[str, object]]:
+    if scope not in {"inventory", "all", "player", "base", "world"}:
         raise ValueError("Unknown inventory query.")
     clauses, parameters = _inventory_filters(
         search=None,
@@ -641,25 +705,25 @@ def query_inventory_locations(
     connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
     connection.row_factory = sqlite3.Row
     try:
-        total = int(
-            connection.execute(
-                "SELECT COUNT(*) FROM inventory_items AS ii" + where, parameters
-            ).fetchone()[0]
-        )
         rows = connection.execute(
-            "SELECT ii.id, ii.container_id AS containerId, ii.slot_index AS slotIndex, "
-            "ii.quantity, ii.owner_kind AS ownerKind, ii.owner_id AS ownerId, "
-            "ii.base_id AS baseId, "
-            "p.name AS ownerName, b.name AS baseName FROM inventory_items AS ii "
+            "SELECT ii.owner_kind AS ownerKind, "
+            "CASE WHEN ii.owner_kind = 'player_inventory' THEN ii.owner_id "
+            "WHEN ii.owner_kind = 'base_inventory' THEN ii.base_id ELSE NULL END AS groupId, "
+            "MAX(p.name) AS ownerName, MAX(b.name) AS baseName, "
+            "SUM(ii.quantity) AS quantitySum, COUNT(*) AS locationCount, "
+            "COUNT(DISTINCT ii.container_id) AS containerCount "
+            "FROM inventory_items AS ii "
             "LEFT JOIN players AS p ON p.id = ii.owner_id "
             "LEFT JOIN bases AS b ON b.id = ii.base_id"
-            f"{where} ORDER BY ii.owner_kind, COALESCE(p.name, b.name, ''), ii.slot_index, ii.id "
-            "LIMIT ? OFFSET ?",
-            (*parameters, page_size, (page - 1) * page_size),
+            f"{where} GROUP BY ii.owner_kind, groupId "
+            "ORDER BY CASE ii.owner_kind WHEN 'player_inventory' THEN 0 "
+            "WHEN 'base_inventory' THEN 1 WHEN 'world' THEN 2 ELSE 3 END, "
+            "COALESCE(MAX(p.name), MAX(b.name), groupId, '') COLLATE NOCASE",
+            parameters,
         ).fetchall()
     finally:
         connection.close()
-    return [_inventory_location_public_row(dict(row)) for row in rows], total
+    return [_inventory_group_public_row(dict(row)) for row in rows]
 
 
 def _inventory_filters(
@@ -676,6 +740,10 @@ def _inventory_filters(
         clauses.append("ii.owner_kind = 'player_inventory'")
     elif scope == "base":
         clauses.append("ii.owner_kind = 'base_inventory'")
+    elif scope == "inventory":
+        clauses.append("ii.owner_kind IN ('player_inventory', 'base_inventory')")
+    elif scope == "world":
+        clauses.append("ii.owner_kind = 'world'")
     if owner_id:
         clauses.append("ii.owner_id = ?")
         parameters.append(owner_id)
@@ -689,6 +757,35 @@ def _inventory_filters(
         clauses.append("(ii.item_id LIKE ? OR ii.item_name LIKE ?)")
         parameters.extend([f"%{search}%", f"%{search}%"])
     return clauses, parameters
+
+
+def _add_inventory_group_filter(
+    clauses: list[str],
+    parameters: list[object],
+    location_type: str | None,
+    group_id: str | None,
+) -> None:
+    if location_type is None:
+        if group_id is not None:
+            raise ValueError("Inventory group ID requires a location type.")
+        return
+    owner_kind = {
+        "player": "player_inventory",
+        "base": "base_inventory",
+        "world": "world",
+        "unassigned": "unassigned",
+    }.get(location_type)
+    if owner_kind is None:
+        raise ValueError("Unknown inventory location group.")
+    clauses.append("ii.owner_kind = ?")
+    parameters.append(owner_kind)
+    if location_type in {"player", "base"}:
+        if not group_id:
+            raise ValueError("Inventory owner group requires a stable ID.")
+        clauses.append("ii.owner_id = ?" if location_type == "player" else "ii.base_id = ?")
+        parameters.append(group_id)
+    elif group_id is not None:
+        raise ValueError("World and unassigned groups do not use a group ID.")
 
 
 def _inventory_public_row(row: Mapping[str, object]) -> dict[str, object]:
@@ -717,6 +814,14 @@ def _inventory_location_public_row(row: Mapping[str, object]) -> dict[str, objec
     elif owner_kind == "base_inventory":
         label = f"据点：{base_name or base_id or '资料未收录'}"
         location_type = "base"
+    elif owner_kind == "world":
+        map_object_type = _text(row.get("mapObjectType"))
+        label = (
+            "世界宝箱"
+            if map_object_type and map_object_type.casefold().startswith("treasurebox")
+            else "世界容器"
+        )
+        location_type = "world"
     else:
         label = "未关联容器"
         location_type = "unassigned"
@@ -731,7 +836,42 @@ def _inventory_location_public_row(row: Mapping[str, object]) -> dict[str, objec
         "slotIndex": _integer(row.get("slotIndex")) or 0,
         "quantity": _integer(row.get("quantity")) or 0,
         "containerId": _text(row.get("containerId")),
+        "mapObjectType": _text(row.get("mapObjectType")),
+        "mapObjectInstanceId": _text(row.get("mapObjectInstanceId")),
+        "worldPosition": _world_position_public(row),
     }
+
+
+def _inventory_group_public_row(row: Mapping[str, object]) -> dict[str, object]:
+    owner_kind = _text(row.get("ownerKind")) or "unassigned"
+    group_id = _text(row.get("groupId"))
+    if owner_kind == "player_inventory":
+        location_type = "player"
+        label = f"玩家：{_text(row.get('ownerName')) or group_id or '资料未收录'}"
+    elif owner_kind == "base_inventory":
+        location_type = "base"
+        label = f"据点：{_text(row.get('baseName')) or group_id or '资料未收录'}"
+    elif owner_kind == "world":
+        location_type = "world"
+        label = "其他位置"
+    else:
+        location_type = "unassigned"
+        label = "未识别位置"
+    return {
+        "locationType": location_type,
+        "groupId": group_id,
+        "label": label,
+        "quantitySum": _integer(row.get("quantitySum")) or 0,
+        "locationCount": _integer(row.get("locationCount")) or 0,
+        "containerCount": _integer(row.get("containerCount")) or 0,
+    }
+
+
+def _world_position_public(row: Mapping[str, object]) -> dict[str, float] | None:
+    values = tuple(_number(row.get(key)) for key in ("worldX", "worldY", "worldZ"))
+    if any(value is None for value in values):
+        return None
+    return {"x": values[0], "y": values[1], "z": values[2]}  # type: ignore[dict-item]
 
 
 def query_pal_roster(
@@ -1709,6 +1849,9 @@ def _item_containers(
     profiles: Mapping[str, Mapping[str, Any]],
     bases: Sequence[tuple[Any, ...]],
     world_metadata: WorldMetadataBundle | None,
+    map_object_containers: Mapping[
+        str, tuple[str | None, str | None, float | None, float | None, float | None]
+    ],
 ) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     owner_by_container: dict[str, str] = {}
     for player_id, profile in profiles.items():
@@ -1735,7 +1878,16 @@ def _item_containers(
         base_id = _belong_id(belong, "BaseId", "BaseCampId", "base_id", "base_camp_id")
         if base_id not in base_ids:
             base_id = container_id if container_id in base_ids else None
-        kind = "player_inventory" if owner_id else ("base_inventory" if base_id else "unassigned")
+        map_object = map_object_containers.get(container_id)
+        kind = (
+            "player_inventory"
+            if owner_id
+            else "base_inventory"
+            if base_id
+            else "world"
+            if map_object
+            else "unassigned"
+        )
         slots = _list_property(value.get("Slots"))
         containers.append((container_id, kind, owner_id, guild_id, base_id, len(slots)))
         for slot in slots:
@@ -1758,15 +1910,55 @@ def _item_containers(
                     metadata.name if metadata else None,
                     metadata.category if metadata else None,
                     metadata.rarity if metadata else None,
-                    metadata is not None,
+                    metadata is not None and metadata.name is not None,
                     quantity,
                     kind,
                     owner_id,
                     guild_id,
                     base_id,
+                    *(map_object or (None, None, None, None, None)),
                 )
             )
     return containers, items
+
+
+def _map_object_item_containers(
+    entries: list[Any],
+) -> dict[str, tuple[str | None, str | None, float | None, float | None, float | None]]:
+    result: dict[
+        str, tuple[str | None, str | None, float | None, float | None, float | None]
+    ] = {}
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        map_object_type = _text(_scalar(entry.get("MapObjectId")))
+        model = _mapping(entry.get("Model"))
+        model_raw = _mapping(model.get("RawData"))
+        instance_id = _nullable_id(model_raw.get("instance_id"))
+        x, y, z = _map_object_position(model_raw.get("initital_transform_cache"))
+        concrete_model = _mapping(entry.get("ConcreteModel"))
+        for module in _list_property(concrete_model.get("ModuleMap")):
+            if not isinstance(module, Mapping):
+                continue
+            module_type = _text(_scalar(module.get("key"))) or _text(module.get("key"))
+            if module_type != "EPalMapObjectConcreteModelModuleType::ItemContainer":
+                continue
+            module_value = _mapping(module.get("value"))
+            raw = _mapping(module_value.get("RawData"))
+            target_container_id = _nullable_id(raw.get("target_container_id"))
+            if target_container_id:
+                result[target_container_id] = (map_object_type, instance_id, x, y, z)
+    return result
+
+
+def _map_object_position(value: object) -> tuple[float | None, float | None, float | None]:
+    transform = _mapping(value)
+    translation = _mapping(transform.get("translation"))
+    return (
+        _number(_scalar(translation.get("x"))),
+        _number(_scalar(translation.get("y"))),
+        _number(_scalar(translation.get("z"))),
+    )
 
 
 def _belong_id(value: object, *keys: str) -> str | None:

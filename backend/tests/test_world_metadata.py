@@ -7,7 +7,12 @@ from pathlib import Path
 import pytest
 
 from palserver_console.metadata import WorldMetadataError, load_world_metadata
-from tools.generate_world_metadata import _fmodel_rows, _game_text, _partner_skill
+from tools.generate_world_metadata import (
+    _build_items,
+    _fmodel_rows,
+    _game_text,
+    _partner_skill,
+)
 
 
 def test_pinned_world_metadata_loads_with_declared_collections() -> None:
@@ -17,7 +22,7 @@ def test_pinned_world_metadata_loads_with_declared_collections() -> None:
         "status": "ready",
         "schema": "palserver-console-world-metadata",
         "schemaVersion": 1,
-        "dataVersion": "2026.08.24.1",
+        "dataVersion": "2026.08.25.3",
         "sourceRevision": "18b9554168ecf684c5f1e1e4d8e583083b942eb9",
         "errorCode": None,
     }
@@ -47,7 +52,18 @@ def test_pinned_world_metadata_loads_with_declared_collections() -> None:
         "cooldown": 2.0,
     }
     assert len(bundle.skills) == 2_280
-    assert bundle.items == {}
+    accessory = bundle.item("Accessory_AT_1")
+    assert accessory is not None
+    assert accessory.name == "攻击吊坠"
+    assert accessory.category == "Accessory / Accessory"
+    assert accessory.rarity == "2"
+    assert bundle.item("unknown-item") is None
+    unnamed = bundle.item("AnimalSkin")
+    assert unnamed is not None
+    assert unnamed.name is None
+    assert unnamed.category
+    assert unnamed.rarity == "0"
+    assert len(bundle.items) == 2_466
 
 
 def test_fmodel_skill_tables_parse_localized_text_and_match_direct_keys(tmp_path: Path) -> None:
@@ -123,6 +139,171 @@ def test_fmodel_skill_tables_parse_localized_text_and_match_direct_keys(tmp_path
         "sourceName": "Unknown Partner Skill",
         "description": "Existing fallback.",
     }
+
+
+def test_item_metadata_merges_common_and_matches_official_fields() -> None:
+    base = {
+        "BaseOnly": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialOre",
+            "Rarity": 0,
+        },
+        "Overridden": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialWood",
+            "Rarity": 0,
+        },
+        "DirectKey": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Consume",
+            "TypeB": "EPalItemTypeB::ConsumeOther",
+            "Rarity": 2,
+        },
+        "Placeholder": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialStone",
+            "Rarity": 1,
+        },
+        "Missing": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialStone",
+            "Rarity": 1,
+        },
+    }
+    common = {
+        "Overridden": {
+            "OverrideName": "CUSTOM_OVERRIDDEN_NAME",
+            "TypeA": "EPalItemTypeA::Weapon",
+            "TypeB": "EPalItemTypeB::WeaponMelee",
+            "Rarity": 4,
+        }
+    }
+    names = {
+        "ITEM_NAME_BaseOnly": {
+            "TextData": {"LocalizedString": "基础物品", "SourceString": "Base item"}
+        },
+        "CUSTOM_OVERRIDDEN_NAME": {
+            "TextData": {"LocalizedString": "覆盖名称", "SourceString": "Override"}
+        },
+        "ITEM_NAME_Overridden": {
+            "TextData": {"LocalizedString": "低优先级名称", "SourceString": "Lower priority"}
+        },
+        "directkey": {
+            "TextData": {"LocalizedString": "直接键名称", "SourceString": "Direct key"}
+        },
+        "ITEM_NAME_Placeholder": {
+            "TextData": {"LocalizedString": "zh_Hans_Text", "SourceString": "-"}
+        },
+    }
+
+    items, stats = _build_items(base, common, names, {})
+
+    assert items == {
+        "BaseOnly": {
+            "name": "基础物品",
+            "category": "Material / MaterialOre",
+            "rarity": "0",
+        },
+        "Overridden": {
+            "name": "覆盖名称",
+            "category": "Weapon / WeaponMelee",
+            "rarity": "4",
+        },
+        "DirectKey": {
+            "name": "直接键名称",
+            "category": "Consume / ConsumeOther",
+            "rarity": "2",
+        },
+        "Placeholder": {
+            "category": "Material / MaterialStone",
+            "rarity": "1",
+        },
+        "Missing": {
+            "category": "Material / MaterialStone",
+            "rarity": "1",
+        },
+    }
+    assert stats == {
+        "dataTableRows": 5,
+        "nameMatched": 3,
+        "nameUnmatched": 2,
+        "placeholder": 1,
+        "missingLocalizationKey": 1,
+        "invalidLocalizationRow": 0,
+        "typeAValid": 5,
+        "typeBValid": 5,
+        "rarityValid": 5,
+        "runtimeMarkupItems": 0,
+        "characterNameTemplates": 0,
+        "runtimeMarkupResolved": 0,
+        "runtimeMarkupUnresolved": 0,
+        "unknownMarkup": 0,
+    }
+
+
+def test_item_character_name_markup_reuses_existing_character_metadata() -> None:
+    rows = {
+        "BossDefeatReward_FlowerPrince": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialMonster",
+            "Rarity": 1,
+        },
+        "BossDefeatReward_Mothman": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialMonster",
+            "Rarity": 1,
+        },
+        "UnknownCharacter": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialMonster",
+            "Rarity": 1,
+        },
+        "UnknownMarkup": {
+            "OverrideName": "None",
+            "TypeA": "EPalItemTypeA::Material",
+            "TypeB": "EPalItemTypeB::MaterialMonster",
+            "Rarity": 1,
+        },
+    }
+    names = {
+        "ITEM_NAME_BossDefeatReward_FlowerPrince": {
+            "TextData": {"LocalizedString": "<characterName id=|FlowerPrince|/>的花瓣"}
+        },
+        "ITEM_NAME_BossDefeatReward_Mothman": {
+            "TextData": {"LocalizedString": "<characterName id=|Mothman|>的羽毛"}
+        },
+        "ITEM_NAME_UnknownCharacter": {
+            "TextData": {"LocalizedString": "<characterName id=|MissingPal|/>的鳞片"}
+        },
+        "ITEM_NAME_UnknownMarkup": {
+            "TextData": {"LocalizedString": "<unknown value=|FlowerPrince|/>的碎片"}
+        },
+    }
+
+    items, stats = _build_items(
+        rows,
+        {},
+        names,
+        {"flowerprince": "夜蔓爵", "mothman": "暮尘蛾"},
+    )
+
+    assert items["BossDefeatReward_FlowerPrince"]["name"] == "夜蔓爵的花瓣"
+    assert items["BossDefeatReward_Mothman"]["name"] == "暮尘蛾的羽毛"
+    assert "name" not in items["UnknownCharacter"]
+    assert "name" not in items["UnknownMarkup"]
+    assert all("<" not in str(item.get("name", "")) for item in items.values())
+    assert stats["runtimeMarkupItems"] == 4
+    assert stats["characterNameTemplates"] == 3
+    assert stats["runtimeMarkupResolved"] == 2
+    assert stats["runtimeMarkupUnresolved"] == 1
+    assert stats["unknownMarkup"] == 1
 
 
 def test_world_metadata_integrity_failure_is_rejected(tmp_path: Path) -> None:

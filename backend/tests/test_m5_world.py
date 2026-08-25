@@ -29,6 +29,7 @@ from palserver_console.world.cache import (
     entity_detail,
     query_cache,
     query_inventory,
+    query_inventory_location_groups,
     query_inventory_locations,
     query_pal_care_summary,
     query_pal_passive_skill_options,
@@ -413,10 +414,16 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
         source_revision="a" * 40,
         pals={},
         skills={},
-        items={"Wood": ItemMetadata(name="木材", category="材料", rarity="普通")},
+        items={
+            "Wood": ItemMetadata(name="木材", category="材料", rarity="普通"),
+            "FutureOre": ItemMetadata(name=None, category="矿石", rarity="稀有"),
+        },
         _pals_casefold={},
         _skills_casefold={},
-        _items_casefold={"wood": ItemMetadata(name="木材", category="材料", rarity="普通")},
+        _items_casefold={
+            "wood": ItemMetadata(name="木材", category="材料", rarity="普通"),
+            "futureore": ItemMetadata(name=None, category="矿石", rarity="稀有"),
+        },
     )
     monkeypatch.setattr(world_cache, "load_world_metadata", lambda: metadata)
     cache = tmp_path / "world-cache.sqlite"
@@ -434,7 +441,7 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
         sort="quantity",
     )
     assert total == 2
-    assert categories == ["材料"]
+    assert categories == ["材料", "矿石"]
     assert items == [
         {
             "itemId": "Wood",
@@ -479,13 +486,16 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
         page=1,
         page_size=60,
         search="FutureOre",
-        category=None,
+        category="矿石",
         scope="base",
         owner_id=None,
         base_id=str(base_id),
         sort="name",
     )
     assert unknown_total == 1
+    assert unknown_items[0]["name"] is None
+    assert unknown_items[0]["category"] == "矿石"
+    assert unknown_items[0]["rarity"] == "稀有"
     assert unknown_items[0]["metadataKnown"] is False
     assert unknown_items[0]["metadataLabel"] == "资料未收录"
     empty_items, empty_total, empty_categories = query_inventory(
@@ -502,6 +512,181 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
     assert empty_items == []
     assert empty_total == 0
     assert empty_categories == []
+
+
+def test_inventory_world_locations_scopes_and_group_summaries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    level, players = _synthetic_properties()
+    world = level["worldSaveData"]["value"]
+    containers = world["ItemContainerSaveData"]["value"]
+    base_id = uuid.UUID(int=101)
+    base_container = uuid.UUID(int=302)
+    world_container_a = uuid.UUID(int=401)
+    world_container_b = uuid.UUID(int=402)
+    unassigned_container = uuid.UUID(int=403)
+    player_container = uuid.UUID(int=201)
+
+    def add_container(
+        container_id: uuid.UUID,
+        counts: list[int],
+        belong: dict[str, Any] | None = None,
+    ) -> None:
+        containers.append(
+            {
+                "key": {"ID": _property(container_id)},
+                "value": {
+                    "BelongInfo": _property(belong or {}),
+                    "Slots": _property(
+                        {
+                            "values": [
+                                {
+                                    "RawData": _property(
+                                        {
+                                            "slot_index": index,
+                                            "count": count,
+                                            "item": {"static_id": "Wood"},
+                                        }
+                                    )
+                                }
+                                for index, count in enumerate(counts)
+                            ]
+                        },
+                        "ArrayProperty",
+                    ),
+                },
+            }
+        )
+
+    add_container(base_container, [7, 2], {"BaseId": _property(base_id)})
+    add_container(world_container_a, [2, 3])
+    add_container(world_container_b, [1])
+    add_container(unassigned_container, [4])
+
+    def map_object(
+        map_object_type: str, instance_id: uuid.UUID, target_container_id: uuid.UUID
+    ) -> dict[str, Any]:
+        return {
+            "MapObjectId": _property(map_object_type, "NameProperty"),
+            "Model": _property({"RawData": _property({"instance_id": instance_id})}),
+            "ConcreteModel": _property(
+                {
+                    "ModuleMap": _property(
+                        [
+                            {
+                                "key": "EPalMapObjectConcreteModelModuleType::ItemContainer",
+                                "value": {
+                                    "RawData": _property(
+                                        {"target_container_id": target_container_id}
+                                    )
+                                },
+                            }
+                        ],
+                        "MapProperty",
+                    )
+                }
+            ),
+        }
+
+    world["MapObjectSaveData"] = _property(
+        {
+            "values": [
+                map_object("TreasureBox", uuid.UUID(int=501), world_container_a),
+                map_object(
+                    "TreasureBox_RequiredLongHold",
+                    uuid.UUID(int=502),
+                    world_container_b,
+                ),
+                # Exact MapObject references never override an established player/base owner.
+                map_object("TreasureBox", uuid.UUID(int=503), player_container),
+                map_object("TreasureBox", uuid.UUID(int=504), base_container),
+            ]
+        },
+        "ArrayProperty",
+    )
+    metadata = WorldMetadataBundle(
+        data_version="test-items",
+        source_revision="a" * 40,
+        pals={},
+        skills={},
+        items={"Wood": ItemMetadata(name="木材", category="材料", rarity="普通")},
+        _pals_casefold={},
+        _skills_casefold={},
+        _items_casefold={
+            "wood": ItemMetadata(name="木材", category="材料", rarity="普通")
+        },
+    )
+    monkeypatch.setattr(world_cache, "load_world_metadata", lambda: metadata)
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    expected = {
+        "inventory": (12, 3),
+        "player": (3, 1),
+        "base": (9, 2),
+        "world": (6, 3),
+        "all": (22, 7),
+    }
+    for scope, (quantity, location_count) in expected.items():
+        items, total, _ = query_inventory(
+            cache,
+            page=1,
+            page_size=60,
+            search=None,
+            category=None,
+            scope=scope,
+            owner_id=None,
+            base_id=None,
+            sort="name",
+        )
+        assert total == 1
+        assert items[0]["totalQuantity"] == quantity
+        assert items[0]["locationCount"] == location_count
+
+    groups = query_inventory_location_groups(
+        cache, "Wood", scope="all", owner_id=None, base_id=None
+    )
+    assert [group["locationType"] for group in groups] == [
+        "player",
+        "base",
+        "world",
+        "unassigned",
+    ]
+    assert sum(cast(int, group["quantitySum"]) for group in groups) == 22
+    assert groups[2]["label"] == "其他位置"
+    assert groups[2]["quantitySum"] == 6
+    assert groups[2]["locationCount"] == 3
+    assert groups[2]["containerCount"] == 2
+    assert groups[3]["label"] == "未识别位置"
+
+    world_locations, world_total = query_inventory_locations(
+        cache,
+        "Wood",
+        page=1,
+        page_size=100,
+        scope="world",
+        owner_id=None,
+        base_id=None,
+    )
+    assert world_total == 3
+    assert {location["locationType"] for location in world_locations} == {"world"}
+    assert {location["locationLabel"] for location in world_locations} == {"世界宝箱"}
+    assert {location["mapObjectType"] for location in world_locations} == {
+        "TreasureBox",
+        "TreasureBox_RequiredLongHold",
+    }
+    assert all(location["mapObjectInstanceId"] for location in world_locations)
+
+    player_locations, _ = query_inventory_locations(
+        cache,
+        "Wood",
+        page=1,
+        page_size=100,
+        scope="player",
+        owner_id=None,
+        base_id=None,
+    )
+    assert player_locations[0]["locationType"] == "player"
 
 
 def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
@@ -1240,11 +1425,11 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert inventory.json()["items"] == [
         {
             "itemId": "Wood",
-            "name": None,
-            "category": None,
-            "rarity": None,
-            "metadataKnown": False,
-            "metadataLabel": "资料未收录",
+            "name": "木材",
+            "category": "Material / MaterialWood",
+            "rarity": "0",
+            "metadataKnown": True,
+            "metadataLabel": None,
             "totalQuantity": 3,
             "locationCount": 1,
         }

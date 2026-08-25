@@ -25,6 +25,7 @@ from .cache import (
     inspect_storage,
     query_cache,
     query_inventory,
+    query_inventory_location_groups,
     query_inventory_locations,
     query_pal_care_summary,
     query_pal_passive_skill_options,
@@ -572,6 +573,8 @@ class WorldSnapshotService:
         scope: str,
         owner_id: str | None,
         base_id: str | None,
+        location_type: str | None = None,
+        group_id: str | None = None,
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -583,12 +586,21 @@ class WorldSnapshotService:
             scope=scope,
             owner_id=owner_id,
             base_id=base_id,
+            location_type=location_type,
+            group_id=group_id,
         )
         if total == 0:
             raise WorldDataError("INVENTORY_ITEM_NOT_FOUND", "物品不存在于当前仓库筛选结果。")
         state = self._status_for_snapshot(current)
         return {
             "itemId": item_id,
+            "groups": query_inventory_location_groups(
+                cache,
+                item_id,
+                scope=scope,
+                owner_id=owner_id,
+                base_id=base_id,
+            ),
             "locations": locations,
             "page": page,
             "pageSize": page_size,
