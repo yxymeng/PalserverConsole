@@ -18,5 +18,5 @@ test("世界数据空绑定和库存归属使用中文语义", () => {
   expect(worldCell({ baseId: "base-1", baseName: "据点一号" }, "baseName")).toBe("据点一号");
   expect(worldCell({ baseId: "missing-base" }, "baseName")).toBe("据点资料不可用");
   expect(worldCell({ guildId: "guild-1", guildName: "测试工会" }, "guildName")).toBe("测试工会");
-  expect(worldCell({ guildId: "guild-1" }, "membershipStatus")).toBe("已加入工会");
+  expect(worldCell({ guildId: "guild-1" }, "membershipStatus")).toBe("已加入公会");
 });

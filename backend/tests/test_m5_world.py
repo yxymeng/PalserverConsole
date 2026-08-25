@@ -909,6 +909,122 @@ def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
     assert {row["guildName"] for row in bases} == {"测试工会"}
 
 
+def test_base_and_guild_asset_details_use_only_stable_relations(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    guild_id = str(uuid.UUID(int=500))
+    empty_guild_id = str(uuid.UUID(int=501))
+    missing_guild_id = str(uuid.UUID(int=999))
+    base_a = str(uuid.UUID(int=101))
+    base_b = str(uuid.UUID(int=102))
+    missing_base = str(uuid.UUID(int=103))
+    player_id = str(uuid.UUID(int=1))
+    missing_player = str(uuid.UUID(int=777))
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
+            (
+                guild_id,
+                "测试公会",
+                2,
+                2,
+                json.dumps(
+                    {
+                        "memberIds": [player_id, missing_player],
+                        "baseIds": [base_a, "missing-base"],
+                    }
+                ),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
+            (empty_guild_id, "空公会", 0, 0, json.dumps({"memberIds": [], "baseIds": []})),
+        )
+        connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
+        connection.execute("UPDATE bases SET guild_id = NULL WHERE id = ?", (base_b,))
+        connection.execute(
+            "INSERT INTO bases VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            (missing_base, "关联缺失据点", missing_guild_id, None, 10.0, 20.0, 30.0, "{}"),
+        )
+        inventory_columns = (
+            "container_id, slot_index, item_id, item_name, item_category, item_rarity, "
+            "metadata_known, quantity, owner_kind, owner_id, guild_id, base_id, "
+            "map_object_type, map_object_instance_id, world_x, world_y, world_z"
+        )
+        inventory_insert = (
+            f"INSERT INTO inventory_items({inventory_columns}) "
+            f"VALUES({', '.join('?' for _ in range(17))})"
+        )
+        connection.execute(
+            inventory_insert,
+            (
+                "base-items", 0, "Stone", "石头", "Material", "Common", 1, 7,
+                "base_inventory", None, guild_id, base_a, None, None, None, None, None,
+            ),
+        )
+        connection.execute(
+            inventory_insert,
+            (
+                "guild-items", 0, "Wood", "木材", "Material", "Common", 1, 5,
+                "guild_inventory", None, guild_id, None, None, None, None, None, None,
+            ),
+        )
+
+    base_detail = entity_detail(cache, "bases", base_a)
+    unassigned_base = entity_detail(cache, "bases", base_b)
+    unavailable_base = entity_detail(cache, "bases", missing_base)
+    guild_detail = entity_detail(cache, "guilds", guild_id)
+    empty_guild = entity_detail(cache, "guilds", empty_guild_id)
+    guild_items, guild_item_types, _ = query_inventory(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        category=None,
+        scope="inventory",
+        owner_id=None,
+        base_id=None,
+        guild_id=guild_id,
+        sort="name",
+    )
+
+    assert base_detail is not None
+    assert base_detail["guildAssociation"] == "linked"
+    assert base_detail["workerCount"] == 1
+    assert base_detail["careSummary"] == {
+        "total": 1, "critical": 1, "warning": 0, "attention": 1, "unavailable": 0
+    }
+    assert base_detail["inventorySummary"] == {
+        "itemTypeCount": 1, "totalQuantity": 7, "locationCount": 1
+    }
+    assert unassigned_base is not None and unassigned_base["guildAssociation"] == "unassigned"
+    assert unavailable_base is not None and unavailable_base["guildAssociation"] == "unavailable"
+    assert unavailable_base["guild"] is None
+
+    assert guild_detail is not None
+    assert guild_detail["assetSummary"] == {
+        "memberCount": 1,
+        "baseCount": 1,
+        "palCount": 2,
+        "inventory": {"itemTypeCount": 2, "totalQuantity": 15, "locationCount": 3},
+    }
+    assert guild_detail["missingMemberIds"] == [missing_player]
+    assert guild_detail["missingBaseIds"] == ["missing-base"]
+    assert {item["id"] for item in cast(list[dict[str, Any]], guild_detail["pals"])} == {
+        str(uuid.UUID(int=401)), str(uuid.UUID(int=402))
+    }
+    assert guild_item_types == 2
+    assert sum(int(item["totalQuantity"]) for item in guild_items) == 15
+    assert empty_guild is not None
+    assert empty_guild["assetSummary"] == {
+        "memberCount": 0,
+        "baseCount": 0,
+        "palCount": 0,
+        "inventory": {"itemTypeCount": 0, "totalQuantity": 0, "locationCount": 0},
+    }
+
+
 def test_player_status_filter_and_sort_apply_before_pagination(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"

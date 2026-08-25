@@ -223,6 +223,17 @@ export type WorldInventoryListItem = {
   id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;
   ownerId: string | null; guildId: string | null; baseId: string | null;
 };
+export type WorldInventoryAssetSummary = {
+  itemTypeCount: number;
+  totalQuantity: number;
+  locationCount: number;
+};
+export type WorldGuildAssetSummary = {
+  memberCount: number;
+  baseCount: number;
+  palCount: number;
+  inventory: WorldInventoryAssetSummary;
+};
 export type WorldInventoryScope = "inventory" | "player" | "base" | "world" | "all";
 export type WorldInventoryItem = {
   itemId: string;
@@ -298,11 +309,18 @@ export type WorldPalDetail = WorldPalListItem & {
 export type WorldGuildDetail = WorldGuildListItem & {
   members: WorldPlayerListItem[];
   bases: WorldBaseListItem[];
+  pals: WorldPalListItem[];
+  assetSummary: WorldGuildAssetSummary;
+  missingMemberIds: string[];
+  missingBaseIds: string[];
 };
 export type WorldBaseDetail = WorldBaseListItem & {
   guild: WorldGuildListItem | null;
   workers: WorldPalListItem[];
-  inventory: WorldInventoryListItem[];
+  workerCount: number;
+  careSummary: WorldPalCareSummary;
+  inventorySummary: WorldInventoryAssetSummary;
+  guildAssociation: "linked" | "unassigned" | "unavailable";
 };
 export type WorldTypedListItem =
   | WorldPlayerListItem

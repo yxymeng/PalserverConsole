@@ -170,6 +170,7 @@ def router(deps: AppDependencies) -> APIRouter:
         scope: str = "all",
         ownerId: str | None = None,
         baseId: str | None = None,
+        guildId: str | None = None,
         sort: str = "name",
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
@@ -195,6 +196,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 scope=scope,
                 owner_id=ownerId,
                 base_id=baseId,
+                guild_id=guildId,
                 sort=sort,
                 snapshot_id=snapshotId,
             )
@@ -211,6 +213,7 @@ def router(deps: AppDependencies) -> APIRouter:
         scope: str = "all",
         ownerId: str | None = None,
         baseId: str | None = None,
+        guildId: str | None = None,
         locationType: str | None = None,
         groupId: str | None = None,
         snapshotId: str | None = None,
@@ -244,6 +247,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 scope=scope,
                 owner_id=ownerId,
                 base_id=baseId,
+                guild_id=guildId,
                 location_type=locationType,
                 group_id=groupId,
                 snapshot_id=snapshotId,

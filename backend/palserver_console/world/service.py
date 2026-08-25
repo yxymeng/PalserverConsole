@@ -530,6 +530,7 @@ class WorldSnapshotService:
         owner_id: str | None,
         base_id: str | None,
         sort: str,
+        guild_id: str | None = None,
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -542,6 +543,7 @@ class WorldSnapshotService:
             scope=scope,
             owner_id=owner_id,
             base_id=base_id,
+            guild_id=guild_id,
             sort=sort,
         )
         state = self._status_for_snapshot(current)
@@ -573,6 +575,7 @@ class WorldSnapshotService:
         scope: str,
         owner_id: str | None,
         base_id: str | None,
+        guild_id: str | None = None,
         location_type: str | None = None,
         group_id: str | None = None,
         snapshot_id: str | None = None,
@@ -586,6 +589,7 @@ class WorldSnapshotService:
             scope=scope,
             owner_id=owner_id,
             base_id=base_id,
+            guild_id=guild_id,
             location_type=location_type,
             group_id=group_id,
         )
@@ -600,6 +604,7 @@ class WorldSnapshotService:
                 scope=scope,
                 owner_id=owner_id,
                 base_id=base_id,
+                guild_id=guild_id,
             ),
             "locations": locations,
             "page": page,

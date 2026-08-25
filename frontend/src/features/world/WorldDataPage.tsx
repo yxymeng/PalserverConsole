@@ -1,4 +1,4 @@
-import { Archive, ChevronLeft, ChevronRight, Database, LayoutDashboard, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
+import { AlertTriangle, Archive, ChevronLeft, ChevronRight, Database, HeartPulse, LayoutDashboard, PackageOpen, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -300,7 +300,7 @@ function EntityDrawer({ detail, loading, onClose, onNavigate, onShowInventory }:
 
   const { data, resource } = detail;
   return <aside className="world-entity-drawer" role="dialog" aria-modal="false" aria-label="世界实体详情">
-    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
+    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : <span className="world-detail-id"><small>{resource === "bases" ? "Base ID" : resource === "guilds" ? "Guild ID" : "Pal ID"}</small>{valueOf(data, "id")}</span>}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
     <div className="world-detail-properties">
       {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
       {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
@@ -383,26 +383,64 @@ function PalDetail({ data, onNavigate }: DetailProps) {
   </>;
 }
 
-function GuildDetail({ data, onNavigate }: DetailProps) {
+function GuildDetail({ data, onNavigate, onShowInventory }: DetailProps) {
+  const summary = rowOf(data, "assetSummary");
+  const inventory = summary ? rowOf(summary, "inventory") : null;
+  const missingMembers = stringsOf(data, "missingMemberIds");
+  const missingBases = stringsOf(data, "missingBaseIds");
   return <>
-    <PropertyGrid data={data} fields={[["Guild ID", "id"], ["成员数量", "memberCount"], ["据点数量", "baseCount"]]} />
+    <AssetSummary title="公会资产规模" items={[["成员", numberOf(summary, "memberCount")], ["据点", numberOf(summary, "baseCount")], ["帕鲁", numberOf(summary, "palCount")], ["物品种类", numberOf(inventory, "itemTypeCount")], ["物品总量", numberOf(inventory, "totalQuantity")]]} />
     <RelationList title="成员" rows={rowsOf(data, "members")} resource="players" onNavigate={onNavigate} />
     <RelationList title="关联据点" rows={rowsOf(data, "bases")} resource="bases" onNavigate={onNavigate} />
-    <RawDetail value={data.detail} />
+    <RelationList title="关联帕鲁" rows={rowsOf(data, "pals")} resource="pals" onNavigate={onNavigate} />
+    <InventoryButton title="公会关联仓库" data={data} scope="guild" onShowInventory={onShowInventory} />
+    {(missingMembers.length > 0 || missingBases.length > 0) && <section className="world-association-warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><div><strong>部分关联资料不可用</strong><p>当前缓存中没有对应实体；以下稳定 ID 原样保留，未创建猜测关系。</p>{missingMembers.length > 0 && <MissingIdList label="缺失成员 ID" ids={missingMembers} />}{missingBases.length > 0 && <MissingIdList label="缺失据点 ID" ids={missingBases} />}</div></section>}
+    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Guild ID</dt><dd>{valueOf(data, "id")}</dd></div></dl></details>
   </>;
 }
 
 function BaseDetail({ data, onNavigate, onShowInventory }: DetailProps) {
+  const association = valueOf(data, "guildAssociation");
+  const care = rowOf(data, "careSummary");
+  const inventory = rowOf(data, "inventorySummary");
+  const overview = { ...data, coordinates: coordinateLabel(data), inventoryTypeCount: numberOf(inventory, "itemTypeCount"), inventoryQuantity: numberOf(inventory, "totalQuantity") };
   return <>
-    <PropertyGrid data={data} fields={[["Base ID", "id"], ["X", "x"], ["Y", "y"], ["Z", "z"], ["工作容器", "workerContainerId"]]} />
-    <RelationButton title="所属公会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
+    <PropertyGrid data={overview} fields={[["坐标", "coordinates"], ["工作帕鲁", "workerCount"], ["物品种类", "inventoryTypeCount"], ["物品总量", "inventoryQuantity"]]} />
+    <BaseGuildRelation data={data} association={association} onNavigate={onNavigate} />
+    <CareSummary summary={care} />
     <RelationList title="工作帕鲁" rows={rowsOf(data, "workers")} resource="pals" onNavigate={onNavigate} />
     <InventoryButton title="据点库存" data={data} scope="base" onShowInventory={onShowInventory} />
-    <RawDetail value={data.detail} />
+    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Base ID</dt><dd>{valueOf(data, "id")}</dd></div><div><dt>Worker Container ID</dt><dd>{valueOf(data, "workerContainerId")}</dd></div></dl></details>
   </>;
 }
 
 type DetailProps = { data: WorldRow; onNavigate: (resource: PrimaryWorldResource, id: string) => void; onShowInventory: (context: InventoryContext) => void };
+
+function AssetSummary({ title, items }: { title: string; items: [string, number | null][] }) {
+  return <section className="world-asset-summary"><h3>{title}</h3><dl>{items.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value === null ? "不可用" : value.toLocaleString()}</dd></div>)}</dl></section>;
+}
+
+function MissingIdList({ label, ids }: { label: string; ids: string[] }) {
+  return <div className="world-missing-ids"><span>{label}</span>{ids.map((id) => <code key={id}>{id}</code>)}</div>;
+}
+
+function BaseGuildRelation({ data, association, onNavigate }: { data: WorldRow; association: string; onNavigate: DetailProps["onNavigate"] }) {
+  const guild = rowOf(data, "guild");
+  if (association === "linked" && guild?.id) return <RelationButton title="所属公会" value={guild} resource="guilds" onNavigate={onNavigate} />;
+  if (association === "unavailable") return <section className="world-relation-section"><h3>所属公会</h3><p className="world-association-unavailable">关联资料不可用</p><code className="world-stable-id">{valueOf(data, "guildId")}</code></section>;
+  return <section className="world-relation-section"><h3>所属公会</h3><p className="muted">未分配</p></section>;
+}
+
+function CareSummary({ summary }: { summary: WorldRow | null }) {
+  const total = numberOf(summary, "total");
+  const critical = numberOf(summary, "critical");
+  const warning = numberOf(summary, "warning");
+  const attention = numberOf(summary, "attention");
+  const unavailable = numberOf(summary, "unavailable");
+  const tone = attention === null ? "unavailable" : attention > 0 ? "attention" : unavailable ? "unavailable" : "healthy";
+  const label = total === 0 ? "暂无工作帕鲁" : attention === null ? "照护摘要不可用" : attention > 0 ? `${attention} 只需要关注` : unavailable ? "部分照护数据不可用" : "未见需要关注";
+  return <section className={`base-care-summary ${tone}`} aria-label="工作帕鲁照护摘要"><header><HeartPulse size={18} aria-hidden="true" /><div><h3>照护摘要</h3><p>{label}</p></div></header><dl><div><dt>需立即处理</dt><dd>{critical ?? "-"}</dd></div><div><dt>需要关注</dt><dd>{warning ?? "-"}</dd></div><div><dt>数据不可用</dt><dd>{unavailable ?? "-"}</dd></div></dl><small>与帕鲁名册“需要关注”使用同一存档快照规则。</small></section>;
+}
 
 function PropertyGrid({ data, fields }: { data: WorldRow; fields: [string, string][] }) {
   return <dl className="world-detail-grid">{fields.map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{valueOf(data, key)}</dd></div>)}</dl>;
@@ -416,11 +454,14 @@ function RelationList({ title, rows, resource, onNavigate }: { title: string; ro
   return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item, index) => item.id ? <button className="world-relation-link" type="button" key={String(item.id)} onClick={() => onNavigate(resource, String(item.id))}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && <PalGenderIcon item={item} />}</span><small>{String(item.id)}</small></button> : <p key={index}>{entityName(item, resource)}</p>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
 }
 
-function InventoryButton({ title, data, scope, onShowInventory }: { title: string; data: WorldRow; scope: "player" | "base"; onShowInventory: DetailProps["onShowInventory"] }) {
+function InventoryButton({ title, data, scope, onShowInventory }: { title: string; data: WorldRow; scope: "player" | "base" | "guild"; onShowInventory: DetailProps["onShowInventory"] }) {
   const id = valueOf(data, "id");
   if (id === "不可用") return null;
-  const name = entityName(data, scope === "player" ? "players" : "bases");
-  return <section className="world-relation-section"><h3>{title}</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ scope, [scope === "player" ? "ownerId" : "baseId"]: id, label: `${scope === "player" ? "玩家库存" : "据点库存"}：${name}` })}><span className="world-relation-name">在仓库中查看</span><small>仅显示该归属范围</small></button></section>;
+  const resource = scope === "player" ? "players" : scope === "base" ? "bases" : "guilds";
+  const name = entityName(data, resource);
+  const context = scope === "player" ? { scope, ownerId: id } : scope === "base" ? { scope, baseId: id } : { scope: "inventory" as const, guildId: id };
+  const label = `${scope === "player" ? "玩家库存" : scope === "base" ? "据点库存" : "公会关联仓库"}：${name}`;
+  return <section className="world-relation-section"><h3>{title}</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ ...context, label })}><span className="world-relation-name"><PackageOpen size={16} aria-hidden="true" />在仓库中查看</span><small>仅显示该稳定 ID 的关联范围</small></button></section>;
 }
 
 function RawDetail({ value }: { value: unknown }) {
@@ -431,6 +472,21 @@ function RawDetail({ value }: { value: unknown }) {
 function rowsOf(data: WorldRow, key: string): WorldRow[] {
   const value = data[key];
   return Array.isArray(value) ? value.filter(isWorldRow) : [];
+}
+
+function stringsOf(data: WorldRow, key: string): string[] {
+  const value = data[key];
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+}
+
+function numberOf(data: WorldRow | null, key: string): number | null {
+  const value = data?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function coordinateLabel(data: WorldRow): string {
+  const values = ["x", "y", "z"].map((key) => numberOf(data, key));
+  return values.every((value) => value !== null) ? values.map((value) => Math.round(value as number).toLocaleString()).join(" / ") : "数据不可用";
 }
 
 function rowOf(data: WorldRow, key: string): WorldRow | null {

@@ -116,8 +116,8 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
       "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } },
-      "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], detail: { adminPlayerId: "player-1" } },
-      "/api/world/bases/base-1": { ...base, guild, workers: [pal], inventory: [{ id: "item-2", itemId: "Stone", quantity: 8, containerId: "base-bag" }], detail: { state: 1 } },
+      "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], pals: [pal], assetSummary: { memberCount: 1, baseCount: 1, palCount: 1, inventory: { itemTypeCount: 2, totalQuantity: 12, locationCount: 3 } }, missingMemberIds: ["missing-player"], missingBaseIds: [], detail: { adminPlayerId: "player-1" } },
+      "/api/world/bases/base-1": { ...base, guild, guildAssociation: "linked", workers: [pal], workerCount: 1, careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 }, inventorySummary: { itemTypeCount: 2, totalQuantity: 9, locationCount: 2 }, detail: { state: 1 } },
     };
     if (path in details) return route.fulfill({ json: details[path] });
     return route.fulfill({ status: 404, json: { errorCode: "WORLD_ENTITY_NOT_FOUND", message: path } });
@@ -277,12 +277,25 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
 
   await page.getByRole("tab", { name: "公会" }).click();
   await page.getByRole("button", { name: "测试工会" }).click();
+  await expect(drawer).toContainText("公会资产规模");
+  await expect(drawer).toContainText("物品总量");
+  await expect(drawer).toContainText("12");
   await expect(drawer).toContainText("成员");
   await expect(drawer).toContainText("关联据点");
-  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
+  await expect(drawer).toContainText("关联帕鲁");
+  await expect(drawer).toContainText("部分关联资料不可用");
+  await expect(drawer).toContainText("missing-player");
+  await drawer.getByRole("button", { name: "在仓库中查看" }).click();
+  await expect(page.locator(".inventory-context")).toContainText("公会关联仓库：测试工会");
+  await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("guildId") === "guild-1")).toBeTruthy();
 
   await page.getByRole("tab", { name: "据点" }).click();
   await page.getByRole("button", { name: "据点一号" }).click();
+  await expect(drawer).toContainText("坐标");
+  await expect(drawer).toContainText("Base ID");
+  await expect(drawer).toContainText("1 / 2 / 3");
+  await expect(drawer).toContainText("1 只需要关注");
+  await expect(drawer).toContainText("与帕鲁名册“需要关注”使用同一存档快照规则");
   await expect(drawer).toContainText("工作帕鲁");
   await expect(drawer).toContainText("据点库存");
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();

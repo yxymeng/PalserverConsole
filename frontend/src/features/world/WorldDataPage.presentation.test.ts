@@ -38,3 +38,18 @@ test("仓库默认使用持有库存并按存放分布两级展开", () => {
   expect(source).toContain("mapObjectType");
   expect(source).not.toContain("<small>位置</small>");
 });
+
+test("据点与公会详情复用照护和仓库关联语义", () => {
+  const pagePath = fileURLToPath(new URL("./WorldDataPage.tsx", import.meta.url));
+  const inventoryPath = fileURLToPath(new URL("./InventoryWorkspace.tsx", import.meta.url));
+  const pageSource = readFileSync(pagePath, "utf8");
+  const inventorySource = readFileSync(inventoryPath, "utf8");
+
+  expect(pageSource).toContain("与帕鲁名册“需要关注”使用同一存档快照规则");
+  expect(pageSource).toContain('scope="guild"');
+  expect(pageSource).toContain("关联资料不可用");
+  expect(pageSource).toContain("未创建猜测关系");
+  expect(pageSource).toContain("Guild ID");
+  expect(pageSource).toContain("Base ID");
+  expect(inventorySource).toContain('query.set("guildId", context.guildId)');
+});

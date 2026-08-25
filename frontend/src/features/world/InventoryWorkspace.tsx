@@ -9,6 +9,7 @@ export type InventoryContext = {
   scope: WorldInventoryScope;
   ownerId?: string;
   baseId?: string;
+  guildId?: string;
   label?: string;
 };
 
@@ -55,6 +56,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
         if (category) query.set("category", category);
         if (context.ownerId) query.set("ownerId", context.ownerId);
         if (context.baseId) query.set("baseId", context.baseId);
+        if (context.guildId) query.set("guildId", context.guildId);
         try {
           const next = await requestJson<WorldInventoryResponse>(`/api/world/inventories?${query}`, { signal });
           if (next.snapshotId !== currentSnapshotId) {
@@ -96,6 +98,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
         const query = new URLSearchParams({ page: String(nextPage), pageSize: group ? "100" : "1", scope: context.scope, snapshotId: currentSnapshotId });
         if (context.ownerId) query.set("ownerId", context.ownerId);
         if (context.baseId) query.set("baseId", context.baseId);
+        if (context.guildId) query.set("guildId", context.guildId);
         if (group) {
           query.set("locationType", group.locationType);
           if (group.groupId) query.set("groupId", group.groupId);
@@ -161,7 +164,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   }
 
   const totalPages = result?.total ? Math.ceil(result.total / pageSize) : 1;
-  const hasFilters = Boolean(appliedSearch || category || sort !== "name" || context.scope !== "inventory" || context.ownerId || context.baseId);
+  const hasFilters = Boolean(appliedSearch || category || sort !== "name" || context.scope !== "inventory" || context.ownerId || context.baseId || context.guildId);
   const allUnknown = Boolean(result?.items.length) && result!.items.every((item) => !item.metadataKnown);
   const quantityLabel = ({ inventory: "库存总量", player: "玩家总量", base: "据点总量", world: "世界容器总量", all: "全世界总量" } as const)[context.scope];
 

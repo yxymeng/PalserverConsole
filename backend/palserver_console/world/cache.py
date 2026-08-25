@@ -17,7 +17,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 13
+CACHE_SCHEMA_VERSION = 14
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
@@ -569,6 +569,7 @@ def query_inventory(
     owner_id: str | None,
     base_id: str | None,
     sort: str,
+    guild_id: str | None = None,
 ) -> tuple[list[dict[str, object]], int, list[str]]:
     """Aggregate immutable item slots before they leave the server."""
 
@@ -583,6 +584,7 @@ def query_inventory(
         scope=scope,
         owner_id=owner_id,
         base_id=base_id,
+        guild_id=guild_id,
     )
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     order = {
@@ -616,6 +618,7 @@ def query_inventory(
             scope=scope,
             owner_id=owner_id,
             base_id=base_id,
+            guild_id=guild_id,
         )
         category_where = (
             f" WHERE {' AND '.join([*category_clauses, 'ii.item_category IS NOT NULL'])}"
@@ -647,6 +650,7 @@ def query_inventory_locations(
     base_id: str | None,
     location_type: str | None = None,
     group_id: str | None = None,
+    guild_id: str | None = None,
 ) -> tuple[list[dict[str, object]], int]:
     if scope not in {"inventory", "all", "player", "base", "world"}:
         raise ValueError("Unknown inventory query.")
@@ -656,6 +660,7 @@ def query_inventory_locations(
         scope=scope,
         owner_id=owner_id,
         base_id=base_id,
+        guild_id=guild_id,
     )
     clauses.append("ii.item_id = ?")
     parameters.append(item_id)
@@ -698,6 +703,7 @@ def query_inventory_location_groups(
     scope: str,
     owner_id: str | None,
     base_id: str | None,
+    guild_id: str | None = None,
 ) -> list[dict[str, object]]:
     if scope not in {"inventory", "all", "player", "base", "world"}:
         raise ValueError("Unknown inventory query.")
@@ -707,6 +713,7 @@ def query_inventory_location_groups(
         scope=scope,
         owner_id=owner_id,
         base_id=base_id,
+        guild_id=guild_id,
     )
     clauses.append("ii.item_id = ?")
     parameters.append(item_id)
@@ -746,6 +753,7 @@ def _inventory_filters(
     scope: str,
     owner_id: str | None,
     base_id: str | None,
+    guild_id: str | None,
 ) -> tuple[list[str], list[object]]:
     clauses: list[str] = []
     parameters: list[object] = []
@@ -765,6 +773,9 @@ def _inventory_filters(
     if base_id:
         clauses.append("ii.base_id = ?")
         parameters.append(base_id)
+    if guild_id:
+        clauses.append("ii.guild_id = ?")
+        parameters.append(guild_id)
     if category:
         clauses.append("ii.item_category = ?")
         parameters.append(category)
@@ -1106,18 +1117,51 @@ def _guild_detail(connection: sqlite3.Connection, guild_id: str) -> dict[str, ob
     if row is None:
         return None
     result = _public_row(dict(row))
-    result["members"] = _rows(
+    members = _rows(
         connection,
         "SELECT id, name, level, guild_id FROM players WHERE guild_id = ? "
         "ORDER BY name COLLATE NOCASE LIMIT 200",
         (guild_id,),
     )
-    result["bases"] = _rows(
+    bases = _rows(
         connection,
         "SELECT id, name, guild_id, worker_container_id, x, y, z FROM bases "
         "WHERE guild_id = ? ORDER BY name COLLATE NOCASE LIMIT 200",
         (guild_id,),
     )
+    result["members"] = members
+    result["bases"] = bases
+    detail = _mapping(result.get("detail"))
+    member_ids = [item for item in detail.get("memberIds", []) if isinstance(item, str)]
+    base_ids = [item for item in detail.get("baseIds", []) if isinstance(item, str)]
+    linked_member_ids = {str(item["id"]) for item in members if item.get("id")}
+    linked_base_ids = {str(item["id"]) for item in bases if item.get("id")}
+    pal_where = (
+        "EXISTS(SELECT 1 FROM players AS player "
+        "WHERE player.id = pal.owner_player_id AND player.guild_id = ?) OR "
+        "EXISTS(SELECT 1 FROM bases AS base "
+        "WHERE base.id = pal.base_id AND base.guild_id = ?)"
+    )
+    pal_count = int(
+        connection.execute(
+            f"SELECT COUNT(*) FROM pals AS pal WHERE {pal_where}", (guild_id, guild_id)
+        ).fetchone()[0]
+    )
+    result["pals"] = [
+        _pal_public_row(dict(item))
+        for item in connection.execute(
+            f"SELECT pal.* FROM pals AS pal WHERE {pal_where} ORDER BY pal.rowid LIMIT 200",
+            (guild_id, guild_id),
+        ).fetchall()
+    ]
+    result["assetSummary"] = {
+        "memberCount": len(linked_member_ids),
+        "baseCount": len(linked_base_ids),
+        "palCount": pal_count,
+        "inventory": _inventory_summary(connection, guild_id=guild_id),
+    }
+    result["missingMemberIds"] = [item for item in member_ids if item not in linked_member_ids]
+    result["missingBaseIds"] = [item for item in base_ids if item not in linked_base_ids]
     return result
 
 
@@ -1127,19 +1171,58 @@ def _base_detail(connection: sqlite3.Connection, base_id: str) -> dict[str, obje
         return None
     result = _public_row(dict(row))
     result["guild"] = _reference(connection, "guilds", result.get("guildId"))
-    result["workers"] = _rows(
-        connection,
+    result["guildAssociation"] = (
+        "unassigned"
+        if not result.get("guildId")
+        else "linked"
+        if result["guild"]
+        else "unavailable"
+    )
+    worker_rows = connection.execute(
         "SELECT * FROM pals WHERE base_id = ? AND assignment = 'base_worker' "
         "ORDER BY rowid LIMIT 200",
         (base_id,),
+    ).fetchall()
+    result["workers"] = [_pal_public_row(dict(item)) for item in worker_rows]
+    result["workerCount"] = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM pals WHERE base_id = ? AND assignment = 'base_worker'",
+            (base_id,),
+        ).fetchone()[0]
     )
-    result["inventory"] = _rows(
-        connection,
-        "SELECT * FROM inventory_items WHERE base_id = ? "
-        "ORDER BY container_id, slot_index LIMIT 200",
-        (base_id,),
+    result["careSummary"] = _pal_care_summary(
+        connection, "WHERE base_id = ? AND assignment = 'base_worker'", (base_id,)
     )
+    result["inventorySummary"] = _inventory_summary(connection, base_id=base_id)
     return result
+
+
+def _inventory_summary(
+    connection: sqlite3.Connection,
+    *,
+    base_id: str | None = None,
+    guild_id: str | None = None,
+) -> dict[str, int]:
+    scope = "base" if base_id else "inventory"
+    clauses, parameters = _inventory_filters(
+        search=None,
+        category=None,
+        scope=scope,
+        owner_id=None,
+        base_id=base_id,
+        guild_id=guild_id,
+    )
+    where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    row = connection.execute(
+        "SELECT COUNT(DISTINCT ii.item_id), COALESCE(SUM(ii.quantity), 0), COUNT(*) "
+        f"FROM inventory_items AS ii{where}",
+        parameters,
+    ).fetchone()
+    return {
+        "itemTypeCount": int(row[0]),
+        "totalQuantity": int(row[1]),
+        "locationCount": int(row[2]),
+    }
 
 
 def _rows(
@@ -1356,7 +1439,16 @@ def _groups(entries: list[Any]) -> tuple[list[tuple[Any, ...]], dict[str, str]]:
         base_ids = [_id(item) for item in base_values]
         base_ids = [item for item in base_ids if item]
         name = str(raw.get("guild_name") or raw.get("group_name") or "未命名工会")
-        detail = {"baseIds": base_ids, "adminPlayerId": _id(raw.get("admin_player_uid"))}
+        detail = {
+            "memberIds": [
+                member_id
+                for member in members
+                if isinstance(member, Mapping)
+                and (member_id := _id(member.get("player_uid")))
+            ],
+            "baseIds": base_ids,
+            "adminPlayerId": _id(raw.get("admin_player_uid")),
+        }
         rows.append((group_id, name, len(members), len(base_ids), _json(detail)))
     return rows, player_group
 
@@ -1961,39 +2053,46 @@ def _assess_pal_care(signals: PalCareSignals) -> PalCareAssessment:
 def query_pal_care_summary(path: Path) -> dict[str, int]:
     connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
     try:
-        rows = connection.execute(
-            """
-            SELECT current_hp, hunger, sanity, disease, activity,
-                COALESCE(json_extract(detail_json, '$.care.disease_recorded'), 0),
-                COALESCE(json_extract(detail_json, '$.care.activity_recorded'), 0)
-            FROM pals
-            """
-        ).fetchall()
-        assessments = [
-            _assess_pal_care(
-                {
-                    "current_hp": _number(row[0]),
-                    "hunger": _number(row[1]),
-                    "sanity": _number(row[2]),
-                    "disease": _text(row[3]),
-                    "activity": _text(row[4]),
-                    "disease_recorded": bool(row[5]),
-                    "activity_recorded": bool(row[6]),
-                }
-            )
-            for row in rows
-        ]
-        critical = sum(item["severity"] == "critical" for item in assessments)
-        warning = sum(item["severity"] == "warning" for item in assessments)
-        return {
-            "total": len(rows),
-            "critical": critical,
-            "warning": warning,
-            "attention": critical + warning,
-            "unavailable": sum(bool(item["unavailable"]) for item in assessments),
-        }
+        return _pal_care_summary(connection)
     finally:
         connection.close()
+
+
+def _pal_care_summary(
+    connection: sqlite3.Connection,
+    where: str = "",
+    parameters: tuple[object, ...] = (),
+) -> dict[str, int]:
+    rows = connection.execute(
+        "SELECT current_hp, hunger, sanity, disease, activity, "
+        "COALESCE(json_extract(detail_json, '$.care.disease_recorded'), 0), "
+        "COALESCE(json_extract(detail_json, '$.care.activity_recorded'), 0) "
+        f"FROM pals {where}",
+        parameters,
+    ).fetchall()
+    assessments = [
+        _assess_pal_care(
+            {
+                "current_hp": _number(row[0]),
+                "hunger": _number(row[1]),
+                "sanity": _number(row[2]),
+                "disease": _text(row[3]),
+                "activity": _text(row[4]),
+                "disease_recorded": bool(row[5]),
+                "activity_recorded": bool(row[6]),
+            }
+        )
+        for row in rows
+    ]
+    critical = sum(item["severity"] == "critical" for item in assessments)
+    warning = sum(item["severity"] == "warning" for item in assessments)
+    return {
+        "total": len(rows),
+        "critical": critical,
+        "warning": warning,
+        "attention": critical + warning,
+        "unavailable": sum(bool(item["unavailable"]) for item in assessments),
+    }
 
 
 def _item_containers(
