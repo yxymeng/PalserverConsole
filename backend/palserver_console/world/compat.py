@@ -111,6 +111,26 @@ def decode_item_slot(
     return value
 
 
+def decode_guild_item_storage(
+    reader: FArchiveReader, type_name: str, size: int, path: str
+) -> dict[str, Any]:
+    """Decode the exact GuildItemStorage container reference and retain its tail."""
+
+    if type_name != "ArrayProperty":
+        raise ValueError(f"Expected ArrayProperty, got {type_name}")
+    value = cast(dict[str, Any], reader.property(type_name, size, path, nested_caller_path=path))
+    inner = reader.internal_copy(_raw_bytes(value["value"]["values"]), debug=False)
+    value["value"] = {
+        "container_id": inner.guid(),
+        "trailing_bytes": list(inner.read_to_end()),
+    }
+    return value
+
+
+def _read_only_encoder(*_: Any) -> int:
+    raise RuntimeError("The M5 compatibility layer does not write GuildItemStorage RawData.")
+
+
 def decode_base_camp(
     reader: FArchiveReader, type_name: str, size: int, path: str
 ) -> dict[str, Any]:
@@ -282,7 +302,12 @@ def m5_custom_properties() -> dict[str, tuple[Any, Any]]:
         ".worldSaveData.BaseCampSaveData.Value.RawData": decode_base_camp,
         ".worldSaveData.BaseCampSaveData.Value.WorkerDirector.RawData": decode_worker_director,
     }
-    return {
+    result = {
         path: (decoder, PALWORLD_CUSTOM_PROPERTIES[path][1])
         for path, decoder in selected.items()
     }
+    result[".worldSaveData.GuildExtraSaveDataMap.Value.GuildItemStorage.RawData"] = (
+        decode_guild_item_storage,
+        _read_only_encoder,
+    )
+    return result

@@ -167,7 +167,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
 
   return <section className="inventory-workspace" aria-label="仓库">
     <header className="inventory-heading">
-      <div><h2>仓库</h2><p>按物品汇总当前存档快照中的玩家背包和据点库存；世界容器可单独查看。</p></div>
+      <div><h2>仓库</h2><p>按物品汇总当前存档快照中的玩家背包、据点和公会仓库；世界容器可单独查看。</p></div>
       <span className="inventory-total">{result?.total ?? "-"} 种物品</span>
     </header>
     {context.label && <div className="inventory-context" role="status"><MapPin size={17} aria-hidden="true" /><span>当前仅显示：{context.label}</span><button className="world-clear-button" type="button" onClick={onClearContext}><X size={15} />返回全部仓库</button></div>}
@@ -210,7 +210,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
             </div>;
           })}
         </section>}
-      </article>) : <div className="world-empty-state"><Archive size={22} /><strong>{result ? hasFilters ? "没有符合条件的物品" : "当前存档快照没有库存" : "正在读取仓库"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : "解析成功后，玩家和据点中的物品会在这里按总量聚合。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
+      </article>) : <div className="world-empty-state"><Archive size={22} /><strong>{result ? hasFilters ? "没有符合条件的物品" : "当前存档快照没有库存" : "正在读取仓库"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : "解析成功后，玩家、据点和公会仓库中的物品会在这里按总量聚合。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
     </div>
     <footer className="audit-footer inventory-footer"><span>共 {result?.total || 0} 种物品，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages || loading} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></footer>
   </section>;

@@ -16,7 +16,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 10
+CACHE_SCHEMA_VERSION = 12
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
@@ -254,6 +254,7 @@ def build_world_cache(
     item_containers = _list_property(world.get("ItemContainerSaveData"))
     character_containers = _list_property(world.get("CharacterContainerSaveData"))
     groups = _list_property(world.get("GroupSaveDataMap"))
+    guild_extras = _list_property(world.get("GuildExtraSaveDataMap"))
     base_camps = _list_property(world.get("BaseCampSaveData"))
     map_objects = _list_property(world.get("MapObjectSaveData"))
     game_time_ticks = _game_time_ticks(world)
@@ -278,6 +279,7 @@ def build_world_cache(
         base_rows,
         world_metadata,
         _map_object_item_containers(map_objects),
+        _guild_item_containers(guild_extras),
     )
 
     counts = {
@@ -667,13 +669,17 @@ def query_inventory_locations(
         rows = connection.execute(
             "SELECT ii.id, ii.container_id AS containerId, ii.slot_index AS slotIndex, "
             "ii.quantity, ii.owner_kind AS ownerKind, ii.owner_id AS ownerId, "
-            "ii.base_id AS baseId, ii.map_object_type AS mapObjectType, "
+            "ii.guild_id AS guildId, ii.base_id AS baseId, "
+            "ii.map_object_type AS mapObjectType, "
             "ii.map_object_instance_id AS mapObjectInstanceId, "
             "ii.world_x AS worldX, ii.world_y AS worldY, ii.world_z AS worldZ, "
-            "p.name AS ownerName, b.name AS baseName FROM inventory_items AS ii "
+            "p.name AS ownerName, g.name AS guildName, b.name AS baseName "
+            "FROM inventory_items AS ii "
             "LEFT JOIN players AS p ON p.id = ii.owner_id "
+            "LEFT JOIN guilds AS g ON g.id = ii.guild_id "
             "LEFT JOIN bases AS b ON b.id = ii.base_id"
-            f"{where} ORDER BY ii.owner_kind, COALESCE(p.name, b.name, ''), ii.slot_index, ii.id "
+            f"{where} ORDER BY ii.owner_kind, COALESCE(p.name, g.name, b.name, ''), "
+            "ii.slot_index, ii.id "
             "LIMIT ? OFFSET ?",
             (*parameters, page_size, (page - 1) * page_size),
         ).fetchall()
@@ -708,17 +714,21 @@ def query_inventory_location_groups(
         rows = connection.execute(
             "SELECT ii.owner_kind AS ownerKind, "
             "CASE WHEN ii.owner_kind = 'player_inventory' THEN ii.owner_id "
-            "WHEN ii.owner_kind = 'base_inventory' THEN ii.base_id ELSE NULL END AS groupId, "
-            "MAX(p.name) AS ownerName, MAX(b.name) AS baseName, "
+            "WHEN ii.owner_kind = 'base_inventory' THEN ii.base_id "
+            "WHEN ii.owner_kind = 'guild_inventory' THEN ii.guild_id "
+            "ELSE NULL END AS groupId, "
+            "MAX(p.name) AS ownerName, MAX(g.name) AS guildName, MAX(b.name) AS baseName, "
             "SUM(ii.quantity) AS quantitySum, COUNT(*) AS locationCount, "
             "COUNT(DISTINCT ii.container_id) AS containerCount "
             "FROM inventory_items AS ii "
             "LEFT JOIN players AS p ON p.id = ii.owner_id "
+            "LEFT JOIN guilds AS g ON g.id = ii.guild_id "
             "LEFT JOIN bases AS b ON b.id = ii.base_id"
             f"{where} GROUP BY ii.owner_kind, groupId "
             "ORDER BY CASE ii.owner_kind WHEN 'player_inventory' THEN 0 "
-            "WHEN 'base_inventory' THEN 1 WHEN 'world' THEN 2 ELSE 3 END, "
-            "COALESCE(MAX(p.name), MAX(b.name), groupId, '') COLLATE NOCASE",
+            "WHEN 'base_inventory' THEN 1 WHEN 'guild_inventory' THEN 2 "
+            "WHEN 'world' THEN 3 ELSE 4 END, "
+            "COALESCE(MAX(p.name), MAX(g.name), MAX(b.name), groupId, '') COLLATE NOCASE",
             parameters,
         ).fetchall()
     finally:
@@ -741,7 +751,9 @@ def _inventory_filters(
     elif scope == "base":
         clauses.append("ii.owner_kind = 'base_inventory'")
     elif scope == "inventory":
-        clauses.append("ii.owner_kind IN ('player_inventory', 'base_inventory')")
+        clauses.append(
+            "ii.owner_kind IN ('player_inventory', 'base_inventory', 'guild_inventory')"
+        )
     elif scope == "world":
         clauses.append("ii.owner_kind = 'world'")
     if owner_id:
@@ -772,6 +784,7 @@ def _add_inventory_group_filter(
     owner_kind = {
         "player": "player_inventory",
         "base": "base_inventory",
+        "guild": "guild_inventory",
         "world": "world",
         "unassigned": "unassigned",
     }.get(location_type)
@@ -779,10 +792,15 @@ def _add_inventory_group_filter(
         raise ValueError("Unknown inventory location group.")
     clauses.append("ii.owner_kind = ?")
     parameters.append(owner_kind)
-    if location_type in {"player", "base"}:
+    if location_type in {"player", "base", "guild"}:
         if not group_id:
             raise ValueError("Inventory owner group requires a stable ID.")
-        clauses.append("ii.owner_id = ?" if location_type == "player" else "ii.base_id = ?")
+        id_column = {
+            "player": "ii.owner_id",
+            "base": "ii.base_id",
+            "guild": "ii.guild_id",
+        }[location_type]
+        clauses.append(f"{id_column} = ?")
         parameters.append(group_id)
     elif group_id is not None:
         raise ValueError("World and unassigned groups do not use a group ID.")
@@ -805,8 +823,10 @@ def _inventory_public_row(row: Mapping[str, object]) -> dict[str, object]:
 def _inventory_location_public_row(row: Mapping[str, object]) -> dict[str, object]:
     owner_kind = _text(row.get("ownerKind")) or "unassigned"
     owner_id = _text(row.get("ownerId"))
+    guild_id = _text(row.get("guildId"))
     base_id = _text(row.get("baseId"))
     owner_name = _text(row.get("ownerName"))
+    guild_name = _text(row.get("guildName"))
     base_name = _text(row.get("baseName"))
     if owner_kind == "player_inventory":
         label = f"玩家：{owner_name or owner_id or '资料未收录'}"
@@ -814,6 +834,9 @@ def _inventory_location_public_row(row: Mapping[str, object]) -> dict[str, objec
     elif owner_kind == "base_inventory":
         label = f"据点：{base_name or base_id or '资料未收录'}"
         location_type = "base"
+    elif owner_kind == "guild_inventory":
+        label = f"公会仓库：{guild_name}" if guild_name else "公会仓库"
+        location_type = "guild"
     elif owner_kind == "world":
         map_object_type = _text(row.get("mapObjectType"))
         label = (
@@ -831,6 +854,8 @@ def _inventory_location_public_row(row: Mapping[str, object]) -> dict[str, objec
         "locationLabel": label,
         "ownerId": owner_id,
         "ownerName": owner_name,
+        "guildId": guild_id,
+        "guildName": guild_name,
         "baseId": base_id,
         "baseName": base_name,
         "slotIndex": _integer(row.get("slotIndex")) or 0,
@@ -851,6 +876,10 @@ def _inventory_group_public_row(row: Mapping[str, object]) -> dict[str, object]:
     elif owner_kind == "base_inventory":
         location_type = "base"
         label = f"据点：{_text(row.get('baseName')) or group_id or '资料未收录'}"
+    elif owner_kind == "guild_inventory":
+        location_type = "guild"
+        guild_name = _text(row.get("guildName"))
+        label = f"公会仓库：{guild_name}" if guild_name else "公会仓库"
     elif owner_kind == "world":
         location_type = "world"
         label = "其他位置"
@@ -1850,8 +1879,17 @@ def _item_containers(
     bases: Sequence[tuple[Any, ...]],
     world_metadata: WorldMetadataBundle | None,
     map_object_containers: Mapping[
-        str, tuple[str | None, str | None, float | None, float | None, float | None]
+        str,
+        tuple[
+            str | None,
+            str | None,
+            float | None,
+            float | None,
+            float | None,
+            str | None,
+        ],
     ],
+    guild_containers: Mapping[str, str | None],
 ) -> tuple[list[tuple[Any, ...]], list[tuple[Any, ...]]]:
     owner_by_container: dict[str, str] = {}
     for player_id, profile in profiles.items():
@@ -1875,13 +1913,20 @@ def _item_containers(
         owner_id = owner_by_container.get(container_id) or _belong_id(
             belong, "PlayerUId", "PlayerUid", "player_uid", "owner_id"
         )
+        map_object = map_object_containers.get(container_id)
+        guild_container = container_id in guild_containers
+        if guild_container:
+            guild_id = guild_containers[container_id] or guild_id
         base_id = _belong_id(belong, "BaseId", "BaseCampId", "base_id", "base_camp_id")
         if base_id not in base_ids:
-            base_id = container_id if container_id in base_ids else None
-        map_object = map_object_containers.get(container_id)
+            base_id = None
+        if base_id is None and map_object and map_object[5] in base_ids:
+            base_id = map_object[5]
         kind = (
             "player_inventory"
             if owner_id
+            else "guild_inventory"
+            if guild_container
             else "base_inventory"
             if base_id
             else "world"
@@ -1916,17 +1961,52 @@ def _item_containers(
                     owner_id,
                     guild_id,
                     base_id,
-                    *(map_object or (None, None, None, None, None)),
+                    *(map_object[:5] if map_object else (None, None, None, None, None)),
                 )
             )
     return containers, items
 
 
+def _guild_item_containers(entries: list[Any]) -> dict[str, str | None]:
+    result: dict[str, str | None] = {}
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            continue
+        guild_id = _nullable_id(_property(entry.get("key")))
+        value = _mapping(entry.get("value"))
+        storage = _mapping(value.get("GuildItemStorage"))
+        raw = _property(storage.get("RawData"))
+        if not isinstance(raw, Mapping):
+            continue
+        container_id = _nullable_id(raw.get("container_id"))
+        if container_id:
+            result[container_id] = guild_id
+    return result
+
+
 def _map_object_item_containers(
     entries: list[Any],
-) -> dict[str, tuple[str | None, str | None, float | None, float | None, float | None]]:
+) -> dict[
+    str,
+    tuple[
+        str | None,
+        str | None,
+        float | None,
+        float | None,
+        float | None,
+        str | None,
+    ],
+]:
     result: dict[
-        str, tuple[str | None, str | None, float | None, float | None, float | None]
+        str,
+        tuple[
+            str | None,
+            str | None,
+            float | None,
+            float | None,
+            float | None,
+            str | None,
+        ],
     ] = {}
     for entry in entries:
         if not isinstance(entry, Mapping):
@@ -1935,6 +2015,7 @@ def _map_object_item_containers(
         model = _mapping(entry.get("Model"))
         model_raw = _mapping(model.get("RawData"))
         instance_id = _nullable_id(model_raw.get("instance_id"))
+        base_camp_id_belong_to = _nullable_id(model_raw.get("base_camp_id_belong_to"))
         x, y, z = _map_object_position(model_raw.get("initital_transform_cache"))
         concrete_model = _mapping(entry.get("ConcreteModel"))
         for module in _list_property(concrete_model.get("ModuleMap")):
@@ -1947,7 +2028,14 @@ def _map_object_item_containers(
             raw = _mapping(module_value.get("RawData"))
             target_container_id = _nullable_id(raw.get("target_container_id"))
             if target_container_id:
-                result[target_container_id] = (map_object_type, instance_id, x, y, z)
+                result[target_container_id] = (
+                    map_object_type,
+                    instance_id,
+                    x,
+                    y,
+                    z,
+                    base_camp_id_belong_to,
+                )
     return result
 
 

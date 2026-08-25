@@ -525,6 +525,9 @@ def test_inventory_world_locations_scopes_and_group_summaries(
     world_container_a = uuid.UUID(int=401)
     world_container_b = uuid.UUID(int=402)
     unassigned_container = uuid.UUID(int=403)
+    map_object_base_container = uuid.UUID(int=404)
+    guild_container = uuid.UUID(int=405)
+    guild_id = uuid.UUID(int=500)
     player_container = uuid.UUID(int=201)
 
     def add_container(
@@ -562,13 +565,31 @@ def test_inventory_world_locations_scopes_and_group_summaries(
     add_container(world_container_a, [2, 3])
     add_container(world_container_b, [1])
     add_container(unassigned_container, [4])
+    add_container(guild_container, [6])
+    add_container(
+        map_object_base_container,
+        [5],
+        {"GroupId": _property(uuid.UUID(int=500))},
+    )
 
     def map_object(
-        map_object_type: str, instance_id: uuid.UUID, target_container_id: uuid.UUID
+        map_object_type: str,
+        instance_id: uuid.UUID,
+        target_container_id: uuid.UUID,
+        base_camp_id_belong_to: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         return {
             "MapObjectId": _property(map_object_type, "NameProperty"),
-            "Model": _property({"RawData": _property({"instance_id": instance_id})}),
+            "Model": _property(
+                {
+                    "RawData": _property(
+                        {
+                            "instance_id": instance_id,
+                            "base_camp_id_belong_to": base_camp_id_belong_to,
+                        }
+                    )
+                }
+            ),
             "ConcreteModel": _property(
                 {
                     "ModuleMap": _property(
@@ -591,18 +612,45 @@ def test_inventory_world_locations_scopes_and_group_summaries(
     world["MapObjectSaveData"] = _property(
         {
             "values": [
-                map_object("TreasureBox", uuid.UUID(int=501), world_container_a),
+                map_object(
+                    "TreasureBox",
+                    uuid.UUID(int=501),
+                    world_container_a,
+                    uuid.UUID(int=0),
+                ),
                 map_object(
                     "TreasureBox_RequiredLongHold",
                     uuid.UUID(int=502),
                     world_container_b,
+                    uuid.UUID(int=999),
                 ),
                 # Exact MapObject references never override an established player/base owner.
-                map_object("TreasureBox", uuid.UUID(int=503), player_container),
+                map_object(
+                    "TreasureBox", uuid.UUID(int=503), player_container, base_id
+                ),
                 map_object("TreasureBox", uuid.UUID(int=504), base_container),
+                map_object(
+                    "StorageBox",
+                    uuid.UUID(int=505),
+                    map_object_base_container,
+                    base_id,
+                ),
             ]
         },
         "ArrayProperty",
+    )
+    world["GuildExtraSaveDataMap"] = _property(
+        [
+            {
+                "key": guild_id,
+                "value": {
+                    "GuildItemStorage": _property(
+                        {"RawData": _property({"container_id": guild_container})}
+                    )
+                },
+            }
+        ],
+        "MapProperty",
     )
     metadata = WorldMetadataBundle(
         data_version="test-items",
@@ -621,11 +669,11 @@ def test_inventory_world_locations_scopes_and_group_summaries(
     build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
 
     expected = {
-        "inventory": (12, 3),
+        "inventory": (23, 5),
         "player": (3, 1),
-        "base": (9, 2),
+        "base": (14, 3),
         "world": (6, 3),
-        "all": (22, 7),
+        "all": (33, 9),
     }
     for scope, (quantity, location_count) in expected.items():
         items, total, _ = query_inventory(
@@ -649,15 +697,19 @@ def test_inventory_world_locations_scopes_and_group_summaries(
     assert [group["locationType"] for group in groups] == [
         "player",
         "base",
+        "guild",
         "world",
         "unassigned",
     ]
-    assert sum(cast(int, group["quantitySum"]) for group in groups) == 22
-    assert groups[2]["label"] == "其他位置"
+    assert sum(cast(int, group["quantitySum"]) for group in groups) == 33
+    assert groups[2]["label"] == "公会仓库"
+    assert groups[2]["groupId"] == str(guild_id)
     assert groups[2]["quantitySum"] == 6
-    assert groups[2]["locationCount"] == 3
-    assert groups[2]["containerCount"] == 2
-    assert groups[3]["label"] == "未识别位置"
+    assert groups[3]["label"] == "其他位置"
+    assert groups[3]["quantitySum"] == 6
+    assert groups[3]["locationCount"] == 3
+    assert groups[3]["containerCount"] == 2
+    assert groups[4]["label"] == "未识别位置"
 
     world_locations, world_total = query_inventory_locations(
         cache,
@@ -676,6 +728,54 @@ def test_inventory_world_locations_scopes_and_group_summaries(
         "TreasureBox_RequiredLongHold",
     }
     assert all(location["mapObjectInstanceId"] for location in world_locations)
+
+    guild_locations, guild_total = query_inventory_locations(
+        cache,
+        "Wood",
+        page=1,
+        page_size=100,
+        scope="inventory",
+        owner_id=None,
+        base_id=None,
+        location_type="guild",
+        group_id=str(guild_id),
+    )
+    assert guild_total == 1
+    assert guild_locations[0]["locationType"] == "guild"
+    assert guild_locations[0]["locationLabel"] == "公会仓库"
+    assert guild_locations[0]["containerId"] == str(guild_container)
+
+    unassigned_locations, unassigned_total = query_inventory_locations(
+        cache,
+        "Wood",
+        page=1,
+        page_size=100,
+        scope="all",
+        owner_id=None,
+        base_id=None,
+        location_type="unassigned",
+    )
+    assert unassigned_total == 1
+    assert unassigned_locations[0]["containerId"] == str(unassigned_container)
+
+    base_locations, base_total = query_inventory_locations(
+        cache,
+        "Wood",
+        page=1,
+        page_size=100,
+        scope="base",
+        owner_id=None,
+        base_id=None,
+    )
+    assert base_total == 3
+    map_object_base_location = next(
+        location
+        for location in base_locations
+        if location["containerId"] == str(map_object_base_container)
+    )
+    assert map_object_base_location["locationType"] == "base"
+    assert map_object_base_location["baseId"] == str(base_id)
+    assert map_object_base_location["baseName"] == "据点甲"
 
     player_locations, _ = query_inventory_locations(
         cache,

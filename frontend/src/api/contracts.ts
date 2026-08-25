@@ -229,10 +229,12 @@ export type WorldInventoryItem = {
 };
 export type WorldInventoryLocation = {
   id: number;
-  locationType: "player" | "base" | "world" | "unassigned";
+  locationType: "player" | "base" | "guild" | "world" | "unassigned";
   locationLabel: string;
   ownerId: string | null;
   ownerName: string | null;
+  guildId: string | null;
+  guildName: string | null;
   baseId: string | null;
   baseName: string | null;
   slotIndex: number;

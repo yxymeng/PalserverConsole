@@ -28,6 +28,8 @@ test("仓库默认使用持有库存并按存放分布两级展开", () => {
   expect(source).toContain('["world", "世界"]');
   expect(source).toContain("库存总量");
   expect(source).toContain("世界容器总量");
+  expect(source).toContain("公会仓库");
+  expect(source).not.toContain('["guild", "公会"]');
   expect(source).toContain("存放记录");
   expect(source).toContain("存放分布");
   expect(source).toContain("group.label");

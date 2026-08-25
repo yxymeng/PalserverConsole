@@ -225,13 +225,14 @@ def router(deps: AppDependencies) -> APIRouter:
         if locationType is not None and locationType not in {
             "player",
             "base",
+            "guild",
             "world",
             "unassigned",
         }:
             return error_response(
                 422, "INVALID_INVENTORY_LOCATION_TYPE", "仓库存放分组不正确。"
             )
-        if (locationType in {"player", "base"}) != bool(groupId):
+        if (locationType in {"player", "base", "guild"}) != bool(groupId):
             return error_response(
                 422, "INVALID_INVENTORY_LOCATION_GROUP", "仓库存放分组 ID 不正确。"
             )
