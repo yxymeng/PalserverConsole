@@ -195,6 +195,25 @@
 .world-relation-section h3 { display: flex; justify-content: space-between; gap: 8px; margin: 0; color: var(--foreground); font-size: 13px; }
 .world-relation-section h3 small { color: var(--muted); font-weight: 500; }
 .world-relation-section > p { margin: 0; color: var(--muted); font-size: 13px; }
+.player-progress-identity .world-detail-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.player-progress-status { display: grid; gap: 5px; margin: 15px 18px 0; padding: 12px 13px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-subtle); }
+.player-progress-status.complete { border-color: color-mix(in srgb, var(--success) 45%, var(--border)); background: color-mix(in srgb, var(--success-surface) 50%, var(--surface)); }
+.player-progress-status.partial { border-color: color-mix(in srgb, var(--warning) 45%, var(--border)); background: color-mix(in srgb, var(--warning-surface) 50%, var(--surface)); }
+.player-progress-status strong { color: var(--foreground); font-size: 13px; }
+.player-progress-status p { margin: 0; color: var(--muted-strong); font-size: 12px; line-height: 1.55; }
+.player-progress-status details { color: var(--muted-strong); font-size: 12px; }
+.player-progress-status summary, .player-technical-detail summary { cursor: pointer; font-weight: 650; }
+.player-progress-groups { display: grid; margin-top: 15px; border-block: 1px solid var(--border); background: var(--border); gap: 1px; }
+.player-progress-group { min-width: 0; padding: 14px 18px; background: var(--surface); }
+.player-progress-group h3 { margin: 0 0 9px; color: var(--foreground); font-size: 13px; }
+.player-progress-group dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; margin: 0; }
+.player-progress-group dl > div { display: grid; min-width: 0; gap: 3px; }
+.player-progress-group dt { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
+.player-progress-group dd { margin: 0; color: var(--foreground); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.player-technical-detail dl { display: grid; gap: 8px; margin: 0; }
+.player-technical-detail dl > div { min-width: 0; }
+.player-technical-detail dt { color: var(--muted); font-size: 11px; }
+.player-technical-detail dd { margin: 2px 0 0; overflow-wrap: anywhere; color: var(--muted-strong); font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 11px; }
 .world-relation-list, .world-data-list { display: grid; gap: 6px; max-height: 220px; overflow: auto; }
 .world-relation-link { display: grid; gap: 2px; width: 100%; padding: 8px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); color: var(--foreground); font: inherit; font-size: 13px; text-align: left; }
 .world-relation-link:hover { border-color: var(--primary); color: var(--primary); }
@@ -203,10 +222,12 @@
 .world-detail-json { max-height: 220px; margin: 0; overflow: auto; padding: 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-subtle); color: var(--muted-strong); font-size: 11px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .world-raw-detail summary { color: var(--foreground); font-size: 13px; font-weight: 700; cursor: pointer; }
 .world-table-head, .world-table-row { display: grid; min-width: 780px; grid-template-columns: repeat(var(--world-columns), minmax(130px, 1fr)); align-items: center; gap: 12px; padding: 12px 16px; }
+.world-table-players .world-table-head, .world-table-players .world-table-row { min-width: 560px; grid-template-columns: minmax(110px, 1fr) 52px minmax(100px, 1fr) minmax(210px, 1.8fr); }
 .world-table-head { color: var(--muted); background: var(--surface-muted); font-size: 12px; font-weight: 650; }
 .world-table-row { border-top: 1px solid var(--border); color: var(--foreground); font-size: 13px; }
 .world-table-row[data-selected="true"] { background: color-mix(in srgb, var(--primary) 13%, var(--surface)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary) 62%, transparent); }
 .world-table-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.world-table-row > span[data-key="progressOverview"] { display: -webkit-box; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-height: 1.45; }
 .world-link { max-width: 100%; overflow: hidden; border: 0; padding: 0; color: var(--primary); background: transparent; font-weight: 650; text-align: left; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
 .world-link:hover { color: var(--primary-hover); text-decoration: underline; }
 .world-link.world-entity-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
@@ -598,8 +619,11 @@
   .world-entity-drawer .section-heading .icon-button { width: 40px; margin-left: auto; }
   .world-table-head { display: none; }
   .world-table-row { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding: 14px; }
+  .world-table-players .world-table-row { min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .world-table-players .world-table-row > span[data-key="progressOverview"] { grid-column: 1 / -1; }
   .world-table-row > span { display: grid; gap: 3px; overflow: visible; white-space: normal; overflow-wrap: anywhere; }
   .world-table-row > span::before { content: attr(data-label); color: var(--muted); font-size: 11px; font-weight: 650; }
+  .player-progress-identity .world-detail-grid, .player-progress-group dl { grid-template-columns: 1fr; }
   .backup-table .world-table-row > span:last-child { display: flex; flex-wrap: wrap; }
   .backup-table .world-table-row > span:last-child::before { width: 100%; }
   .operational-health { padding: 18px; }

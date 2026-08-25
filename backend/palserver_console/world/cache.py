@@ -7,6 +7,7 @@ import time
 import uuid
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -16,7 +17,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 12
+CACHE_SCHEMA_VERSION = 13
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
 
@@ -520,6 +521,8 @@ def query_cache(
         ).fetchall()
         public_rows = [_public_row(dict(row)) for row in rows]
         if resource == "players":
+            for public_row in public_rows:
+                _add_player_profile_fields(public_row)
             _add_relation_names(
                 connection,
                 public_rows,
@@ -1064,6 +1067,7 @@ def _player_detail(connection: sqlite3.Connection, player_id: str) -> dict[str, 
     if row is None:
         return None
     result = _public_row(dict(row))
+    _add_player_profile_fields(result)
     pals = _rows(
         connection,
         "SELECT * FROM pals WHERE owner_player_id = ? ORDER BY rowid LIMIT 200",
@@ -1216,8 +1220,116 @@ def _player_profiles(properties: Sequence[Mapping[str, Any]]) -> dict[str, dict[
             "party_container_id": _container_id(save_data.get("OtomoCharacterContainerId")),
             "storage_container_id": _container_id(save_data.get("PalStorageContainerId")),
             "platform": _scalar(save_data.get("PlayerPlatform")),
+            "last_recorded_at": _windows_ticks_iso(_scalar(save_data.get("LastOnlineDateTime"))),
+            "progress": _player_progress(save_data),
         }
     return profiles
+
+
+_PLAYER_PROGRESS_FIELDS = (
+    "discoveredPalSpecies",
+    "capturedPals",
+    "fastTravelPoints",
+    "exploredAreas",
+    "fieldBosses",
+    "towerBosses",
+    "dungeonClears",
+    "oilRigClears",
+    "technologyPoints",
+    "ancientTechnologyPoints",
+    "recipes",
+)
+
+
+def _player_progress(save_data: Mapping[str, Any]) -> dict[str, object]:
+    record = _property(save_data.get("RecordData"))
+    record_data = record if isinstance(record, Mapping) else {}
+    candidates: dict[str, int | None] = {
+        "discoveredPalSpecies": _truthy_map_count(record_data.get("PaldeckUnlockFlag")),
+        "capturedPals": _count_map_sum(record_data.get("PalCaptureCount")),
+        "fastTravelPoints": _truthy_map_count(record_data.get("FastTravelPointUnlockFlag")),
+        "exploredAreas": _truthy_map_count(record_data.get("FindAreaFlagMap")),
+        "fieldBosses": _truthy_map_count(record_data.get("NormalBossDefeatFlag")),
+        "towerBosses": _truthy_map_count(record_data.get("TowerBossDefeatFlag")),
+        "dungeonClears": _nonnegative_integer(record_data.get("FixedDungeonClearCount")),
+        "oilRigClears": _nonnegative_integer(record_data.get("OilrigClearCount")),
+        "technologyPoints": _nonnegative_integer(save_data.get("TechnologyPoint")),
+        "ancientTechnologyPoints": _nonnegative_integer(save_data.get("bossTechnologyPoint")),
+        "recipes": _property_list_count(save_data.get("UnlockedRecipeTechnologyNames")),
+    }
+    values = {key: value for key, value in candidates.items() if value is not None}
+    unavailable = [key for key in _PLAYER_PROGRESS_FIELDS if key not in values]
+    state = "unavailable" if not values else "partial" if unavailable else "complete"
+    return {"state": state, "values": values, "unavailable": unavailable}
+
+
+def _map_entries(value: object) -> list[tuple[object, object]] | None:
+    current = _property(value)
+    if isinstance(current, Mapping) and isinstance(current.get("values"), list):
+        current = current["values"]
+    if isinstance(current, Mapping):
+        return list(current.items())
+    if not isinstance(current, list):
+        return None
+    entries: list[tuple[object, object]] = []
+    for item in current:
+        if not isinstance(item, Mapping) or "value" not in item:
+            return None
+        entries.append((item.get("key"), item["value"]))
+    return entries
+
+
+def _truthy_map_count(value: object) -> int | None:
+    entries = _map_entries(value)
+    if entries is None:
+        return None
+    count = 0
+    for _, raw in entries:
+        current = _scalar(raw)
+        if not isinstance(current, bool | int) or (
+            isinstance(current, int) and current not in {0, 1}
+        ):
+            return None
+        count += int(bool(current))
+    return count
+
+
+def _count_map_sum(value: object) -> int | None:
+    entries = _map_entries(value)
+    if entries is None:
+        return None
+    total = 0
+    for _, raw in entries:
+        current = _nonnegative_integer(raw)
+        if current is None:
+            return None
+        total += current
+    return total
+
+
+def _nonnegative_integer(value: object) -> int | None:
+    current = _scalar(value)
+    if isinstance(current, bool) or not isinstance(current, int | float):
+        return None
+    integer = int(current)
+    return integer if integer >= 0 and integer == current else None
+
+
+def _property_list_count(value: object) -> int | None:
+    current = _property(value)
+    if isinstance(current, Mapping) and isinstance(current.get("values"), list):
+        return len(current["values"])
+    return len(current) if isinstance(current, list) else None
+
+
+def _windows_ticks_iso(value: object) -> str | None:
+    ticks = _nonnegative_integer(value)
+    if ticks is None or ticks == 0:
+        return None
+    try:
+        return (datetime(1, 1, 1, tzinfo=UTC) + timedelta(microseconds=ticks // 10)).isoformat()
+    except OverflowError:
+        return None
 
 
 def _groups(entries: list[Any]) -> tuple[list[tuple[Any, ...]], dict[str, str]]:
@@ -1377,7 +1489,18 @@ def _characters(
                     _json(profile.get("inventory_ids", [])),
                     profile.get("party_container_id"),
                     profile.get("storage_container_id"),
-                    _json({"platform": profile.get("platform")}),
+                    _json(
+                        {
+                            "platform": profile.get("platform"),
+                            "lastRecordedAt": profile.get("last_recorded_at"),
+                            "progress": profile.get("progress")
+                            or {
+                                "state": "unavailable",
+                                "values": {},
+                                "unavailable": list(_PLAYER_PROGRESS_FIELDS),
+                            },
+                        }
+                    ),
                 )
             )
             continue
@@ -2157,6 +2280,22 @@ def _public_row(row: dict[str, Any]) -> dict[str, object]:
         else:
             result[public_key] = value
     return result
+
+
+def _add_player_profile_fields(row: dict[str, object]) -> None:
+    detail = row.get("detail")
+    profile = detail if isinstance(detail, Mapping) else {}
+    progress = profile.get("progress")
+    row["progress"] = (
+        progress
+        if isinstance(progress, Mapping)
+        else {
+            "state": "unavailable",
+            "values": {},
+            "unavailable": list(_PLAYER_PROGRESS_FIELDS),
+        }
+    )
+    row["lastRecordedAt"] = profile.get("lastRecordedAt")
 
 
 def _camel_case(value: str) -> str:

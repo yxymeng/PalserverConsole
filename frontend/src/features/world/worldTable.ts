@@ -1,11 +1,12 @@
 import type { WorldResource, WorldRow } from "../../api/contracts";
 import { palTraitLabels, resolvePal } from "./palCatalog";
+import { playerProgressCoverage, playerProgressOf, playerProgressSummary } from "./playerProgress";
 
 export type PrimaryWorldResource = Extract<WorldResource, "players" | "pals" | "guilds" | "bases">;
 
 export function worldColumns(resource: PrimaryWorldResource) {
   const definitions: Record<PrimaryWorldResource, { key: string; label: string }[]> = {
-    players: [{ key: "name", label: "玩家" }, { key: "level", label: "等级" }, { key: "guildName", label: "工会" }, { key: "membershipStatus", label: "状态" }],
+    players: [{ key: "name", label: "玩家" }, { key: "level", label: "等级" }, { key: "guildName", label: "公会" }, { key: "progressOverview", label: "主要进度 / 数据覆盖" }],
     pals: [{ key: "displayName", label: "帕鲁" }, { key: "traits", label: "属性" }, { key: "level", label: "等级" }, { key: "ownerName", label: "主人" }, { key: "baseName", label: "据点" }],
     guilds: [{ key: "name", label: "工会" }, { key: "memberCount", label: "成员" }, { key: "baseCount", label: "据点" }, { key: "id", label: "Guild ID" }],
     bases: [{ key: "name", label: "据点" }, { key: "id", label: "Base ID" }, { key: "guildName", label: "工会" }, { key: "workerContainerId", label: "工作容器" }],
@@ -14,6 +15,10 @@ export function worldColumns(resource: PrimaryWorldResource) {
 }
 
 export function worldCell(item: WorldRow, key: string): string {
+  if (key === "progressOverview") {
+    const progress = playerProgressOf(item);
+    return `${playerProgressSummary(progress)} · ${playerProgressCoverage(progress)}`;
+  }
   if (key === "displayName") return resolvePal(item).displayName;
   if (key === "traits") return palTraitLabels(item).join(" · ") || "普通";
   if (key === "ownerName") return item.ownerName ? String(item.ownerName) : item.ownerPlayerId ? "玩家资料不可用" : "未分配";

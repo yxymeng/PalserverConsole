@@ -125,6 +125,13 @@ export type WorldReparseResponse = { message: string; reparseGeneration: number 
 export type WorldPlayerListItem = {
   id: string; instanceId: string; name: string; level: number | null; guildId: string | null;
   guildName?: string; inventoryIds: string[]; partyContainerId: string | null; storageContainerId: string | null;
+  lastRecordedAt: string | null; progress: WorldPlayerProgress;
+};
+export type WorldPlayerProgressField = "discoveredPalSpecies" | "capturedPals" | "fastTravelPoints" | "exploredAreas" | "fieldBosses" | "towerBosses" | "dungeonClears" | "oilRigClears" | "technologyPoints" | "ancientTechnologyPoints" | "recipes";
+export type WorldPlayerProgress = {
+  state: "complete" | "partial" | "unavailable";
+  values: Partial<Record<WorldPlayerProgressField, number>>;
+  unavailable: WorldPlayerProgressField[];
 };
 export type WorldPalListItem = {
   id: string; ownerPlayerId: string | null; characterId: string; nickname: string | null; level: number | null;

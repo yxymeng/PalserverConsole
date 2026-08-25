@@ -1,13 +1,16 @@
 import { Archive, ChevronLeft, ChevronRight, Database, LayoutDashboard, PawPrint, RefreshCw, Search, SlidersHorizontal, Users, Warehouse, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 
 import type { AuthStatus, WorldReparseResponse, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
+import { useIsMobile } from "../../hooks/use-mobile";
 import { formatWorldTime, type PrimaryWorldResource, worldCell, worldColumns } from "./worldTable";
 import { palTraitLabels, playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { PalRoster } from "./PalRoster";
 import { InventoryWorkspace, type InventoryContext } from "./InventoryWorkspace";
+import { PLAYER_PROGRESS_GROUPS, PLAYER_PROGRESS_LABELS, playerProgressCoverage, playerProgressOf, playerProgressUnavailable, playerProgressValue } from "./playerProgress";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 import { waitForWorldReparse } from "./worldReparse";
 
@@ -231,21 +234,20 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
         </form>
         {error && <p className="form-error" role="alert">{error}</p>}
         {message && <p className="form-success" role="status">{message}</p>}
-        <section className={`world-table ${showListLoading ? "is-loading" : ""}`} aria-live="polite" aria-busy={listLoading}>
+        <section className={`world-table world-table-${resource} ${showListLoading ? "is-loading" : ""}`} aria-live="polite" aria-busy={listLoading}>
           <div className="world-table-head" style={{ "--world-columns": columns.length } as CSSProperties}>{columns.map((column) => <span key={column.key}>{column.label}</span>)}</div>
           {showListLoading ? <WorldTableSkeleton columns={columns.length} /> : displayedItems.length ? displayedItems.map((item, index) => {
             const isSelected = selected?.resource === resource && String(selected.data.id) === String(item.id);
             return <div className="world-table-row" data-selected={isSelected || undefined} style={{ "--world-columns": columns.length } as CSSProperties} key={String(item.id || `${resource}-${index}`)}>{columns.map((column, columnIndex) => {
             const cell = worldCell(item, column.key);
             const palGender = resource === "pals" && column.key === "displayName" ? genderLabel(item) : null;
-            return <span key={column.key} data-label={column.label}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => void openDetail(resource, String(item.id))}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && <PalGenderIcon item={item} />}</button> : cell}</span>;
+            return <span key={column.key} data-key={column.key} data-label={column.label} title={cell}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => void openDetail(resource, String(item.id))}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && <PalGenderIcon item={item} />}</button> : cell}</span>;
           })}</div>;
           }) : <div className="world-empty-state"><Database size={22} /><strong>{result ? hasFilters ? "没有符合条件的数据" : `暂无${RESOURCE_LABELS[resource]}数据` : "正在读取世界数据"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : "解析成功后，实体会显示在这里。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
         </section>
         <section className="audit-footer"><span>共 {result?.total || 0} 条，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
       </section>
-      {selected && <button className="world-drawer-backdrop" type="button" aria-label="关闭详情遮罩" onClick={() => setSelected(null)} />}
-      <EntityDrawer detail={selected} loading={detailLoading} onClose={() => setSelected(null)} onNavigate={(target, id) => void openDetail(target, id)} onShowInventory={openInventory} />
+      <EntityDetailLayer detail={selected} loading={detailLoading} onClose={() => setSelected(null)} onNavigate={(target, id) => void openDetail(target, id)} onShowInventory={openInventory} />
       </div>}
     </main>
   </div>;
@@ -298,7 +300,7 @@ function EntityDrawer({ detail, loading, onClose, onNavigate, onShowInventory }:
 
   const { data, resource } = detail;
   return <aside className="world-entity-drawer" role="dialog" aria-modal="false" aria-label="世界实体详情">
-    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
+    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : valueOf(data, "id")}</p></div></div><button className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
     <div className="world-detail-properties">
       {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
       {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
@@ -330,14 +332,43 @@ function genderLabel(item: WorldRow): string | null {
 }
 
 function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps) {
+  const progress = playerProgressOf(data);
+  const unavailable = playerProgressUnavailable(progress);
   return <>
-    <PropertyGrid data={data} fields={[["等级", "level"], ["公会 ID", "guildId"], ["Player ID", "id"], ["实例", "instanceId"]]} />
+    <section className="player-progress-identity">
+      <PropertyGrid data={{ ...data, lastRecordedLabel: formatPlayerRecordedAt(data.lastRecordedAt) }} fields={[["等级", "level"], ["所属公会", "guildName"], ["最后记录时间", "lastRecordedLabel"]]} />
+    </section>
     <RelationButton title="所属公会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
+    <section className={`player-progress-status ${progress.state}`} aria-label="玩家进度数据覆盖">
+      <strong>{playerProgressCoverage(progress)}</strong>
+      <p>{progress.state === "complete" ? "以下项目均来自这名玩家的只读存档快照。" : progress.state === "partial" ? "仅显示存档中可确认的项目；缺失项目不会补零。" : "当前世界角色存在，但没有可用的玩家存档进度；不会显示一组误导性的零值。"}</p>
+      {progress.state === "partial" && <details><summary>查看不可用项目（{unavailable.length}）</summary><p>{unavailable.join("、")}</p></details>}
+    </section>
+    {progress.state !== "unavailable" && <div className="player-progress-groups">
+      {PLAYER_PROGRESS_GROUPS.map((group) => {
+        const available = group.fields.filter((field) => progress.values[field] !== undefined);
+        if (!available.length) return null;
+        return <section className="player-progress-group" key={group.title}><h3>{group.title}</h3><dl>{available.map((field) => <div key={field}><dt>{PLAYER_PROGRESS_LABELS[field]}</dt><dd>{playerProgressValue(progress, field)}</dd></div>)}</dl></section>;
+      })}
+    </div>}
     <RelationList title="拥有帕鲁" rows={rowsOf(data, "pals")} resource="pals" onNavigate={onNavigate} />
     <RelationList title="队伍帕鲁" rows={rowsOf(data, "partyPals")} resource="pals" onNavigate={onNavigate} />
     <RelationList title="储存帕鲁" rows={rowsOf(data, "storagePals")} resource="pals" onNavigate={onNavigate} />
     <InventoryButton title="玩家库存" data={data} scope="player" onShowInventory={onShowInventory} />
+    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Player ID</dt><dd>{valueOf(data, "id")}</dd></div><div><dt>Instance ID</dt><dd>{valueOf(data, "instanceId")}</dd></div></dl></details>
   </>;
+}
+
+function EntityDetailLayer(props: Parameters<typeof EntityDrawer>[0]) {
+  const isMobile = useIsMobile();
+  const content = <>{props.detail && <button className="world-drawer-backdrop" type="button" aria-label="关闭详情遮罩" onClick={props.onClose} />}<EntityDrawer {...props} /></>;
+  return isMobile && props.detail ? createPortal(content, document.body) : content;
+}
+
+function formatPlayerRecordedAt(value: unknown): string {
+  if (typeof value !== "string" || !value) return "不可用";
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? "不可用" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 function PalDetail({ data, onNavigate }: DetailProps) {

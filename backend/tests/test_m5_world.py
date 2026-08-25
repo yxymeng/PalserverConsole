@@ -339,6 +339,104 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return level, [player]
 
 
+def _progress_map(values: dict[str, object]) -> dict[str, Any]:
+    return _property(
+        [
+            {"key": _property(key, "NameProperty"), "value": _property(value)}
+            for key, value in values.items()
+        ],
+        "MapProperty",
+    )
+
+
+def _complete_progress_save() -> dict[str, Any]:
+    return {
+        "RecordData": _property(
+            {
+                "PaldeckUnlockFlag": _progress_map({"SheepBall": True, "CatMage": False}),
+                "PalCaptureCount": _progress_map({"SheepBall": 4, "CatMage": 3}),
+                "FastTravelPointUnlockFlag": _progress_map({"Start": True, "Hill": True}),
+                "FindAreaFlagMap": _progress_map({"Grassland": True}),
+                "NormalBossDefeatFlag": _progress_map({"BOSS_1": True, "BOSS_2": False}),
+                "TowerBossDefeatFlag": _progress_map({"TOWER_1": True, "TOWER_2": True}),
+                "FixedDungeonClearCount": _property(5, "IntProperty"),
+                "OilrigClearCount": _property(2, "IntProperty"),
+            }
+        ),
+        "TechnologyPoint": _property(12, "IntProperty"),
+        "bossTechnologyPoint": _property(3, "IntProperty"),
+        "UnlockedRecipeTechnologyNames": _property(
+            {"values": ["Arrow", "Flour", "Sphere"]}, "ArrayProperty"
+        ),
+    }
+
+
+def test_synthetic_player_progress_distinguishes_complete_partial_missing_and_abnormal(
+    tmp_path: Path,
+) -> None:
+    complete = world_cache._player_progress(_complete_progress_save())
+    assert complete == {
+        "state": "complete",
+        "values": {
+            "discoveredPalSpecies": 1,
+            "capturedPals": 7,
+            "fastTravelPoints": 2,
+            "exploredAreas": 1,
+            "fieldBosses": 1,
+            "towerBosses": 2,
+            "dungeonClears": 5,
+            "oilRigClears": 2,
+            "technologyPoints": 12,
+            "ancientTechnologyPoints": 3,
+            "recipes": 3,
+        },
+        "unavailable": [],
+    }
+
+    partial = world_cache._player_progress(
+        {"TechnologyPoint": _property(0), "UnlockedRecipeTechnologyNames": _property([])}
+    )
+    assert partial["state"] == "partial"
+    assert partial["values"] == {"technologyPoints": 0, "recipes": 0}
+    assert "towerBosses" in cast(list[str], partial["unavailable"])
+
+    missing = world_cache._player_progress({})
+    assert missing["state"] == "unavailable"
+    assert missing["values"] == {}
+
+    abnormal = world_cache._player_progress(
+        {
+            "RecordData": _property(
+                {
+                    "PalCaptureCount": _progress_map({"SheepBall": -1}),
+                    "TowerBossDefeatFlag": _property("not-a-map"),
+                    "FixedDungeonClearCount": _property("many"),
+                }
+            ),
+            "TechnologyPoint": _property(-4),
+            "bossTechnologyPoint": _property(1.5),
+            "UnlockedRecipeTechnologyNames": _property("Arrow"),
+        }
+    )
+    assert abnormal["state"] == "unavailable"
+    assert abnormal["values"] == {}
+
+    level, players = _synthetic_properties()
+    save_data = players[0]["SaveData"]["value"]
+    save_data.update(_complete_progress_save())
+    save_data["LastOnlineDateTime"] = _property(638_000_000_000_000_000, "Int64Property")
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    rows, total = query_cache(cache, "players", page=1, page_size=50)
+    detail = entity_detail(cache, "players", str(uuid.UUID(int=1)))
+    assert total == 1
+    assert rows[0]["progress"] == complete
+    assert rows[0]["lastRecordedAt"]
+    assert detail is not None
+    assert detail["progress"] == complete
+
+
 def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     level["worldSaveData"]["value"]["GameTimeSaveData"] = _property(

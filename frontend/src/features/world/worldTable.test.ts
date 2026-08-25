@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import { worldCell, worldColumns } from "./worldTable";
 
 test("玩家页保持稳定列顺序", () => {
-  expect(worldColumns("players").map(({ key }) => key)).toEqual(["name", "level", "guildName", "membershipStatus"]);
+    expect(worldColumns("players").map(({ key }) => key)).toEqual(["name", "level", "guildName", "progressOverview"]);
   expect(worldColumns("pals").map(({ key }) => key)).toEqual(["displayName", "traits", "level", "ownerName", "baseName"]);
   expect(worldColumns("bases").map(({ key }) => key)).toEqual(["name", "id", "guildName", "workerContainerId"]);
 });

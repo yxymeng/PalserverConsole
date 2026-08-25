@@ -2,7 +2,8 @@ import { expect, test } from "@playwright/test";
 
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux04-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-1" };
-const player = { id: "player-1", name: "Alice", level: 20, guildId: "guild-1", guildName: "测试工会" };
+const playerProgress = { state: "complete", values: { discoveredPalSpecies: 12, capturedPals: 3456, fastTravelPoints: 18, exploredAreas: 7, fieldBosses: 4, towerBosses: 2, dungeonClears: 9, oilRigClears: 3, technologyPoints: 14, ancientTechnologyPoints: 5, recipes: 62 }, unavailable: [] };
+const player = { id: "player-1", instanceId: "instance-player-1", name: "Alice", level: 20, guildId: "guild-1", guildName: "测试工会", lastRecordedAt: "2026-08-25T12:00:00+00:00", progress: playerProgress };
 const care = { currentHp: 0, hunger: 12, hungerRaw: null, hungerStatus: null, sanity: 40, physicalHealth: null, disease: "EPalStatus::Cold", activity: "EPalActivity::Working", diseaseRecorded: true, activityRecorded: true, reasons: ["zero_hp", "disease", "hunger_low", "san_low"], unavailable: [], severity: "critical", attention: true };
 const unavailableCare = { currentHp: null, hunger: null, hungerRaw: null, hungerStatus: null, sanity: null, physicalHealth: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity", "disease", "activity"], severity: "unavailable", attention: false };
 const aptitude = { speciesRarity: 1, ivs: { hp: 90, attack: 80, defense: 70, average: 80 }, workSuitabilities: [{ type: "Handcraft", level: 1 }, { type: "Transport", level: 1 }], metadataKnown: true, metadataLabel: null };
@@ -185,12 +186,23 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await tabs.getByRole("tab", { name: "玩家" }).click();
   await expect(page.locator(".world-player-avatar")).toHaveText("A");
   await expect(page.locator(".world-list-panel")).toContainText("测试工会");
-  await expect(page.locator(".world-list-panel")).toContainText("已加入工会");
+  await expect(page.locator(".world-list-panel")).toContainText("发现 12 种 · 捕获 3,456 只");
+  await expect(page.locator(".world-list-panel")).toContainText("完整数据");
 
   await page.getByRole("button", { name: "Alice" }).click();
   const drawer = page.getByLabel("世界实体详情");
   await expect(page.locator('.world-table-row[data-selected="true"]')).toContainText("Alice");
   if (testInfo.project.name === "mobile") await expect(drawer).toHaveAttribute("role", "dialog");
+  await expect(drawer).toContainText("已发现帕鲁种类");
+  await expect(drawer).toContainText("累计捕获帕鲁数量");
+  await expect(drawer).toContainText("已完成野外头目项目");
+  await expect(drawer).toContainText("已完成高塔");
+  await expect(drawer).toContainText("地下城通关次数");
+  await expect(drawer).toContainText("油田通关次数");
+  await expect(drawer).not.toContainText("累计击杀");
+  await expect(drawer.getByText("Player ID")).toBeHidden();
+  await drawer.getByText("技术信息", { exact: true }).click();
+  await expect(drawer.getByText("Player ID")).toBeVisible();
   await expect(drawer).toContainText("拥有帕鲁");
   await drawer.locator(".world-relation-section").filter({ hasText: "拥有帕鲁" }).getByRole("button", { name: /小羊/ }).click();
   await expect(drawer).toContainText("Character ID");
