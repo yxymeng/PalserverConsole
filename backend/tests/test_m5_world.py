@@ -1072,6 +1072,51 @@ def test_base_and_guild_asset_details_use_only_stable_relations(tmp_path: Path) 
     }
 
 
+def test_guild_and_base_details_do_not_truncate_linked_pals(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    guild_id = str(uuid.UUID(int=500))
+    base_id = str(uuid.UUID(int=101))
+    player_id = str(uuid.UUID(int=1))
+    additional_ids = [f"guild-pal-{index}" for index in range(201)]
+    with sqlite3.connect(cache) as connection:
+        connection.execute(
+            "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
+            (guild_id, "测试公会", 1, 1, "{}"),
+        )
+        connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
+        source = connection.execute(
+            "SELECT * FROM pals WHERE id = ?", (str(uuid.UUID(int=401)),)
+        ).fetchone()
+        assert source is not None
+        columns = [item[1] for item in connection.execute("PRAGMA table_info(pals)")]
+        id_index = columns.index("id")
+        rows = []
+        for pal_id in additional_ids:
+            row = list(source)
+            row[id_index] = pal_id
+            rows.append(row)
+        connection.executemany(
+            f"INSERT INTO pals ({', '.join(columns)}) VALUES({', '.join('?' for _ in columns)})",
+            rows,
+        )
+
+    guild_detail = entity_detail(cache, "guilds", guild_id)
+    base_detail = entity_detail(cache, "bases", base_id)
+
+    assert guild_detail is not None
+    guild_pals = cast(list[dict[str, Any]], guild_detail["pals"])
+    assert guild_detail["assetSummary"]["palCount"] == len(guild_pals) == 203
+    assert guild_pals[200]["id"] == "guild-pal-198"
+    assert guild_pals[-1]["id"] == "guild-pal-200"
+    assert base_detail is not None
+    workers = cast(list[dict[str, Any]], base_detail["workers"])
+    assert base_detail["workerCount"] == len(workers) == 202
+    assert workers[200]["id"] == "guild-pal-199"
+    assert workers[-1]["id"] == "guild-pal-200"
+
+
 def test_player_status_filter_and_sort_apply_before_pagination(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
@@ -1808,10 +1853,13 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
         response = client.get("/api/world/bases?page=1&pageSize=1")
         rejected = client.get("/api/world/pals?pageSize=201")
         replaced = client.get("/api/world/pals?snapshotId=superseded")
-        inventory = client.get("/api/world/inventories?pageSize=60")
-        inventory_detail = client.get("/api/world/inventories/Wood?pageSize=100")
-        inventory_replaced = client.get("/api/world/inventories?snapshotId=superseded")
-        inventory_invalid_scope = client.get("/api/world/inventories?scope=unknown")
+        legacy_inventory = client.get("/api/world/inventories?pageSize=200")
+        legacy_inventory_rejected = client.get("/api/world/inventories?pageSize=201")
+        inventory = client.get("/api/world/inventory-items?pageSize=60")
+        inventory_invalid_page = client.get("/api/world/inventory-items?pageSize=61")
+        inventory_detail = client.get("/api/world/inventory-items/Wood?pageSize=100")
+        inventory_replaced = client.get("/api/world/inventory-items?snapshotId=superseded")
+        inventory_invalid_scope = client.get("/api/world/inventory-items?scope=unknown")
         roster = client.get("/api/world/pals/roster?pageSize=60")
         aptitude_roster = client.get(
             "/api/world/pals/roster?minRarity=5&minHpIv=90&minAverageIv=80"
@@ -1838,7 +1886,18 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert rejected.json()["errorCode"] == "INVALID_WORLD_PAGE"
     assert replaced.status_code == 409
     assert replaced.json()["errorCode"] == "SNAPSHOT_REPLACED"
+    assert legacy_inventory.status_code == 200
+    assert legacy_inventory.json()["pageSize"] == 200
+    assert legacy_inventory.json()["total"] == 1
+    legacy_item = legacy_inventory.json()["items"][0]
+    assert legacy_item["itemId"] == "Wood"
+    assert legacy_item["quantity"] == 3
+    assert "slotIndex" in legacy_item
+    assert "totalQuantity" not in legacy_item
+    assert legacy_inventory_rejected.status_code == 422
+    assert legacy_inventory_rejected.json()["errorCode"] == "INVALID_WORLD_PAGE"
     assert inventory.status_code == 200
+    assert inventory.json()["pageSize"] == 60
     assert inventory.json()["total"] == 1
     assert inventory.json()["items"] == [
         {
@@ -1852,6 +1911,8 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
             "locationCount": 1,
         }
     ]
+    assert inventory_invalid_page.status_code == 422
+    assert inventory_invalid_page.json()["errorCode"] == "INVALID_INVENTORY_PAGE"
     assert inventory_detail.status_code == 200
     assert inventory_detail.json()["locations"][0]["locationType"] == "player"
     assert inventory_detail.json()["locations"][0]["containerId"]

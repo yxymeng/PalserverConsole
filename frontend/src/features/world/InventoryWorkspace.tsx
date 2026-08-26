@@ -68,7 +68,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
         if (context.guildId) query.set("guildId", context.guildId);
         if (context.metadata) query.set("metadata", context.metadata);
         try {
-          const next = await requestJson<WorldInventoryResponse>(`/api/world/inventories?${query}`, { signal });
+          const next = await requestJson<WorldInventoryResponse>(`/api/world/inventory-items?${query}`, { signal });
           if (next.snapshotId !== currentSnapshotId) {
             currentSnapshotId = await onSnapshotReplaced();
             continue;
@@ -123,7 +123,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
           if (group.groupId) query.set("groupId", group.groupId);
         }
         try {
-          const next = await requestJson<WorldInventoryDetailResponse>(`/api/world/inventories/${encodeURIComponent(item.itemId)}?${query}`, { signal });
+          const next = await requestJson<WorldInventoryDetailResponse>(`/api/world/inventory-items/${encodeURIComponent(item.itemId)}?${query}`, { signal });
           if (!isCurrentRequest()) return;
           if (next.snapshotId !== currentSnapshotId) {
             currentSnapshotId = await onSnapshotReplaced();

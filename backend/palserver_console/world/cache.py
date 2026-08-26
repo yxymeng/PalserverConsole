@@ -1215,7 +1215,7 @@ def _guild_detail(connection: sqlite3.Connection, guild_id: str) -> dict[str, ob
     result["pals"] = [
         _pal_public_row(dict(item))
         for item in connection.execute(
-            f"SELECT pal.* FROM pals AS pal WHERE {pal_where} ORDER BY pal.rowid LIMIT 200",
+            f"SELECT pal.* FROM pals AS pal WHERE {pal_where} ORDER BY pal.rowid",
             (guild_id, guild_id),
         ).fetchall()
     ]
@@ -1245,7 +1245,7 @@ def _base_detail(connection: sqlite3.Connection, base_id: str) -> dict[str, obje
     )
     worker_rows = connection.execute(
         "SELECT * FROM pals WHERE base_id = ? AND assignment = 'base_worker' "
-        "ORDER BY rowid LIMIT 200",
+        "ORDER BY rowid",
         (base_id,),
     ).fetchall()
     result["workers"] = [_pal_public_row(dict(item)) for item in worker_rows]

@@ -164,7 +164,7 @@ def router(deps: AppDependencies) -> APIRouter:
             response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
             return error_response(response_status, error.code, str(error))
 
-    @api.get("/api/world/inventories", tags=["world"], response_model=None)
+    @api.get("/api/world/inventory-items", tags=["world"], response_model=None)
     def world_inventory(
         request: Request,
         page: int = 1,
@@ -212,7 +212,7 @@ def router(deps: AppDependencies) -> APIRouter:
             response_status = 409 if error.code == "SNAPSHOT_REPLACED" else 503
             return error_response(response_status, error.code, str(error))
 
-    @api.get("/api/world/inventories/{item_id}", tags=["world"], response_model=None)
+    @api.get("/api/world/inventory-items/{item_id}", tags=["world"], response_model=None)
     def world_inventory_item(
         item_id: str,
         request: Request,

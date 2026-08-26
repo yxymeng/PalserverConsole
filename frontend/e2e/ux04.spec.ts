@@ -88,7 +88,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : location === "unassigned" ? rosterPals.slice(1) : sorted;
       return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, passiveSkills: palSkills.passive, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
-    if (path === "/api/world/inventories") {
+    if (path === "/api/world/inventory-items") {
       const requestUrl = new URL(route.request().url());
       inventoryUrls.push(requestUrl);
       const scope = requestUrl.searchParams.get("scope") || "all";
@@ -99,7 +99,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const items = metadata === "unknown" ? scopedItems.filter((item) => !item.metadataKnown) : scopedItems;
       return route.fulfill({ json: { items, categories: ["材料"], page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
-    if (path === "/api/world/inventories/Wood") {
+    if (path === "/api/world/inventory-items/Wood") {
       const requestUrl = new URL(route.request().url());
       const scope = requestUrl.searchParams.get("scope") || "all";
       const selectedType = requestUrl.searchParams.get("locationType");
@@ -403,13 +403,13 @@ test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async 
   await page.route("**/api/world/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/world/snapshots/current") return route.fulfill({ json: snapshot });
-    if (url.pathname === "/api/world/inventories") return route.fulfill({ json: { items: [item("A", "物品 A"), item("B", "物品 B")], categories: ["材料"], page: 1, pageSize: 60, total: 2, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: "race", stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: coverage, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "test", errorCode: null } } });
-    if (url.pathname === "/api/world/inventories/A") {
+    if (url.pathname === "/api/world/inventory-items") return route.fulfill({ json: { items: [item("A", "物品 A"), item("B", "物品 B")], categories: ["材料"], page: 1, pageSize: 60, total: 2, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: "race", stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: coverage, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "test", errorCode: null } } });
+    if (url.pathname === "/api/world/inventory-items/A") {
       markOldItemStarted();
       await oldItemReleased;
       return route.fulfill({ json: detail("A", [group("player", "过期 A 分组")], []) }).catch(() => undefined);
     }
-    if (url.pathname === "/api/world/inventories/B") {
+    if (url.pathname === "/api/world/inventory-items/B") {
       const locationType = url.searchParams.get("locationType");
       if (!locationType) return route.fulfill({ json: detail("B", [group("player", "玩家分组"), group("base", "据点分组")], []) });
       if (locationType === "player") {
