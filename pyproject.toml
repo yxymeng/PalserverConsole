@@ -37,6 +37,9 @@ version = {attr = "palserver_console.__version__"}
 [tool.setuptools.packages.find]
 where = ["backend"]
 
+[tool.setuptools.package-data]
+"palserver_console.metadata" = ["data/*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
 addopts = "-ra"

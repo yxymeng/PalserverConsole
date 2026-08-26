@@ -83,35 +83,283 @@ export type AuditItem = {
   parserVersion: string | null;
 };
 export type AuditResponse = { items: AuditItem[]; page: number; pageSize: number; total: number; observedAt: number };
-export type WorldStatus = {
+export type WorldResource = "players" | "pals" | "guilds" | "bases" | "inventories" | "work-pals";
+export type WorldParseStatus = "ready" | "parsing" | "failed" | "unavailable" | "incompatible";
+export type WorldDataCoverage = {
+  state: "complete" | "unavailable";
+  resources: Record<WorldResource, boolean>;
+};
+export type WorldSnapshotContext = {
   source: string;
   observedAt: number;
-  sourceObservedAt?: number;
-  collectedAt?: number | null;
-  parsedAt?: number | null;
+  sourceObservedAt: number;
+  collectedAt: number | null;
+  parsedAt: number | null;
+  snapshotId: string | null;
   stale: boolean;
   errorCode: string | null;
-  error: string | null;
-  snapshotId: string | null;
   parsing: boolean;
-  parseDurationMs: number | null;
-  peakMemoryBytes?: number | null;
-  cacheSizeBytes?: number | null;
-  gameTimeTicks?: number | null;
-  counts: Record<string, number>;
+  parseStatus: WorldParseStatus;
+  dataCoverage: WorldDataCoverage;
 };
-export type WorldRow = Record<string, unknown> & { id?: string; name?: string };
-export type WorldResponse = {
-  items: WorldRow[];
+export type WorldContractBoundary = {
+  queryVersion: number;
+  cacheSchema: string;
+  cacheSchemaVersion: number;
+  metadataSchema: string;
+  metadataSchemaVersion: number;
+  metadataDataVersion: string | null;
+};
+export type WorldSnapshotSummary = WorldSnapshotContext & {
+  contract: WorldContractBoundary;
+  reparseGeneration: number;
+  error: string | null;
+  parseDurationMs: number | null;
+  peakMemoryBytes: number | null;
+  cacheSizeBytes: number | null;
+  gameTimeTicks: number | null;
+  counts: {
+    players: number;
+    pals: number;
+    guilds: number;
+    bases: number;
+    containers: number;
+    inventory_items: number;
+    work_pals: number;
+  };
+  overview?: WorldOverview | null;
+};
+export type WorldStatus = WorldSnapshotSummary;
+export type WorldOverview = {
+  assets: {
+    players: number; pals: number; palSpecies: number; itemTypes: number;
+    itemQuantity: number; bases: number; guilds: number;
+  };
+  actions: {
+    attentionPals: number; luckyPals: number; bossPals: number; unassignedPals: number;
+    unknownItems: number; unknownPalMetadata: number; careUnavailable: number;
+  };
+};
+export type WorldReparseResponse = { message: string; reparseGeneration: number };
+
+export type WorldPlayerListItem = {
+  id: string; instanceId: string; name: string; level: number | null; guildId: string | null;
+  guildName?: string; inventoryIds: string[]; partyContainerId: string | null; storageContainerId: string | null;
+  lastRecordedAt: string | null; progress: WorldPlayerProgress;
+};
+export type WorldPlayerProgressField = "discoveredPalSpecies" | "capturedPals" | "fastTravelPoints" | "exploredAreas" | "fieldBosses" | "towerBosses" | "dungeonClears" | "oilRigClears" | "technologyPoints" | "ancientTechnologyPoints" | "recipes";
+export type WorldPlayerProgress = {
+  state: "complete" | "partial" | "unavailable";
+  values: Partial<Record<WorldPlayerProgressField, number>>;
+  unavailable: WorldPlayerProgressField[];
+};
+export type WorldPalListItem = {
+  id: string; ownerPlayerId: string | null; characterId: string; nickname: string | null; level: number | null;
+  containerId: string | null; slotIndex: number | null; baseId: string | null; assignment: string;
+  ownerName?: string; baseName?: string;
+  gender?: string | null; rank?: number | null; isBoss?: boolean; isLucky?: boolean;
+};
+export type WorldPalRosterItem = WorldPalListItem & {
+  gender: string | null;
+  rank: number | null;
+  isBoss: boolean;
+  isLucky: boolean;
+  locationType: "player" | "party" | "storage" | "base" | "unassigned";
+  aptitude: WorldPalAptitude;
+  skills: WorldPalSkills;
+  care: WorldPalCare;
+};
+export type WorldPalAptitude = {
+  speciesRarity: number | null;
+  ivs: { hp: number | null; attack: number | null; defense: number | null; average: number | null };
+  workSuitabilities: { type: string; level: number }[];
+  metadataKnown: boolean;
+  metadataLabel: "资料未收录" | null;
+};
+export type WorldPalSkill = {
+  id: string;
+  name: string | null;
+  description: string | null;
+  sourceName: string | null;
+  rank: number | null;
+  element: string | null;
+  power: number | null;
+  cooldown: number | null;
+  metadataKnown: boolean;
+};
+export type WorldPalSkills = {
+  passive: WorldPalSkill[];
+  equipped: WorldPalSkill[];
+  learned: WorldPalSkill[];
+  partner: WorldPalSkill | null;
+};
+export type WorldMetadataStatus = {
+  status: "ready" | "unavailable";
+  schema: string;
+  schemaVersion: number;
+  dataVersion: string | null;
+  sourceRevision: string | null;
+  errorCode: string | null;
+};
+export type WorldPalCare = {
+  currentHp: number | null;
+  hunger: number | null;
+  hungerRaw: number | null;
+  hungerStatus: string | null;
+  sanity: number | null;
+  physicalHealth: string | null;
+  disease: string | null;
+  activity: string | null;
+  diseaseRecorded: boolean;
+  activityRecorded: boolean;
+  reasons: ("zero_hp" | "disease" | "hunger_low" | "san_low")[];
+  unavailable: ("currentHp" | "hunger" | "sanity" | "disease" | "activity")[];
+  severity: "critical" | "warning" | "info" | "unavailable" | "healthy";
+  attention: boolean;
+};
+export type WorldPalCareSummary = {
+  total: number;
+  critical: number;
+  warning: number;
+  attention: number;
+  unavailable: number;
+};
+export type WorldPalRosterResponse = WorldSnapshotContext & {
+  items: WorldPalRosterItem[];
   page: number;
   pageSize: number;
   total: number;
-  source: string;
-  observedAt: number;
-  stale: boolean;
-  errorCode: string | null;
+  careSummary: WorldPalCareSummary;
+  passiveSkills: WorldPalSkill[];
+  metadata: WorldMetadataStatus;
 };
-export type WorldResource = "players" | "pals" | "guilds" | "bases" | "inventories" | "work-pals";
+export type WorldGuildListItem = {
+  id: string; name: string; memberCount: number; baseCount: number;
+};
+export type WorldBaseListItem = {
+  id: string; name: string; guildId: string | null; workerContainerId: string | null;
+  x: number | null; y: number | null; z: number | null; guildName?: string;
+};
+export type WorldInventoryListItem = {
+  id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;
+  ownerId: string | null; guildId: string | null; baseId: string | null;
+};
+export type WorldInventoryAssetSummary = {
+  itemTypeCount: number;
+  totalQuantity: number;
+  locationCount: number;
+};
+export type WorldGuildAssetSummary = {
+  memberCount: number;
+  baseCount: number;
+  palCount: number;
+  inventory: WorldInventoryAssetSummary;
+};
+export type WorldInventoryScope = "inventory" | "player" | "base" | "world" | "all";
+export type WorldInventoryItem = {
+  itemId: string;
+  name: string | null;
+  category: string | null;
+  rarity: string | null;
+  metadataKnown: boolean;
+  metadataLabel: "资料未收录" | null;
+  totalQuantity: number;
+  locationCount: number;
+};
+export type WorldInventoryLocation = {
+  id: number;
+  locationType: "player" | "base" | "guild" | "world" | "unassigned";
+  locationLabel: string;
+  ownerId: string | null;
+  ownerName: string | null;
+  guildId: string | null;
+  guildName: string | null;
+  baseId: string | null;
+  baseName: string | null;
+  slotIndex: number;
+  quantity: number;
+  containerId: string | null;
+  mapObjectType: string | null;
+  mapObjectInstanceId: string | null;
+  worldPosition: { x: number; y: number; z: number } | null;
+};
+export type WorldInventoryLocationGroup = {
+  locationType: WorldInventoryLocation["locationType"];
+  groupId: string | null;
+  label: string;
+  quantitySum: number;
+  locationCount: number;
+  containerCount: number;
+};
+export type WorldInventoryResponse = WorldSnapshotContext & {
+  items: WorldInventoryItem[];
+  categories: string[];
+  page: number;
+  pageSize: number;
+  total: number;
+  metadata: WorldMetadataStatus;
+};
+export type WorldInventoryDetailResponse = WorldSnapshotContext & {
+  itemId: string;
+  groups: WorldInventoryLocationGroup[];
+  locations: WorldInventoryLocation[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
+export type WorldContainerReference = {
+  id: string; kind: string; ownerId: string | null; guildId: string | null;
+  baseId: string | null; slotCount: number;
+};
+export type WorldPlayerDetail = WorldPlayerListItem & {
+  pals: WorldPalListItem[];
+  partyPals: WorldPalListItem[];
+  storagePals: WorldPalListItem[];
+  inventory: WorldInventoryListItem[];
+  guild: WorldGuildListItem | null;
+};
+export type WorldPalDetail = WorldPalListItem & {
+  owner: WorldPlayerListItem | null;
+  base: WorldBaseListItem | null;
+  container: WorldContainerReference | null;
+  care: WorldPalCare;
+  aptitude: WorldPalAptitude;
+  skills: WorldPalSkills;
+  metadata: WorldMetadataStatus;
+};
+export type WorldGuildDetail = WorldGuildListItem & {
+  members: WorldPlayerListItem[];
+  bases: WorldBaseListItem[];
+  pals: WorldPalListItem[];
+  assetSummary: WorldGuildAssetSummary;
+  missingMemberIds: string[];
+  missingBaseIds: string[];
+};
+export type WorldBaseDetail = WorldBaseListItem & {
+  guild: WorldGuildListItem | null;
+  workers: WorldPalListItem[];
+  workerCount: number;
+  careSummary: WorldPalCareSummary;
+  inventorySummary: WorldInventoryAssetSummary;
+  guildAssociation: "linked" | "unassigned" | "unavailable";
+};
+export type WorldEntityListItem =
+  | WorldPlayerListItem
+  | WorldPalListItem
+  | WorldGuildListItem
+  | WorldBaseListItem;
+export type WorldEntityListResponse = WorldSnapshotContext & {
+  items: WorldEntityListItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
+export type WorldEntityDetail = WorldSnapshotContext & (
+  | WorldPlayerDetail
+  | WorldPalDetail
+  | WorldGuildDetail
+  | WorldBaseDetail
+);
 export type Theme = "light" | "dark";
 
 export type BackupItem = { id: string; observedAt: number; sizeBytes: number; valid: boolean; missing: string[] };

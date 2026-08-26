@@ -7,7 +7,8 @@ if exist "%~dp0PalServerConsole.exe" (
   set "PALSERVER_CONSOLE_DATA=%~dp0data"
   "%~dp0Program\PalServerConsole.exe" %*
 ) else (
-  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-console.ps1" %*
+  set "PSModulePath="
+  "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-console.ps1" %*
 )
 if errorlevel 1 (
   echo.

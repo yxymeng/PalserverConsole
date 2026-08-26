@@ -18,6 +18,38 @@ def _raw_bytes(value: Sequence[int]) -> bytes:
     return bytes(value)
 
 
+def decode_map_objects(
+    reader: FArchiveReader, type_name: str, size: int, path: str
+) -> dict[str, Any]:
+    """Decode only the stable MapObject fields needed for exact inventory links."""
+
+    if type_name != "ArrayProperty":
+        raise ValueError(f"Expected ArrayProperty, got {type_name}")
+    value = cast(dict[str, Any], reader.property(type_name, size, path, nested_caller_path=path))
+    for map_object in value["value"]["values"]:
+        model_raw = map_object["Model"]["value"]["RawData"]["value"]
+        model_reader = reader.internal_copy(_raw_bytes(model_raw["values"]), debug=False)
+        model_raw.clear()
+        model_raw.update(
+            {
+                "instance_id": model_reader.guid(),
+                "concrete_model_instance_id": model_reader.guid(),
+                "base_camp_id_belong_to": model_reader.guid(),
+                "group_id_belong_to": model_reader.guid(),
+                "hp": {"current": model_reader.i32(), "max": model_reader.i32()},
+                "initital_transform_cache": model_reader.ftransform(),
+            }
+        )
+        for module in map_object["ConcreteModel"]["value"]["ModuleMap"]["value"]:
+            if module["key"] != "EPalMapObjectConcreteModelModuleType::ItemContainer":
+                continue
+            module_raw = module["value"]["RawData"]["value"]
+            module_reader = reader.internal_copy(_raw_bytes(module_raw["values"]), debug=False)
+            module_raw.clear()
+            module_raw["target_container_id"] = module_reader.guid()
+    return value
+
+
 def decode_character(
     reader: FArchiveReader, type_name: str, size: int, path: str
 ) -> dict[str, Any]:
@@ -77,6 +109,26 @@ def decode_item_slot(
         "trailing_bytes": list(inner.read_to_end()),
     }
     return value
+
+
+def decode_guild_item_storage(
+    reader: FArchiveReader, type_name: str, size: int, path: str
+) -> dict[str, Any]:
+    """Decode the exact GuildItemStorage container reference and retain its tail."""
+
+    if type_name != "ArrayProperty":
+        raise ValueError(f"Expected ArrayProperty, got {type_name}")
+    value = cast(dict[str, Any], reader.property(type_name, size, path, nested_caller_path=path))
+    inner = reader.internal_copy(_raw_bytes(value["value"]["values"]), debug=False)
+    value["value"] = {
+        "container_id": inner.guid(),
+        "trailing_bytes": list(inner.read_to_end()),
+    }
+    return value
+
+
+def _read_only_encoder(*_: Any) -> int:
+    raise RuntimeError("The M5 compatibility layer does not write GuildItemStorage RawData.")
 
 
 def decode_base_camp(
@@ -243,13 +295,19 @@ def m5_custom_properties() -> dict[str, tuple[Any, Any]]:
             ".worldSaveData.ItemContainerSaveData.Value.RawData"
         ][0],
         ".worldSaveData.ItemContainerSaveData.Value.Slots.Slots.RawData": decode_item_slot,
+        ".worldSaveData.MapObjectSaveData": decode_map_objects,
         ".worldSaveData.CharacterContainerSaveData.Value.Slots.Slots.RawData": (
             decode_character_container
         ),
         ".worldSaveData.BaseCampSaveData.Value.RawData": decode_base_camp,
         ".worldSaveData.BaseCampSaveData.Value.WorkerDirector.RawData": decode_worker_director,
     }
-    return {
+    result = {
         path: (decoder, PALWORLD_CUSTOM_PROPERTIES[path][1])
         for path, decoder in selected.items()
     }
+    result[".worldSaveData.GuildExtraSaveDataMap.Value.GuildItemStorage.RawData"] = (
+        decode_guild_item_storage,
+        _read_only_encoder,
+    )
+    return result

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+
 test("M8 operation contract、错误码和移动端交互", async ({ page }, testInfo) => {
   let startCalls = 0;
   await page.on("dialog", async (dialog) => dialog.accept());
@@ -32,7 +34,7 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     await page.route(`**/api/live/${key}`, (route) => route.fulfill({ json: liveSnapshot[key] }));
   }
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: {
-    source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null,
+      contract: worldContract, source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null,
     snapshotId: "m8-world", parsing: false, parseDurationMs: 100, gameTimeTicks: null,
     counts: { players: 0, pals: 0, guilds: 0, bases: 0 },
   } }));

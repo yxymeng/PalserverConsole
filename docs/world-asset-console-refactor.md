@@ -1,6 +1,7 @@
 # 世界资产台完全重构规格
 
 - 状态：Accepted
+- 实施状态：Completed（2026-08-26）
 - 确认日期：2026-08-20
 - 访客模式：Operate
 - 目标入口：`世界数据`
@@ -437,7 +438,22 @@
 
 ## 20. 已知未验证项
 
-- 当前脱敏 `level.m5.json.gz` 不包含玩家进度字段；
-- 尚未用脱敏或真实玩家存档验证 Boss、高塔、地下城、油田、科技点和配方解析；
-- 尚未验证压力规模 5,000 只帕鲁和 50,000 个物品槽；
-- 本文档确认的是设计和验收合同，尚未实施代码、测试或构建。
+- 当前脱敏 `level.m5.json.gz` 不包含玩家进度字段；真实玩家进度的 Boss、高塔、地下城、油田、科技点和配方解析仍未验证，不以合成测试替代该结论。
+- 私有 M0 fixture 未配置；对应全量测试保留明确 skip。
+- 官方 FModel 导出的 Palworld 名称与文本属于游戏内容，不是 MIT 或 Apache 许可的项目代码；来源、固定指纹、用途与权利边界记录在 `THIRD_PARTY_NOTICES.md`。
+
+## 21. 最终模块交接
+
+世界资产台已形成单一显式版本边界：frontend query contract `1`、derived cache `world-asset-cache/14`、metadata schema `palserver-console-world-metadata/1`，当前 metadata data version 为 `2026.08.25.3`。前端不再保留无约束 `WorldRow`、旧 `WorldResponse`、详情 `detail` 回退或原始记录过渡面板；旧只读 `/api/world/...` 路由仍保持兼容。版本不一致时显式返回或显示 `WORLD_QUERY_CONTRACT_INCOMPATIBLE` / `CACHE_SCHEMA_INCOMPATIBLE`，不静默混用。
+
+最终验收证据：
+
+- 后端全量 `217 passed, 2 skipped`；Ruff 通过；mypy `Success: no issues found in 62 source files`。
+- 前端 Vitest `19 files / 49 tests`、typecheck、build 通过；最终工作树补跑 lint、build 仍通过，lint 为 `0 errors / 3 warnings`，三项均为既有 shadcn Fast Refresh warning；build 保留既有 `Some chunks are larger than 500 kB` warning。
+- Playwright 在 `1440x960` 与 `390x844` 覆盖核心浏览、关系导航、焦点环路、六工作区无快照状态和错误恢复，共 `6 passed`；最终工作树另对本轮改动的 `m8`、`ux02`、`ux04`、`ux11` 在 desktop/mobile 补跑，共 `10 passed (37.5s)`。
+- Impeccable detector 返回 `[]`；桌面与手机最终截图确认无可见横向溢出、遮挡或不可达控件。
+- 压力测试覆盖 200 玩家、5,000 帕鲁和 50,000 物品槽，列表保持分页、物品槽在服务端聚合。
+- 只读真实 M5 `Level.sav` 验证 `1 passed, 46 deselected`；对绑定世界 41 个 `.sav` 的 SHA-256 前后逐文件一致，未执行服务器生命周期操作。
+- 许可、敏感信息与 `git diff --check` 已完成；运行时路由枚举确认现有 world 写方法仅为历史 `POST /api/world/reparse` 与 `POST /api/world/storage/cleanup`，不存在 world `PUT`、`PATCH`、`DELETE`。本轮未修改 world router，新增 world 写路由为 `0`；未写入真实存档。
+
+残余风险仅为本节列出的真实玩家进度与私有 M0 fixture 未验证，以及已明确披露的 Palworld 游戏内容权利边界。回滚时恢复本 Ticket 的前端类型化查询改动与契约握手、后端契约字段、测试和文档即可；derived cache 可按旧实现重新解析，真实 `.sav` 无迁移且无需回滚。回滚不得覆盖本模块外的用户修改。

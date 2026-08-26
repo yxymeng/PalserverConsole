@@ -1,6 +1,16 @@
 import catalogData from "./palCatalogData.json";
 
-type PalSource = Record<string, unknown>;
+export type PalSource = {
+  characterId: string;
+  nickname?: string | null;
+  gender?: string | null;
+  rank?: number | null;
+  isBoss?: boolean;
+  isPredator?: boolean;
+  isLucky?: boolean;
+  isAwakened?: boolean;
+  isImported?: boolean;
+};
 
 export type PalCatalogEntry = {
   name: string;
@@ -36,7 +46,6 @@ export function resolvePal(source: PalSource): PalPresentation {
   const nickname = textValue(source.nickname);
   const catalogEntry = PAL_CATALOG[characterId] || PAL_CATALOG_CASE_INSENSITIVE[characterId.toLocaleLowerCase("en-US")];
   const speciesName = catalogEntry?.name || characterId || "未知帕鲁";
-  const detail = objectValue(source.detail);
   return {
     characterId: characterId || "未知",
     displayName: nickname || speciesName,
@@ -45,13 +54,13 @@ export function resolvePal(source: PalSource): PalPresentation {
     englishName: catalogEntry?.englishName || characterId || "Unknown Pal",
     icon: catalogEntry?.icon || UNKNOWN_PAL_ICON,
     known: Boolean(catalogEntry),
-    gender: genderValue(detail.gender),
-    rank: numberValue(detail.rank),
-    isBoss: booleanValue(detail.isBoss) || /^(BOSS_|GYM_)|Boss$/i.test(characterId),
-    isPredator: booleanValue(detail.isPredator) || /^PREDATOR_/i.test(characterId),
-    isLucky: booleanValue(detail.isLucky),
-    isAwakened: booleanValue(detail.isAwakened),
-    isImported: booleanValue(detail.isImported),
+    gender: genderValue(source.gender),
+    rank: numberValue(source.rank),
+    isBoss: booleanValue(source.isBoss) || /^(BOSS_|GYM_)|Boss$/i.test(characterId),
+    isPredator: booleanValue(source.isPredator) || /^PREDATOR_/i.test(characterId),
+    isLucky: booleanValue(source.isLucky),
+    isAwakened: booleanValue(source.isAwakened),
+    isImported: booleanValue(source.isImported),
   };
 }
 
@@ -69,10 +78,6 @@ export function palTraitLabels(source: PalSource): string[] {
 
 export function playerInitial(value: unknown): string {
   return Array.from(textValue(value))[0]?.toLocaleUpperCase("zh-CN") || "?";
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 function textValue(value: unknown): string {

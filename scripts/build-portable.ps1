@@ -191,6 +191,7 @@ try {
         --icon $appIcon `
         --paths (Join-Path $projectRoot "backend") `
         --add-data "$frontendDist;frontend\dist" `
+        --collect-data "palserver_console.metadata" `
         --collect-all "palworld_save_tools" `
         --collect-all "uvicorn" `
         --workpath $pyInstallerWork `
