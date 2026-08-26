@@ -2,18 +2,6 @@
 
 > 本文件只保留仍在进行或尚未开始的事项。已经完成的 OPT-01～OPT-16、阶段验收、PR 修复记录和历史测试结果由 Git 历史、代码与测试承担，不再复制到 Roadmap。
 
-## 当前进行中
-
-### 世界资产台重构 `[~]`
-
-- 目标：将旧的通用世界实体浏览方式收敛为面向管理员任务的只读世界资产台。
-- 正式功能规格：`docs/world-asset-console-refactor.md`
-- 领域语言：`CONTEXT.md`
-- 架构决策：`docs/adr/0001-world-asset-console.md`
-- 当前执行 ticket / handoff 允许暂存在 `.scratch/world-asset-console/` 与 `docs/agents/`。
-- `.scratch/` 与 `docs/agents/` 不是长期事实源；本次重构最终独立验收通过后应整体清理，仅保留正式 spec、领域语言、ADR、代码和测试中仍有长期价值的内容。
-- 当前剩余工作以实际未完成 ticket 和 spec 验收项为准，不在本文件复制细节，避免产生第二份任务状态。
-
 ## 后续事项
 
 ### 受控远程访问与角色权限 `[ ]`

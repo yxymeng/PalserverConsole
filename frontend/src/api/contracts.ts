@@ -102,7 +102,16 @@ export type WorldSnapshotContext = {
   parseStatus: WorldParseStatus;
   dataCoverage: WorldDataCoverage;
 };
+export type WorldContractBoundary = {
+  queryVersion: number;
+  cacheSchema: string;
+  cacheSchemaVersion: number;
+  metadataSchema: string;
+  metadataSchemaVersion: number;
+  metadataDataVersion: string | null;
+};
 export type WorldSnapshotSummary = WorldSnapshotContext & {
+  contract: WorldContractBoundary;
   reparseGeneration: number;
   error: string | null;
   parseDurationMs: number | null;
@@ -148,6 +157,7 @@ export type WorldPalListItem = {
   id: string; ownerPlayerId: string | null; characterId: string; nickname: string | null; level: number | null;
   containerId: string | null; slotIndex: number | null; baseId: string | null; assignment: string;
   ownerName?: string; baseName?: string;
+  gender?: string | null; rank?: number | null; isBoss?: boolean; isLucky?: boolean;
 };
 export type WorldPalRosterItem = WorldPalListItem & {
   gender: string | null;
@@ -333,34 +343,23 @@ export type WorldBaseDetail = WorldBaseListItem & {
   inventorySummary: WorldInventoryAssetSummary;
   guildAssociation: "linked" | "unassigned" | "unavailable";
 };
-export type WorldTypedListItem =
+export type WorldEntityListItem =
   | WorldPlayerListItem
   | WorldPalListItem
   | WorldGuildListItem
-  | WorldBaseListItem
-  | WorldInventoryListItem;
-export type WorldTypedListResponse = WorldSnapshotContext & {
-  items: WorldTypedListItem[];
+  | WorldBaseListItem;
+export type WorldEntityListResponse = WorldSnapshotContext & {
+  items: WorldEntityListItem[];
   page: number;
   pageSize: number;
   total: number;
 };
-export type WorldTypedDetailResponse = WorldSnapshotContext & (
+export type WorldEntityDetail = WorldSnapshotContext & (
   | WorldPlayerDetail
   | WorldPalDetail
   | WorldGuildDetail
   | WorldBaseDetail
 );
-
-/** @deprecated Existing entity-browser compatibility type. New asset queries use WorldTyped* types. */
-export type WorldRow = Record<string, unknown> & { id?: string; name?: string };
-/** @deprecated Existing entity-browser compatibility response. */
-export type WorldResponse = WorldSnapshotContext & {
-  items: WorldRow[];
-  page: number;
-  pageSize: number;
-  total: number;
-};
 export type Theme = "light" | "dark";
 
 export type BackupItem = { id: string; observedAt: number; sizeBytes: number; valid: boolean; missing: string[] };

@@ -1,4 +1,4 @@
-import type { WorldResource, WorldRow } from "../../api/contracts";
+import type { WorldEntityListItem, WorldResource } from "../../api/contracts";
 import { palTraitLabels, resolvePal } from "./palCatalog";
 import { playerProgressCoverage, playerProgressOf, playerProgressSummary } from "./playerProgress";
 
@@ -14,21 +14,24 @@ export function worldColumns(resource: PrimaryWorldResource) {
   return definitions[resource];
 }
 
-export function worldCell(item: WorldRow, key: string): string {
+export function worldCell(item: WorldEntityListItem, key: string): string {
   if (key === "progressOverview") {
+    if (!("progress" in item)) return "玩家进度不可用";
     const progress = playerProgressOf(item);
     return `${playerProgressSummary(progress)} · ${playerProgressCoverage(progress)}`;
   }
-  if (key === "displayName") return resolvePal(item).displayName;
-  if (key === "traits") return palTraitLabels(item).join(" · ") || "普通";
-  if (key === "ownerName") return item.ownerName ? String(item.ownerName) : item.ownerPlayerId ? "玩家资料不可用" : "未分配";
-  if (key === "baseName") return item.baseName ? String(item.baseName) : item.baseId ? "据点资料不可用" : "未分配";
-  if (key === "guildName") return item.guildName ? String(item.guildName) : item.guildId ? "公会资料不可用" : "未加入公会";
-  if (key === "membershipStatus") return item.guildId ? "已加入公会" : "未加入公会";
-  const value = item[key];
-  if (value === undefined || value === null || value === "") return key === "baseId" || key === "guildId" ? "未分配" : "不可用";
-  if (key === "ownerKind") return ({ player_inventory: "玩家背包", base_inventory: "据点库存", unassigned: "未分配" } as Record<string, string>)[String(value)] || String(value);
-  return String(value);
+  if (key === "displayName") return "characterId" in item ? resolvePal(item).displayName : "不可用";
+  if (key === "traits") return "characterId" in item ? palTraitLabels(item).join(" · ") || "普通" : "不可用";
+  if (key === "ownerName") return "ownerPlayerId" in item ? item.ownerName || (item.ownerPlayerId ? "玩家资料不可用" : "未分配") : "不可用";
+  if (key === "baseName") return "baseId" in item ? item.baseName || (item.baseId ? "据点资料不可用" : "未分配") : "不可用";
+  if (key === "guildName") return "guildId" in item ? item.guildName || (item.guildId ? "公会资料不可用" : "未加入公会") : "不可用";
+  if (key === "name") return "name" in item ? item.name : "不可用";
+  if (key === "level") return "level" in item && item.level !== null ? String(item.level) : "不可用";
+  if (key === "memberCount") return "memberCount" in item ? String(item.memberCount) : "不可用";
+  if (key === "baseCount") return "baseCount" in item ? String(item.baseCount) : "不可用";
+  if (key === "workerContainerId") return "workerContainerId" in item && item.workerContainerId ? item.workerContainerId : "不可用";
+  if (key === "id") return item.id;
+  return "不可用";
 }
 
 export function formatWorldTime(value?: number): string {

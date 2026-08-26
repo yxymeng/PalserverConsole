@@ -110,12 +110,11 @@ applies to these adapted layout definitions.
   (`83373a0e6dab7f3feac88a08928356b955e07804e0da94b2d452e641ab2609f2`) and
   `skills.json` SHA-256
   (`b9172f389bf56a307194d25b70aca23f8610ef81de32bb44bda827f65b83add1`). It
-  generates data version `2026.08.23.1` of the shared offline metadata bundle,
-  including 2,280 passive and active skill records. The bundle records schema
+  generates data version `2026.08.25.3` of the shared offline metadata bundle,
+  including 753 Pal records, 2,280 skill records, and 2,466 item records. The bundle records schema
   version 1, fixed source revisions and input hashes, generation method,
-  per-collection counts, and a SHA-256 integrity value. Active and partner skill
-  fields unavailable from the fixed sources remain explicitly unavailable; the
-  `items` collection remains empty.
+  per-collection counts, and a SHA-256 integrity value. Fields unavailable from
+  the fixed sources remain explicitly unavailable.
 - Application runtime loads only this bundled local metadata. It does not fetch
   metadata from the network or send save contents to this or any other source.
 
@@ -135,6 +134,27 @@ We thank the PalworldSaveTools maintainers for making this catalog available.
   before adding it to the local, offline metadata bundle.
 
 We thank the palworld-server-tool maintainers for maintaining the localization mapping.
+
+## Palworld official FModel metadata exports
+
+- Source: locally exported Palworld game resources read with FModel; the export
+  files themselves are development inputs and are not bundled in the application.
+- Fixed export fingerprints:
+  - zh-Hans skill names and descriptions: revision
+    `9c8c9eeb8b10bd144ed4ac3aa47b427df72661b7`;
+  - item data, common item data, and zh-Hans item names: revision
+    `630da112426c0600edb3204b76e13528d336455f`.
+- Purpose: offline Simplified Chinese skill text and offline item name, category,
+  and rarity metadata for the read-only world views.
+- Generated scope: the pinned `2026.08.25.3` bundle contains 753 Pal records,
+  2,280 skill records, and 2,466 item records. Missing localized fields remain
+  unavailable and are not inferred.
+- Rights: these exports are Palworld game content, not MIT or Apache-licensed
+  project code. Palworld game data, names, and text remain owned by Pocketpair,
+  Inc. and the relevant rights holders. This project is not affiliated with or
+  endorsed by Pocketpair.
+- Runtime behavior: the application reads only the generated local bundle. It
+  does not invoke FModel, fetch game metadata, or upload save contents at runtime.
 
 ## shadcn/ui registry components
 

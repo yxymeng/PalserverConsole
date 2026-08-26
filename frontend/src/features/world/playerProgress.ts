@@ -1,4 +1,4 @@
-import type { WorldPlayerProgress, WorldPlayerProgressField, WorldRow } from "../../api/contracts";
+import type { WorldPlayerProgress, WorldPlayerProgressField } from "../../api/contracts";
 
 export const PLAYER_PROGRESS_LABELS: Record<WorldPlayerProgressField, string> = {
   discoveredPalSpecies: "已发现帕鲁种类",
@@ -23,12 +23,8 @@ export const PLAYER_PROGRESS_GROUPS: Array<{
   { title: "捕获与科技", fields: ["capturedPals", "technologyPoints", "ancientTechnologyPoints"] },
 ];
 
-export function playerProgressOf(row: WorldRow): WorldPlayerProgress {
-  const candidate = row.progress;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
-    return { state: "unavailable", values: {}, unavailable: Object.keys(PLAYER_PROGRESS_LABELS) as WorldPlayerProgressField[] };
-  }
-  return candidate as WorldPlayerProgress;
+export function playerProgressOf(row: { progress: WorldPlayerProgress }): WorldPlayerProgress {
+  return row.progress;
 }
 
 export function playerProgressCoverage(progress: WorldPlayerProgress): string {

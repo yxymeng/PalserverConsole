@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux04-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-1" };
 const playerProgress = { state: "complete", values: { discoveredPalSpecies: 12, capturedPals: 3456, fastTravelPoints: 18, exploredAreas: 7, fieldBosses: 4, towerBosses: 2, dungeonClears: 9, oilRigClears: 3, technologyPoints: 14, ancientTechnologyPoints: 5, recipes: 62 }, unavailable: [] };
@@ -15,7 +17,7 @@ const palSkills = {
   partner: { id: "Fluffy Shield", name: null, description: "装备到玩家身上并成为盾牌。", sourceName: "Fluffy Shield", rank: null, element: null, power: null, cooldown: null, metadataKnown: true },
 };
 const noSkills = { passive: [], equipped: [], learned: [], partner: null };
-const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", detail: { gender: "Female", rank: 1, isLucky: true }, aptitude, skills: palSkills, care };
+const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", gender: "Female", rank: 1, isLucky: true, aptitude, skills: palSkills, care };
 const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude: unknownAptitude, skills: noSkills, care: unavailableCare };
 const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude, skills: noSkills, care: unavailableCare };
 const guild = { id: "guild-1", name: "测试工会", memberCount: 1, baseCount: 1 };
@@ -60,7 +62,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const parseStatus = parsing ? "parsing" : incompatible ? "incompatible" : failed ? "failed" : "ready";
       const errorCode = incompatible ? "CACHE_SCHEMA_INCOMPATIBLE" : failed ? "SNAPSHOT_PARSE_FAILED" : null;
       return route.fulfill({ json: {
-      source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: incompatible || failed, errorCode, error: errorCode, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42,
+      contract: worldContract, source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: incompatible || failed, errorCode, error: errorCode, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42,
       sourceObservedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: parsing ? null : 1_786_000_042, parseStatus,
       reparseGeneration: incompatible ? 0 : reparseRequests,
       dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
@@ -120,8 +122,8 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
       "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } },
-      "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], pals: [pal], assetSummary: { memberCount: 1, baseCount: 1, palCount: 1, inventory: { itemTypeCount: 2, totalQuantity: 12, locationCount: 3 } }, missingMemberIds: ["missing-player"], missingBaseIds: [], detail: { adminPlayerId: "player-1" } },
-      "/api/world/bases/base-1": { ...base, guild, guildAssociation: "linked", workers: [pal], workerCount: 1, careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 }, inventorySummary: { itemTypeCount: 2, totalQuantity: 9, locationCount: 2 }, detail: { state: 1 } },
+      "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], pals: [pal], assetSummary: { memberCount: 1, baseCount: 1, palCount: 1, inventory: { itemTypeCount: 2, totalQuantity: 12, locationCount: 3 } }, missingMemberIds: ["missing-player"], missingBaseIds: [] },
+      "/api/world/bases/base-1": { ...base, guild, guildAssociation: "linked", workers: [pal], workerCount: 1, careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 }, inventorySummary: { itemTypeCount: 2, totalQuantity: 9, locationCount: 2 } },
     };
     if (path in details) return route.fulfill({ json: details[path] });
     return route.fulfill({ status: 404, json: { errorCode: "WORLD_ENTITY_NOT_FOUND", message: path } });
@@ -287,9 +289,10 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(palDrawer).toContainText("威力 40");
   await expect(palDrawer).toContainText("中文资料未收录");
   const closePalDrawer = palDrawer.getByRole("button", { name: "关闭帕鲁详情" });
+  const lastPalDrawerControl = palDrawer.locator("button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])").last();
   await expect(closePalDrawer).toBeFocused();
   await page.keyboard.press("Shift+Tab");
-  await expect(palDrawer.locator("summary")).toBeFocused();
+  await expect(lastPalDrawerControl).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(closePalDrawer).toBeFocused();
   await page.screenshot({ path: testInfo.outputPath(`ux05-${testInfo.project.name}.png`), fullPage: true });

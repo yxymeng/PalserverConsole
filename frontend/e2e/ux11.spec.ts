@@ -1,9 +1,11 @@
 import { expect, test, type Page } from "@playwright/test";
 
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux11-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-ux11" };
 const status = {
-  source: "save-snapshot", observedAt: 1_786_000_000, sourceObservedAt: 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: 1_786_000_042,
+  contract: worldContract, source: "save-snapshot", observedAt: 1_786_000_000, sourceObservedAt: 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: 1_786_000_042,
   snapshotId: "world-ux11", stale: false, errorCode: null, error: null, parsing: false, parseStatus: "ready", reparseGeneration: 0, parseDurationMs: 42, peakMemoryBytes: null, cacheSizeBytes: null, gameTimeTicks: null,
   dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
   counts: { players: 1, pals: 0, guilds: 0, bases: 0, containers: 0, inventory_items: 0, work_pals: 0 },

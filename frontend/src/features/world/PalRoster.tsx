@@ -2,7 +2,7 @@ import { AlertCircle, ChevronDown, CircleAlert, Crown, HeartPulse, LoaderCircle,
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
-import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldPalSkill, WorldPalSkills, WorldRow } from "../../api/contracts";
+import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldPalSkill, WorldPalSkills } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useIsMobile } from "../../hooks/use-mobile";
 import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
@@ -322,7 +322,7 @@ function MobileAptitudeFilters({ open, filters, passiveSkillOptions, onUpdate, o
 }
 
 function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (item: WorldPalRosterItem, trigger: HTMLButtonElement) => void }) {
-  const pal = resolvePal(item as unknown as Record<string, unknown>);
+  const pal = resolvePal(item);
   const location = item.locationType === "base" ? item.baseName || locationLabels.base : item.ownerName || locationLabels[item.locationType];
   return <div className="pal-roster-row">
     <button className="pal-roster-name" type="button" onClick={(event) => onOpen(item, event.currentTarget)}><span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"}><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span><span><strong>{pal.displayName}</strong><small>{pal.known ? pal.speciesName : pal.characterId}</small></span>{pal.gender && <span className={`world-pal-gender ${pal.gender}`} title={pal.gender === "male" ? "雄性" : "雌性"} aria-label={pal.gender === "male" ? "雄性" : "雌性"}>{pal.gender === "male" ? "♂" : "♀"}</span>}</button>
@@ -368,7 +368,7 @@ function PalCareBadge({ care }: { care: WorldPalCare }) {
 }
 
 function PalRosterTraits({ item }: { item: WorldPalRosterItem }) {
-  const traits = palTraitLabels(item as unknown as Record<string, unknown>).filter((label) => label === "闪光" || label === "头目");
+  const traits = palTraitLabels(item).filter((label) => label === "闪光" || label === "头目");
   return <span className="pal-roster-traits" data-label="个体标记">{traits.length ? traits.map((label) => <em key={label}>{label}</em>) : "普通"}</span>;
 }
 
@@ -412,30 +412,30 @@ function PalRosterDrawer({ state, onClose, onNavigate }: { state: DrawerState | 
   }, [onClose, state]);
   if (!state) return null;
   const data = state.detail || state.item;
-  const pal = resolvePal(data as unknown as Record<string, unknown>);
+  const pal = resolvePal(data);
   return createPortal(<><button className="pal-roster-backdrop" type="button" tabIndex={-1} aria-label="关闭帕鲁详情遮罩" onClick={onClose} /><aside ref={drawerRef} className="pal-roster-drawer" role="dialog" aria-modal="true" aria-label="帕鲁详情"><header><div className="world-drawer-title"><span className="world-entity-avatar world-pal-avatar"><img src={pal.icon} alt="" /></span><div><h2>{pal.displayName}</h2><p>{pal.speciesName}</p></div></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={18} /></button></header>{state.loading ? <div className="pal-roster-drawer-state"><LoaderCircle className="spin" size={24} /><strong>正在读取帕鲁详情</strong><p>名册结果仍保留，可随时关闭。</p></div> : state.error ? <div className="pal-roster-drawer-state error" role="alert"><AlertCircle size={24} /><strong>详情读取失败</strong><p>已保留名册结果。请关闭后重试，或检查当前快照状态。</p><code>{state.error}</code></div> : <PalRosterDetail data={data} pal={pal} onNavigate={onNavigate} />}</aside></>, document.body);
 }
 
 function PalRosterDetail({ data, pal, onNavigate }: { data: WorldPalDetail | WorldPalRosterItem; pal: ReturnType<typeof resolvePal>; onNavigate: (resource: "players" | "bases", id: string) => void }) {
-  const record = data as unknown as WorldRow;
-  const location = "locationType" in data ? locationLabels[data.locationType] : value(record.locationType) || value(record.assignment);
-  const care = (data as WorldPalDetail | WorldPalRosterItem).care;
-  const aptitude = (data as WorldPalDetail | WorldPalRosterItem).aptitude;
-  const skills = (data as WorldPalDetail | WorldPalRosterItem).skills || EMPTY_PAL_SKILLS;
+  const location = "locationType" in data ? locationLabels[data.locationType] : value(data.assignment);
+  const care = data.care;
+  const aptitude = data.aptitude;
+  const skills = data.skills || EMPTY_PAL_SKILLS;
+  const ownerName = data.ownerName || ("owner" in data ? data.owner?.name : null);
+  const baseName = data.baseName || ("base" in data ? data.base?.name : null);
   return <div className="pal-roster-detail">
     <section className="world-relation-section pal-care-detail"><h3>照护状态 <small>来自存档快照</small></h3><PalCareDetail care={care} /></section>
-    <dl className="world-detail-grid"><div><dt>等级</dt><dd>{value(record.level)}</dd></div><div><dt>星级</dt><dd>{pal.rank ?? 0}</dd></div><div><dt>归属</dt><dd>{location}</dd></div><div><dt>主人</dt><dd>{value(record.ownerName) || value((record.owner as WorldRow | undefined)?.name)}</dd></div><div><dt>据点</dt><dd>{value(record.baseName) || value((record.base as WorldRow | undefined)?.name)}</dd></div><div><dt>物种稀有度</dt><dd>{aptitude.speciesRarity ?? "资料未收录"}</dd></div></dl>
-    {typeof record.ownerPlayerId === "string" && record.ownerPlayerId && <button className="world-relation-link" type="button" onClick={() => onNavigate("players", record.ownerPlayerId as string)}>查看主人详情<small>{record.ownerPlayerId}</small></button>}
-    {typeof record.baseId === "string" && record.baseId && <button className="world-relation-link" type="button" onClick={() => onNavigate("bases", record.baseId as string)}>查看据点详情<small>{record.baseId}</small></button>}
+    <dl className="world-detail-grid"><div><dt>等级</dt><dd>{value(data.level)}</dd></div><div><dt>星级</dt><dd>{pal.rank ?? 0}</dd></div><div><dt>归属</dt><dd>{location}</dd></div><div><dt>主人</dt><dd>{value(ownerName)}</dd></div><div><dt>据点</dt><dd>{value(baseName)}</dd></div><div><dt>物种稀有度</dt><dd>{aptitude.speciesRarity ?? "资料未收录"}</dd></div></dl>
+    {data.ownerPlayerId && <button className="world-relation-link" type="button" onClick={() => onNavigate("players", data.ownerPlayerId!)}>查看主人详情<small>{data.ownerPlayerId}</small></button>}
+    {data.baseId && <button className="world-relation-link" type="button" onClick={() => onNavigate("bases", data.baseId!)}>查看据点详情<small>{data.baseId}</small></button>}
     <section className="world-relation-section pal-aptitude-detail"><h3>个体值 <small>生命 / 攻击 / 防御</small></h3><dl><div><dt>生命</dt><dd>{formatIv(aptitude.ivs.hp)}</dd></div><div><dt>攻击</dt><dd>{formatIv(aptitude.ivs.attack)}</dd></div><div><dt>防御</dt><dd>{formatIv(aptitude.ivs.defense)}</dd></div><div><dt>平均</dt><dd>{formatIv(aptitude.ivs.average)}</dd></div></dl></section>
     <section className="world-relation-section pal-work-detail"><h3>工作适应性</h3>{aptitude.workSuitabilities.length ? <ul>{aptitude.workSuitabilities.map((work) => <li key={work.type}><span>{workSuitabilityLabels[work.type] || work.type}</span><strong>{work.level} 级</strong></li>)}</ul> : <p>{aptitude.metadataKnown ? "无工作适应性" : <><code>{pal.characterId}</code> · 资料未收录</>}</p>}</section>
     <PalSkillSection title="被动技能" skills={skills.passive} kind="passive" />
     <PalSkillSection title="已装备主动技能" skills={skills.equipped} kind="active" />
     <PalSkillSection title="已学会主动技能" skills={skills.learned} kind="active" />
     <PalSkillSection title="伙伴技能" skills={skills.partner ? [skills.partner] : []} kind="partner" />
-    <section className="world-relation-section"><h3>个体标记</h3><p>{palTraitLabels(record).join(" · ") || "普通"}</p></section>
-    <section className="world-relation-section pal-technical-ids"><h3>技术信息</h3><p>Character ID <code>{pal.characterId}</code></p><p>内部 ID <code>{value(record.id)}</code></p></section>
-    <details className="world-relation-section world-raw-detail"><summary>原始记录</summary><pre className="world-detail-json">{JSON.stringify(record.detail || record, null, 2)}</pre></details>
+    <section className="world-relation-section"><h3>个体标记</h3><p>{palTraitLabels(data).join(" · ") || "普通"}</p></section>
+    <section className="world-relation-section pal-technical-ids"><h3>技术信息</h3><p>Character ID <code>{pal.characterId}</code></p><p>内部 ID <code>{value(data.id)}</code></p></section>
   </div>;
 }
 

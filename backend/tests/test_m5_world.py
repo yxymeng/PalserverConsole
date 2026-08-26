@@ -1709,6 +1709,8 @@ def test_cache_and_snapshot_keep_source_collection_and_parse_times(
     status = service.status()
     assert status["observedAt"] == current["source_observed_at"]
     assert status["gameTimeTicks"] == 110_628_000_000_000
+    contract = cast(dict[str, object], status["contract"])
+    assert contract["metadataDataVersion"] == "2026.08.25.3"
 
 
 def test_world_status_marks_cache_invalid_when_metadata_table_is_missing(
@@ -2518,10 +2520,68 @@ def test_world_contract_reports_unavailable_without_a_successful_cache(tmp_path:
 
     assert status["snapshotId"] is None
     assert status["parseStatus"] == "unavailable"
+    assert status["contract"] == {
+        "queryVersion": 1,
+        "cacheSchema": "world-asset-cache",
+        "cacheSchemaVersion": CACHE_SCHEMA_VERSION,
+        "metadataSchema": "palserver-console-world-metadata",
+        "metadataSchemaVersion": 1,
+        "metadataDataVersion": None,
+    }
     coverage = status["dataCoverage"]
     assert isinstance(coverage, dict)
     assert coverage["state"] == "unavailable"
     assert raised.value.code == "WORLD_CACHE_UNAVAILABLE"
+
+
+def test_world_asset_pressure_boundary_pages_players_and_aggregates_inventory_slots(
+    tmp_path: Path,
+) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache-pressure.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="pressure", source_observed_at=1)
+
+    with sqlite3.connect(cache) as connection:
+        connection.execute("DELETE FROM players")
+        connection.execute("DELETE FROM inventory_items")
+        connection.executemany(
+            "INSERT INTO players(id, instance_id, name, level, guild_id, inventory_ids_json, "
+            "party_container_id, storage_container_id, detail_json) "
+            "VALUES(?, ?, ?, ?, NULL, '[]', NULL, NULL, ?)",
+            (
+                (f"player-{index:03d}", f"instance-{index:03d}", f"玩家-{index:03d}", index, "{}")
+                for index in range(200)
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO inventory_items(container_id, slot_index, item_id, item_name, "
+            "item_category, item_rarity, metadata_known, quantity, owner_kind) "
+            "VALUES(?, ?, ?, ?, 'Material', '1', 1, 1, 'world')",
+            (
+                (
+                    f"container-{index // 100:03d}",
+                    index % 100,
+                    f"Item-{index % 100:03d}",
+                    f"物品-{index % 100:03d}",
+                )
+                for index in range(50_000)
+            ),
+        )
+
+    player_page, player_total = query_cache(
+        cache, "players", page=4, page_size=50, search=None, sort="name"
+    )
+    inventory_page, inventory_total, categories = query_inventory(
+        cache, page=1, page_size=60, search=None, category=None, scope="all",
+        owner_id=None, base_id=None, sort="quantity",
+    )
+
+    assert player_total == 200
+    assert len(player_page) == 50
+    assert inventory_total == 100
+    assert len(inventory_page) == 60
+    assert sum(cast(int, item["totalQuantity"]) for item in inventory_page) == 30_000
+    assert categories == ["Material"]
 
 
 def test_world_contract_rejects_results_for_a_replaced_snapshot(tmp_path: Path) -> None:

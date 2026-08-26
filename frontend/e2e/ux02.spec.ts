@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+
 test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在完成后隐去", async ({ page }, testInfo) => {
   let operationPoll = 0;
   await page.addInitScript(() => {
@@ -40,7 +42,7 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
     await page.route(`**/api/live/${key}`, (route) => route.fulfill({ json: liveSnapshot[key] }));
   }
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: {
-    source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null,
+      contract: worldContract, source: "save-snapshot", observedAt: 1_786_000_000, stale: false, errorCode: null, error: null,
     snapshotId: "ux02-world", parsing: false, parseDurationMs: 120, gameTimeTicks: 110_628_000_000_000,
     counts: { players: 8, pals: 797, guilds: 3, bases: 8 },
   } }));

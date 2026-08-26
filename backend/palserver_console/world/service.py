@@ -17,9 +17,13 @@ from pathlib import Path
 from typing import Any
 
 from ..config import ProfileError, ServerProfile
+from ..metadata.loader import METADATA_SCHEMA_NAME, METADATA_SCHEMA_VERSION
 from ..persistence import Database
 from ..steam import is_reparse_point
 from .cache import (
+    CACHE_SCHEMA_NAME,
+    CACHE_SCHEMA_VERSION,
+    WORLD_QUERY_CONTRACT_VERSION,
     WorldCacheSchemaError,
     entity_detail,
     inspect_storage,
@@ -329,6 +333,7 @@ class WorldSnapshotService:
         parsed_at: int | None = None
         game_time_ticks: int | None = None
         overview: dict[str, object] | None = None
+        metadata_data_version: str | None = None
         if current:
             try:
                 persisted = json.loads(str(current["parse_result"]))
@@ -345,6 +350,7 @@ class WorldSnapshotService:
             try:
                 cache_path = self._validated_cache_path(current)
                 metadata = read_cache_metadata(cache_path)
+                metadata_data_version = metadata.get("metadata_data_version") or None
                 raw_game_time_ticks = metadata.get("game_time_ticks")
                 if raw_game_time_ticks is not None:
                     game_time_ticks = max(0, int(raw_game_time_ticks))
@@ -390,6 +396,14 @@ class WorldSnapshotService:
             parse_status = "unavailable"
         visible_error = None if parsing else error
         return {
+            "contract": {
+                "queryVersion": WORLD_QUERY_CONTRACT_VERSION,
+                "cacheSchema": CACHE_SCHEMA_NAME,
+                "cacheSchemaVersion": CACHE_SCHEMA_VERSION,
+                "metadataSchema": METADATA_SCHEMA_NAME,
+                "metadataSchemaVersion": METADATA_SCHEMA_VERSION,
+                "metadataDataVersion": metadata_data_version,
+            },
             "source": "save-snapshot",
             "observedAt": observed_at,
             "sourceObservedAt": observed_at,

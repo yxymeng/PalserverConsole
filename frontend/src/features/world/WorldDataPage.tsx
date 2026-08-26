@@ -2,7 +2,7 @@ import { AlertTriangle, Archive, ArrowLeft, Boxes, ChevronLeft, ChevronRight, Ci
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 
-import type { AuthStatus, WorldReparseResponse, WorldResponse, WorldRow, WorldStatus } from "../../api/contracts";
+import type { AuthStatus, WorldBaseDetail, WorldBaseListItem, WorldContainerReference, WorldEntityListItem, WorldEntityListResponse, WorldGuildDetail, WorldGuildListItem, WorldPalCareSummary, WorldPalDetail, WorldPalListItem, WorldPlayerDetail, WorldPlayerListItem, WorldReparseResponse, WorldSnapshotContext, WorldStatus } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { useIsMobile } from "../../hooks/use-mobile";
@@ -13,12 +13,19 @@ import { InventoryWorkspace, type InventoryContext } from "./InventoryWorkspace"
 import { PLAYER_PROGRESS_GROUPS, PLAYER_PROGRESS_LABELS, playerProgressCoverage, playerProgressOf, playerProgressUnavailable, playerProgressValue } from "./playerProgress";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 import { waitForWorldReparse } from "./worldReparse";
+import { ensureWorldContract } from "./worldContract";
 
-type EntityDetail = { resource: PrimaryWorldResource; data: WorldRow };
+type EntityDetail =
+  | { resource: "players"; data: WorldPlayerDetail & WorldSnapshotContext }
+  | { resource: "pals"; data: WorldPalDetail & WorldSnapshotContext }
+  | { resource: "guilds"; data: WorldGuildDetail & WorldSnapshotContext }
+  | { resource: "bases"; data: WorldBaseDetail & WorldSnapshotContext };
+type WorldEntityDetailData = EntityDetail["data"];
+type RelationshipItem = WorldPlayerListItem | WorldPalListItem | WorldGuildListItem | WorldBaseListItem | WorldContainerReference;
 type SortKey = "name" | "level-desc" | "count-desc" | "id";
 type StatusFilter = "all" | "guilded" | "unguilded" | "active" | "empty";
 type WorkspaceKey = "overview" | PrimaryWorldResource | "inventories";
-type EntityBrowserSnapshot = { result: WorldResponse | null; page: number; search: string; appliedSearch: string; sortKey: SortKey; statusFilter: StatusFilter };
+type EntityBrowserSnapshot = { result: WorldEntityListResponse | null; page: number; search: string; appliedSearch: string; sortKey: SortKey; statusFilter: StatusFilter };
 
 const WORKSPACES: { key: WorkspaceKey; label: string; icon: typeof Database; countKey?: keyof WorldStatus["counts"]; resource?: PrimaryWorldResource; planned?: boolean }[] = [
   { key: "overview", label: "总览", icon: LayoutDashboard },
@@ -58,7 +65,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [palContext, setPalContext] = useState<PalRosterContext>({ token: 0 });
   const [visitedWorkspaces, setVisitedWorkspaces] = useState<Set<WorkspaceKey>>(() => new Set(["overview"]));
   const [workspaceHistory, setWorkspaceHistory] = useState<{ workspace: WorkspaceKey; detail: EntityDetail | null }[]>([]);
-  const [result, setResult] = useState<WorldResponse | null>(null);
+  const [result, setResult] = useState<WorldEntityListResponse | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -84,6 +91,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
 
   const refreshSnapshot = useCallback(async () => {
     const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current");
+    ensureWorldContract(nextStatus.contract);
     setStatus(nextStatus);
     return nextStatus.snapshotId;
   }, []);
@@ -97,6 +105,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     try {
       for (let attempt = 0; attempt < 2; attempt += 1) {
         const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current", { signal });
+        ensureWorldContract(nextStatus.contract);
         setStatus(nextStatus);
         if (!hasEntityBrowser || !nextStatus.snapshotId) {
           setResult(null);
@@ -108,7 +117,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
         query.set("sort", sortKey);
         if (nextStatus.snapshotId) query.set("snapshotId", nextStatus.snapshotId);
         try {
-          const nextResult = await requestJson<WorldResponse>(`/api/world/${resource}?${query}`, { signal });
+          const nextResult = await requestJson<WorldEntityListResponse>(`/api/world/${resource}?${query}`, { signal });
           if (nextResult.snapshotId !== nextStatus.snapshotId) continue;
           setResult(nextResult);
           break;
@@ -240,7 +249,11 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
       const nextStatus = await waitForWorldReparse({
         previousSnapshotId,
         reparseGeneration: response.reparseGeneration,
-        readStatus: () => requestJson<WorldStatus>("/api/world/snapshots/current"),
+        readStatus: async () => {
+          const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current");
+          ensureWorldContract(nextStatus.contract);
+          return nextStatus;
+        },
         onStatus: setStatus,
       });
       setStatus(nextStatus);
@@ -257,12 +270,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setDetailLoading(true);
     setError("");
     try {
-      const nextDetail = {
-        resource: nextResource,
-        data: await requestJson<WorldRow>(
-          `/api/world/${nextResource}/${encodeURIComponent(id)}${snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : ""}`,
-        ),
-      };
+      const nextDetail = await loadEntityDetail(nextResource, id, snapshotId);
       if (preserveCurrent && selected) setDetailHistory((current) => [...current, selected]);
       setSelected(nextDetail);
     } catch (caught) {
@@ -313,7 +321,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
             return <div className="world-table-row" data-selected={isSelected || undefined} style={{ "--world-columns": columns.length } as CSSProperties} key={String(item.id || `${resource}-${index}`)}>{columns.map((column, columnIndex) => {
             const cell = worldCell(item, column.key);
             const palGender = resource === "pals" && column.key === "displayName" ? genderLabel(item) : null;
-            return <span key={column.key} data-key={column.key} data-label={column.label} title={cell}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} aria-current={isSelected ? "true" : undefined} onClick={(event) => void openDetail(resource, String(item.id), false, event.currentTarget)}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && <PalGenderIcon item={item} />}</button> : cell}</span>;
+            return <span key={column.key} data-key={column.key} data-label={column.label} title={cell}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} aria-current={isSelected ? "true" : undefined} onClick={(event) => void openDetail(resource, String(item.id), false, event.currentTarget)}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && "characterId" in item && <PalGenderIcon item={item} />}</button> : cell}</span>;
           })}</div>;
           }) : <div className="world-empty-state"><Database size={22} /><strong>{result ? hasFilters ? "没有符合条件的数据" : `暂无${RESOURCE_LABELS[resource]}数据` : snapshotId ? "正在读取世界数据" : "当前没有可用世界快照"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : snapshotId ? "解析成功后，实体会显示在这里。" : "完成只读解析后可浏览此工作区；错误状态会保留在快照条中。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
         </section>
@@ -323,6 +331,15 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     </main>
     {(selected || workspace === "players" || workspace === "bases" || workspace === "guilds") && <EntityDetailLayer detail={selected} loading={detailLoading} canGoBack={detailHistory.length > 0} onClose={closeDetail} onNavigate={(target, id) => void openDetail(target, id, true)} onShowInventory={openInventory} />}
   </div>;
+}
+
+async function loadEntityDetail(resource: PrimaryWorldResource, id: string, snapshotId: string | null | undefined): Promise<EntityDetail> {
+  const suffix = snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : "";
+  const url = `/api/world/${resource}/${encodeURIComponent(id)}${suffix}`;
+  if (resource === "players") return { resource, data: await requestJson<WorldPlayerDetail & WorldSnapshotContext>(url) };
+  if (resource === "pals") return { resource, data: await requestJson<WorldPalDetail & WorldSnapshotContext>(url) };
+  if (resource === "guilds") return { resource, data: await requestJson<WorldGuildDetail & WorldSnapshotContext>(url) };
+  return { resource, data: await requestJson<WorldBaseDetail & WorldSnapshotContext>(url) };
 }
 
 function WorldSnapshotBar({ status, message, reparseError, reparsing, onReparse }: { status: WorldStatus | null; message: string; reparseError: string; reparsing: boolean; onReparse: () => void }) {
@@ -404,45 +421,46 @@ function EntityDrawer({ detail, loading, canGoBack, onClose, onNavigate, onShowI
 
   const { data, resource } = detail;
   return <aside ref={drawerRef} className="world-entity-drawer" role="dialog" aria-modal={modal} aria-label="世界实体详情">
-    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : <span className="world-detail-id"><small>{resource === "bases" ? "Base ID" : resource === "guilds" ? "Guild ID" : "Pal ID"}</small>{valueOf(data, "id")}</span>}</p></div></div><button ref={closeButtonRef} className="icon-button bordered" type="button" title={canGoBack ? "返回上一详情" : "关闭详情"} aria-label={canGoBack ? "返回上一详情" : "关闭详情"} onClick={onClose}>{canGoBack ? <ArrowLeft size={18} /> : <X size={18} />}</button></header>
+    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{detail.resource === "pals" && <PalGenderIcon item={detail.data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{detail.resource === "players" ? playerProgressCoverage(playerProgressOf(detail.data)) : <span className="world-detail-id"><small>{resource === "bases" ? "Base ID" : resource === "guilds" ? "Guild ID" : "Pal ID"}</small>{data.id}</span>}</p></div></div><button ref={closeButtonRef} className="icon-button bordered" type="button" title={canGoBack ? "返回上一详情" : "关闭详情"} aria-label={canGoBack ? "返回上一详情" : "关闭详情"} onClick={onClose}>{canGoBack ? <ArrowLeft size={18} /> : <X size={18} />}</button></header>
     <div className="world-detail-properties">
-      {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
-      {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
-      {resource === "guilds" && <GuildDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
-      {resource === "bases" && <BaseDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
+      {detail.resource === "players" && <PlayerDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
+      {detail.resource === "pals" && <PalDetail data={detail.data} onNavigate={onNavigate} />}
+      {detail.resource === "guilds" && <GuildDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
+      {detail.resource === "bases" && <BaseDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
     </div>
   </aside>;
 }
 
-function EntityMarker({ resource, item }: { resource: PrimaryWorldResource; item: WorldRow }) {
-  if (resource === "players") return <span className="world-entity-avatar world-player-avatar" aria-hidden="true">{playerInitial(item.name)}</span>;
-  if (resource === "pals") {
+function EntityMarker({ resource, item }: { resource: PrimaryWorldResource; item: WorldEntityListItem | WorldEntityDetailData }) {
+  if (resource === "players") return <span className="world-entity-avatar world-player-avatar" aria-hidden="true">{playerInitial(entityName(item, resource))}</span>;
+  if (resource === "pals" && "characterId" in item) {
     const pal = resolvePal(item);
     return <span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"} aria-hidden="true"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>;
   }
   return null;
 }
 
-function PalGenderIcon({ item }: { item: WorldRow }) {
+function PalGenderIcon({ item }: { item: WorldPalListItem | (WorldPalDetail & WorldSnapshotContext) }) {
   const gender = resolvePal(item).gender;
   if (!gender) return null;
   const label = gender === "male" ? "雄性" : "雌性";
   return <span className={`world-pal-gender ${gender}`} title={label} aria-hidden="true">{gender === "male" ? "♂" : "♀"}</span>;
 }
 
-function genderLabel(item: WorldRow): string | null {
+function genderLabel(item: WorldEntityListItem): string | null {
+  if (!("characterId" in item)) return null;
   const gender = resolvePal(item).gender;
   return gender === "male" ? "雄性" : gender === "female" ? "雌性" : null;
 }
 
-function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps) {
+function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps<WorldPlayerDetail>) {
   const progress = playerProgressOf(data);
   const unavailable = playerProgressUnavailable(progress);
   return <>
     <section className="player-progress-identity">
-      <PropertyGrid data={{ ...data, lastRecordedLabel: formatPlayerRecordedAt(data.lastRecordedAt) }} fields={[["等级", "level"], ["所属公会", "guildName"], ["最后记录时间", "lastRecordedLabel"]]} />
+      <PropertyGrid entries={[["等级", data.level], ["所属公会", data.guildName], ["最后记录时间", formatPlayerRecordedAt(data.lastRecordedAt)]]} />
     </section>
-    <RelationButton title="所属公会" value={rowOf(data, "guild")} resource="guilds" onNavigate={onNavigate} />
+    <RelationButton title="所属公会" value={data.guild} resource="guilds" onNavigate={onNavigate} />
     <section className={`player-progress-status ${progress.state}`} aria-label="玩家进度数据覆盖">
       <strong>{playerProgressCoverage(progress)}</strong>
       <p>{progress.state === "complete" ? "以下项目均来自这名玩家的只读存档快照。" : progress.state === "partial" ? "仅显示存档中可确认的项目；缺失项目不会补零。" : "当前世界角色存在，但没有可用的玩家存档进度；不会显示一组误导性的零值。"}</p>
@@ -455,11 +473,11 @@ function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps) {
         return <section className="player-progress-group" key={group.title}><h3>{group.title}</h3><dl>{available.map((field) => <div key={field}><dt>{PLAYER_PROGRESS_LABELS[field]}</dt><dd>{playerProgressValue(progress, field)}</dd></div>)}</dl></section>;
       })}
     </div>}
-    <RelationList title="拥有帕鲁" rows={rowsOf(data, "pals")} resource="pals" onNavigate={onNavigate} />
-    <RelationList title="队伍帕鲁" rows={rowsOf(data, "partyPals")} resource="pals" onNavigate={onNavigate} />
-    <RelationList title="储存帕鲁" rows={rowsOf(data, "storagePals")} resource="pals" onNavigate={onNavigate} />
+    <RelationList title="拥有帕鲁" rows={data.pals} resource="pals" onNavigate={onNavigate} />
+    <RelationList title="队伍帕鲁" rows={data.partyPals} resource="pals" onNavigate={onNavigate} />
+    <RelationList title="储存帕鲁" rows={data.storagePals} resource="pals" onNavigate={onNavigate} />
     <InventoryButton title="玩家库存" data={data} scope="player" onShowInventory={onShowInventory} />
-    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Player ID</dt><dd>{valueOf(data, "id")}</dd></div><div><dt>Instance ID</dt><dd>{valueOf(data, "instanceId")}</dd></div></dl></details>
+    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Player ID</dt><dd>{data.id}</dd></div><div><dt>Instance ID</dt><dd>{data.instanceId}</dd></div></dl></details>
   </>;
 }
 
@@ -510,50 +528,45 @@ function formatPlayerRecordedAt(value: unknown): string {
   return Number.isNaN(date.valueOf()) ? "不可用" : new Intl.DateTimeFormat("zh-CN", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function PalDetail({ data, onNavigate }: DetailProps) {
+function PalDetail({ data, onNavigate }: { data: WorldPalDetail; onNavigate: DetailNavigate }) {
   const pal = resolvePal(data);
   const traitSummary = palTraitLabels(data).join(" · ") || "普通";
   return <>
-    <PropertyGrid data={{ ...data, displayName: pal.displayName, speciesName: pal.speciesName, traitSummary }} fields={[["名称", "displayName"], ["种族", "speciesName"], ["属性", "traitSummary"], ["Character ID", "characterId"], ["等级", "level"], ["Container", "containerId"], ["Slot", "slotIndex"], ["工作状态", "assignment"]]} />
-    <RelationButton title="主人" value={rowOf(data, "owner")} resource="players" onNavigate={onNavigate} />
-    <RelationButton title="据点" value={rowOf(data, "base")} resource="bases" onNavigate={onNavigate} />
-    <RelationButton title="容器" value={rowOf(data, "container")} />
-    <RawDetail value={data.detail} />
+    <PropertyGrid entries={[["名称", pal.displayName], ["种族", pal.speciesName], ["属性", traitSummary], ["Character ID", data.characterId], ["等级", data.level], ["Container", data.containerId], ["Slot", data.slotIndex], ["工作状态", data.assignment]]} />
+    <RelationButton title="主人" value={data.owner} resource="players" onNavigate={onNavigate} />
+    <RelationButton title="据点" value={data.base} resource="bases" onNavigate={onNavigate} />
+    <RelationButton title="容器" value={data.container} />
   </>;
 }
 
-function GuildDetail({ data, onNavigate, onShowInventory }: DetailProps) {
-  const summary = rowOf(data, "assetSummary");
-  const inventory = summary ? rowOf(summary, "inventory") : null;
-  const missingMembers = stringsOf(data, "missingMemberIds");
-  const missingBases = stringsOf(data, "missingBaseIds");
+function GuildDetail({ data, onNavigate, onShowInventory }: DetailProps<WorldGuildDetail>) {
+  const { assetSummary: summary, missingMemberIds: missingMembers, missingBaseIds: missingBases } = data;
+  const inventory = summary.inventory;
   return <>
-    <AssetSummary title="公会资产规模" items={[["成员", numberOf(summary, "memberCount")], ["据点", numberOf(summary, "baseCount")], ["帕鲁", numberOf(summary, "palCount")], ["物品种类", numberOf(inventory, "itemTypeCount")], ["物品总量", numberOf(inventory, "totalQuantity")]]} />
-    <RelationList title="成员" rows={rowsOf(data, "members")} resource="players" onNavigate={onNavigate} />
-    <RelationList title="关联据点" rows={rowsOf(data, "bases")} resource="bases" onNavigate={onNavigate} />
-    <RelationList title="关联帕鲁" rows={rowsOf(data, "pals")} resource="pals" onNavigate={onNavigate} />
+    <AssetSummary title="公会资产规模" items={[["成员", summary.memberCount], ["据点", summary.baseCount], ["帕鲁", summary.palCount], ["物品种类", inventory.itemTypeCount], ["物品总量", inventory.totalQuantity]]} />
+    <RelationList title="成员" rows={data.members} resource="players" onNavigate={onNavigate} />
+    <RelationList title="关联据点" rows={data.bases} resource="bases" onNavigate={onNavigate} />
+    <RelationList title="关联帕鲁" rows={data.pals} resource="pals" onNavigate={onNavigate} />
     <InventoryButton title="公会关联仓库" data={data} scope="guild" onShowInventory={onShowInventory} />
     {(missingMembers.length > 0 || missingBases.length > 0) && <section className="world-association-warning" role="status"><AlertTriangle size={17} aria-hidden="true" /><div><strong>部分关联资料不可用</strong><p>当前缓存中没有对应实体；以下稳定 ID 原样保留，未创建猜测关系。</p>{missingMembers.length > 0 && <MissingIdList label="缺失成员 ID" ids={missingMembers} />}{missingBases.length > 0 && <MissingIdList label="缺失据点 ID" ids={missingBases} />}</div></section>}
-    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Guild ID</dt><dd>{valueOf(data, "id")}</dd></div></dl></details>
+    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Guild ID</dt><dd>{data.id}</dd></div></dl></details>
   </>;
 }
 
-function BaseDetail({ data, onNavigate, onShowInventory }: DetailProps) {
-  const association = valueOf(data, "guildAssociation");
-  const care = rowOf(data, "careSummary");
-  const inventory = rowOf(data, "inventorySummary");
-  const overview = { ...data, coordinates: coordinateLabel(data), inventoryTypeCount: numberOf(inventory, "itemTypeCount"), inventoryQuantity: numberOf(inventory, "totalQuantity") };
+function BaseDetail({ data, onNavigate, onShowInventory }: DetailProps<WorldBaseDetail>) {
+  const { guildAssociation: association, careSummary: care, inventorySummary: inventory } = data;
   return <>
-    <PropertyGrid data={overview} fields={[["坐标", "coordinates"], ["工作帕鲁", "workerCount"], ["物品种类", "inventoryTypeCount"], ["物品总量", "inventoryQuantity"]]} />
+    <PropertyGrid entries={[["坐标", coordinateLabel(data)], ["工作帕鲁", data.workerCount], ["物品种类", inventory.itemTypeCount], ["物品总量", inventory.totalQuantity]]} />
     <BaseGuildRelation data={data} association={association} onNavigate={onNavigate} />
     <CareSummary summary={care} />
-    <RelationList title="工作帕鲁" rows={rowsOf(data, "workers")} resource="pals" onNavigate={onNavigate} />
+    <RelationList title="工作帕鲁" rows={data.workers} resource="pals" onNavigate={onNavigate} />
     <InventoryButton title="据点库存" data={data} scope="base" onShowInventory={onShowInventory} />
-    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Base ID</dt><dd>{valueOf(data, "id")}</dd></div><div><dt>Worker Container ID</dt><dd>{valueOf(data, "workerContainerId")}</dd></div></dl></details>
+    <details className="world-relation-section player-technical-detail"><summary>技术信息</summary><dl><div><dt>Base ID</dt><dd>{data.id}</dd></div><div><dt>Worker Container ID</dt><dd>{displayValue(data.workerContainerId)}</dd></div></dl></details>
   </>;
 }
 
-type DetailProps = { data: WorldRow; onNavigate: (resource: PrimaryWorldResource, id: string) => void; onShowInventory: (context: InventoryContext) => void };
+type DetailNavigate = (resource: PrimaryWorldResource, id: string) => void;
+type DetailProps<T> = { data: T; onNavigate: DetailNavigate; onShowInventory: (context: InventoryContext) => void };
 
 function AssetSummary({ title, items }: { title: string; items: [string, number | null][] }) {
   return <section className="world-asset-summary"><h3>{title}</h3><dl>{items.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value === null ? "不可用" : value.toLocaleString()}</dd></div>)}</dl></section>;
@@ -563,39 +576,34 @@ function MissingIdList({ label, ids }: { label: string; ids: string[] }) {
   return <div className="world-missing-ids"><span>{label}</span>{ids.map((id) => <code key={id}>{id}</code>)}</div>;
 }
 
-function BaseGuildRelation({ data, association, onNavigate }: { data: WorldRow; association: string; onNavigate: DetailProps["onNavigate"] }) {
-  const guild = rowOf(data, "guild");
+function BaseGuildRelation({ data, association, onNavigate }: { data: WorldBaseDetail; association: WorldBaseDetail["guildAssociation"]; onNavigate: DetailNavigate }) {
+  const guild = data.guild;
   if (association === "linked" && guild?.id) return <RelationButton title="所属公会" value={guild} resource="guilds" onNavigate={onNavigate} />;
-  if (association === "unavailable") return <section className="world-relation-section"><h3>所属公会</h3><p className="world-association-unavailable">关联资料不可用</p><code className="world-stable-id">{valueOf(data, "guildId")}</code></section>;
+  if (association === "unavailable") return <section className="world-relation-section"><h3>所属公会</h3><p className="world-association-unavailable">关联资料不可用</p><code className="world-stable-id">{displayValue(data.guildId)}</code></section>;
   return <section className="world-relation-section"><h3>所属公会</h3><p className="muted">未分配</p></section>;
 }
 
-function CareSummary({ summary }: { summary: WorldRow | null }) {
-  const total = numberOf(summary, "total");
-  const critical = numberOf(summary, "critical");
-  const warning = numberOf(summary, "warning");
-  const attention = numberOf(summary, "attention");
-  const unavailable = numberOf(summary, "unavailable");
-  const tone = attention === null ? "unavailable" : attention > 0 ? "attention" : unavailable ? "unavailable" : "healthy";
-  const label = total === 0 ? "暂无工作帕鲁" : attention === null ? "照护摘要不可用" : attention > 0 ? `${attention} 只需要关注` : unavailable ? "部分照护数据不可用" : "未见需要关注";
+function CareSummary({ summary }: { summary: WorldPalCareSummary }) {
+  const { total, critical, warning, attention, unavailable } = summary;
+  const tone = attention > 0 ? "attention" : unavailable ? "unavailable" : "healthy";
+  const label = total === 0 ? "暂无工作帕鲁" : attention > 0 ? `${attention} 只需要关注` : unavailable ? "部分照护数据不可用" : "未见需要关注";
   return <section className={`base-care-summary ${tone}`} aria-label="工作帕鲁照护摘要"><header><HeartPulse size={18} aria-hidden="true" /><div><h3>照护摘要</h3><p>{label}</p></div></header><dl><div><dt>需立即处理</dt><dd>{critical ?? "-"}</dd></div><div><dt>需要关注</dt><dd>{warning ?? "-"}</dd></div><div><dt>数据不可用</dt><dd>{unavailable ?? "-"}</dd></div></dl><small>与帕鲁名册“需要关注”使用同一存档快照规则。</small></section>;
 }
 
-function PropertyGrid({ data, fields }: { data: WorldRow; fields: [string, string][] }) {
-  return <dl className="world-detail-grid">{fields.map(([label, key]) => <div key={key}><dt>{label}</dt><dd>{valueOf(data, key)}</dd></div>)}</dl>;
+function PropertyGrid({ entries }: { entries: [string, string | number | null | undefined][] }) {
+  return <dl className="world-detail-grid">{entries.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{displayValue(value)}</dd></div>)}</dl>;
 }
 
-function RelationButton({ title, value, resource, onNavigate }: { title: string; value: WorldRow | null; resource?: PrimaryWorldResource; onNavigate?: DetailProps["onNavigate"] }) {
-  return <section className="world-relation-section"><h3>{title}</h3>{value ? resource && value.id && onNavigate ? <button className="world-relation-link" type="button" onClick={() => onNavigate(resource, String(value.id))}>{entityName(value, resource)}<small>{String(value.id)}</small></button> : <p>{entityName(value, "bases")}</p> : <p className="muted">未关联</p>}</section>;
+function RelationButton({ title, value, resource, onNavigate }: { title: string; value: RelationshipItem | null; resource?: PrimaryWorldResource; onNavigate?: DetailNavigate }) {
+  return <section className="world-relation-section"><h3>{title}</h3>{value ? resource && onNavigate ? <button className="world-relation-link" type="button" onClick={() => onNavigate(resource, value.id)}>{entityName(value, resource)}<small>{value.id}</small></button> : <p>{entityName(value, "bases")}</p> : <p className="muted">未关联</p>}</section>;
 }
 
-function RelationList({ title, rows, resource, onNavigate }: { title: string; rows: WorldRow[]; resource: PrimaryWorldResource; onNavigate: DetailProps["onNavigate"] }) {
-  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item, index) => item.id ? <button className="world-relation-link" type="button" key={String(item.id)} onClick={() => onNavigate(resource, String(item.id))}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && <PalGenderIcon item={item} />}</span><small>{String(item.id)}</small></button> : <p key={index}>{entityName(item, resource)}</p>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
+function RelationList({ title, rows, resource, onNavigate }: { title: string; rows: RelationshipItem[]; resource: PrimaryWorldResource; onNavigate: DetailNavigate }) {
+  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item) => <button className="world-relation-link" type="button" key={item.id} onClick={() => onNavigate(resource, item.id)}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && "characterId" in item && <PalGenderIcon item={item} />}</span><small>{item.id}</small></button>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
 }
 
-function InventoryButton({ title, data, scope, onShowInventory }: { title: string; data: WorldRow; scope: "player" | "base" | "guild"; onShowInventory: DetailProps["onShowInventory"] }) {
-  const id = valueOf(data, "id");
-  if (id === "不可用") return null;
+function InventoryButton({ title, data, scope, onShowInventory }: { title: string; data: RelationshipItem; scope: "player" | "base" | "guild"; onShowInventory: (context: InventoryContext) => void }) {
+  const id = data.id;
   const resource = scope === "player" ? "players" : scope === "base" ? "bases" : "guilds";
   const name = entityName(data, resource);
   const context = scope === "player" ? { scope, ownerId: id } : scope === "base" ? { scope, baseId: id } : { scope: "inventory" as const, guildId: id };
@@ -603,47 +611,18 @@ function InventoryButton({ title, data, scope, onShowInventory }: { title: strin
   return <section className="world-relation-section"><h3>{title}</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ ...context, label })}><span className="world-relation-name"><PackageOpen size={16} aria-hidden="true" />在仓库中查看</span><small>仅显示该稳定 ID 的关联范围</small></button></section>;
 }
 
-function RawDetail({ value }: { value: unknown }) {
-  if (!value || typeof value !== "object" || Array.isArray(value) || !Object.keys(value).length) return null;
-  return <details className="world-relation-section world-raw-detail"><summary>其他解析数据</summary><pre className="world-detail-json">{JSON.stringify(value, null, 2)}</pre></details>;
-}
-
-function rowsOf(data: WorldRow, key: string): WorldRow[] {
-  const value = data[key];
-  return Array.isArray(value) ? value.filter(isWorldRow) : [];
-}
-
-function stringsOf(data: WorldRow, key: string): string[] {
-  const value = data[key];
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
-}
-
-function numberOf(data: WorldRow | null, key: string): number | null {
-  const value = data?.[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
-}
-
-function coordinateLabel(data: WorldRow): string {
-  const values = ["x", "y", "z"].map((key) => numberOf(data, key));
+function coordinateLabel(data: WorldBaseDetail): string {
+  const values = [data.x, data.y, data.z];
   return values.every((value) => value !== null) ? values.map((value) => Math.round(value as number).toLocaleString()).join(" / ") : "数据不可用";
 }
 
-function rowOf(data: WorldRow, key: string): WorldRow | null {
-  return isWorldRow(data[key]) ? data[key] : null;
-}
-
-function isWorldRow(value: unknown): value is WorldRow {
-  return Boolean(value && typeof value === "object" && !Array.isArray(value));
-}
-
-function valueOf(data: WorldRow, key: string): string {
-  const value = data[key];
+function displayValue(value: unknown): string {
   if (value === undefined || value === null || value === "") return "不可用";
   if (typeof value === "object") return Array.isArray(value) ? `${value.length} 项` : "已关联";
   return String(value);
 }
 
-function entityName(data: WorldRow, resource: PrimaryWorldResource): string {
-  if (resource === "pals") return resolvePal(data).displayName;
-  return valueOf(data, "name") !== "不可用" ? valueOf(data, "name") : valueOf(data, "id");
+function entityName(data: RelationshipItem | WorldEntityListItem | WorldEntityDetailData, resource: PrimaryWorldResource): string {
+  if (resource === "pals" && "characterId" in data) return resolvePal(data).displayName;
+  return "name" in data && data.name ? data.name : data.id;
 }
