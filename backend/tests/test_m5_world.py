@@ -1107,7 +1107,8 @@ def test_guild_and_base_details_do_not_truncate_linked_pals(tmp_path: Path) -> N
 
     assert guild_detail is not None
     guild_pals = cast(list[dict[str, Any]], guild_detail["pals"])
-    assert guild_detail["assetSummary"]["palCount"] == len(guild_pals) == 203
+    asset_summary = cast(dict[str, object], guild_detail["assetSummary"])
+    assert asset_summary["palCount"] == len(guild_pals) == 203
     assert guild_pals[200]["id"] == "guild-pal-198"
     assert guild_pals[-1]["id"] == "guild-pal-200"
     assert base_detail is not None
@@ -1115,6 +1116,115 @@ def test_guild_and_base_details_do_not_truncate_linked_pals(tmp_path: Path) -> N
     assert base_detail["workerCount"] == len(workers) == 202
     assert workers[200]["id"] == "guild-pal-199"
     assert workers[-1]["id"] == "guild-pal-200"
+
+
+def test_guild_detail_does_not_truncate_members_or_bases(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    guild_id = str(uuid.UUID(int=500))
+    member_ids = [f"member-{index:03d}" for index in range(201)]
+    base_ids = [f"base-{index:03d}" for index in range(201)]
+    with sqlite3.connect(cache) as connection:
+        connection.execute("DELETE FROM players")
+        connection.execute("DELETE FROM bases")
+        connection.execute("DELETE FROM guilds")
+        connection.execute(
+            "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
+            (
+                guild_id,
+                "大型公会",
+                len(member_ids),
+                len(base_ids),
+                json.dumps({"memberIds": member_ids, "baseIds": base_ids}),
+            ),
+        )
+        connection.executemany(
+            "INSERT INTO players VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (member_id, member_id, f"成员-{index:03d}", 1, guild_id, "[]", None, None, "{}")
+                for index, member_id in enumerate(member_ids)
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO bases VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (base_id, f"据点-{index:03d}", guild_id, None, None, None, None, "{}")
+                for index, base_id in enumerate(base_ids)
+            ],
+        )
+
+    guild_detail = entity_detail(cache, "guilds", guild_id)
+
+    assert guild_detail is not None
+    members = cast(list[dict[str, Any]], guild_detail["members"])
+    bases = cast(list[dict[str, Any]], guild_detail["bases"])
+    asset_summary = cast(dict[str, object], guild_detail["assetSummary"])
+    assert {item["id"] for item in members} == set(member_ids)
+    assert {item["id"] for item in bases} == set(base_ids)
+    assert asset_summary["memberCount"] == len(members) == 201
+    assert asset_summary["baseCount"] == len(bases) == 201
+    assert guild_detail["missingMemberIds"] == []
+    assert guild_detail["missingBaseIds"] == []
+
+
+def test_player_detail_does_not_truncate_pals_or_inventory(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    player_id = str(uuid.UUID(int=1))
+    pal_ids = [f"player-pal-{index:03d}" for index in range(201)]
+    with sqlite3.connect(cache) as connection:
+        pal_source = connection.execute("SELECT * FROM pals LIMIT 1").fetchone()
+        assert pal_source is not None
+        pal_columns = [item[1] for item in connection.execute("PRAGMA table_info(pals)")]
+        pal_id_index = pal_columns.index("id")
+        owner_index = pal_columns.index("owner_player_id")
+        connection.execute("DELETE FROM pals")
+        pal_rows = []
+        for pal_id in pal_ids:
+            row = list(pal_source)
+            row[pal_id_index] = pal_id
+            row[owner_index] = player_id
+            pal_rows.append(row)
+        connection.executemany(
+            f"INSERT INTO pals ({', '.join(pal_columns)}) "
+            f"VALUES({', '.join('?' for _ in pal_columns)})",
+            pal_rows,
+        )
+
+        inventory_columns = [
+            item[1]
+            for item in connection.execute("PRAGMA table_info(inventory_items)")
+            if item[1] != "id"
+        ]
+        inventory_source = connection.execute(
+            f"SELECT {', '.join(inventory_columns)} FROM inventory_items LIMIT 1"
+        ).fetchone()
+        assert inventory_source is not None
+        container_index = inventory_columns.index("container_id")
+        owner_id_index = inventory_columns.index("owner_id")
+        connection.execute("DELETE FROM inventory_items")
+        inventory_rows = []
+        for index in range(201):
+            row = list(inventory_source)
+            row[container_index] = f"player-container-{index:03d}"
+            row[owner_id_index] = player_id
+            inventory_rows.append(row)
+        connection.executemany(
+            f"INSERT INTO inventory_items ({', '.join(inventory_columns)}) "
+            f"VALUES({', '.join('?' for _ in inventory_columns)})",
+            inventory_rows,
+        )
+
+    player_detail = entity_detail(cache, "players", player_id)
+
+    assert player_detail is not None
+    player_pals = cast(list[dict[str, Any]], player_detail["pals"])
+    inventory = cast(list[dict[str, Any]], player_detail["inventory"])
+    assert [item["id"] for item in player_pals] == pal_ids
+    assert len(inventory) == 201
+    assert inventory[-1]["containerId"] == "player-container-200"
 
 
 def test_player_status_filter_and_sort_apply_before_pagination(tmp_path: Path) -> None:

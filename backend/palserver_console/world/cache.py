@@ -1146,7 +1146,7 @@ def _player_detail(connection: sqlite3.Connection, player_id: str) -> dict[str, 
     _add_player_profile_fields(result)
     pals = _rows(
         connection,
-        "SELECT * FROM pals WHERE owner_player_id = ? ORDER BY rowid LIMIT 200",
+        "SELECT * FROM pals WHERE owner_player_id = ? ORDER BY rowid",
         (player_id,),
     )
     result["pals"] = pals
@@ -1159,7 +1159,7 @@ def _player_detail(connection: sqlite3.Connection, player_id: str) -> dict[str, 
     result["inventory"] = _rows(
         connection,
         "SELECT * FROM inventory_items WHERE owner_id = ? "
-        "ORDER BY container_id, slot_index LIMIT 200",
+        "ORDER BY container_id, slot_index",
         (player_id,),
     )
     result["guild"] = _reference(connection, "guilds", result.get("guildId"))
@@ -1185,13 +1185,13 @@ def _guild_detail(connection: sqlite3.Connection, guild_id: str) -> dict[str, ob
     members = _rows(
         connection,
         "SELECT id, name, level, guild_id FROM players WHERE guild_id = ? "
-        "ORDER BY name COLLATE NOCASE LIMIT 200",
+        "ORDER BY name COLLATE NOCASE",
         (guild_id,),
     )
     bases = _rows(
         connection,
         "SELECT id, name, guild_id, worker_container_id, x, y, z FROM bases "
-        "WHERE guild_id = ? ORDER BY name COLLATE NOCASE LIMIT 200",
+        "WHERE guild_id = ? ORDER BY name COLLATE NOCASE",
         (guild_id,),
     )
     result["members"] = members
