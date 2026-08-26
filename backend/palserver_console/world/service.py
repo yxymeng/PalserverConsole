@@ -13,6 +13,8 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +56,15 @@ class WorldDataError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True)
+class _ValidatedWorldCache:
+    snapshot_id: str
+    path: Path
+    counts: dict[str, int]
+    metadata: dict[str, str]
+    overview: dict[str, object]
 
 
 class WorldSnapshotService:
@@ -119,6 +130,7 @@ class WorldSnapshotService:
         self._last_watch_run_at: int | None = None
         self._last_watch_success_at: int | None = None
         self._last_watch_error: dict[str, object] | None = None
+        self._validated_world_cache: _ValidatedWorldCache | None = None
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -348,14 +360,13 @@ class WorldSnapshotService:
         cache_available = False
         if current:
             try:
-                cache_path = self._validated_cache_path(current)
-                metadata = read_cache_metadata(cache_path)
-                metadata_data_version = metadata.get("metadata_data_version") or None
-                raw_game_time_ticks = metadata.get("game_time_ticks")
+                cached = self._validated_cache(current)
+                metadata_data_version = cached.metadata.get("metadata_data_version") or None
+                raw_game_time_ticks = cached.metadata.get("game_time_ticks")
                 if raw_game_time_ticks is not None:
                     game_time_ticks = max(0, int(raw_game_time_ticks))
-                counts = validate_cache_file(cache_path)
-                overview = query_world_overview(cache_path)
+                counts = dict(cached.counts)
+                overview = deepcopy(cached.overview)
                 cache_available = True
             except WorldDataError as cache_error:
                 error = (cache_error.code, str(cache_error))
@@ -707,6 +718,9 @@ class WorldSnapshotService:
         return current, self._validated_cache_path(current)
 
     def _validated_cache_path(self, current: dict[str, object]) -> Path:
+        return self._validated_cache(current).path
+
+    def _validated_cache(self, current: dict[str, object]) -> _ValidatedWorldCache:
         path = Path(str(current["cache_path"])).resolve(strict=False)
         root = self.cache_root.resolve(strict=False)
         try:
@@ -715,15 +729,32 @@ class WorldSnapshotService:
             raise WorldDataError("CACHE_PATH_INVALID", "当前缓存路径越界。") from error
         if not path.is_file() or path.suffix.casefold() != ".sqlite":
             raise WorldDataError("WORLD_CACHE_UNAVAILABLE", "最后成功缓存文件不存在。")
-        try:
-            validate_cache_file(path)
-        except WorldCacheSchemaError as error:
-            raise WorldDataError(
-                "CACHE_SCHEMA_INCOMPATIBLE", "当前缓存版本不兼容，正在重新解析。"
-            ) from error
-        except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error) as error:
-            raise WorldDataError("CACHE_INVALID", "最后成功缓存无法读取。") from error
-        return path
+
+        snapshot_id = str(current["id"])
+        with self._lock:
+            cached = self._validated_world_cache
+            if cached is not None and cached.snapshot_id == snapshot_id and cached.path == path:
+                return cached
+
+            try:
+                counts = validate_cache_file(path)
+                metadata = read_cache_metadata(path)
+                overview = query_world_overview(path)
+            except WorldCacheSchemaError as error:
+                raise WorldDataError(
+                    "CACHE_SCHEMA_INCOMPATIBLE", "当前缓存版本不兼容，正在重新解析。"
+                ) from error
+            except (OSError, ValueError, json.JSONDecodeError, sqlite3.Error) as error:
+                raise WorldDataError("CACHE_INVALID", "最后成功缓存无法读取。") from error
+            cached = _ValidatedWorldCache(
+                snapshot_id=snapshot_id,
+                path=path,
+                counts=counts,
+                metadata=metadata,
+                overview=overview,
+            )
+            self._validated_world_cache = cached
+            return cached
 
     def _watch_loop(self) -> None:
         while not self._stop.is_set():

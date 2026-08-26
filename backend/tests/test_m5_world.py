@@ -1713,6 +1713,50 @@ def test_cache_and_snapshot_keep_source_collection_and_parse_times(
     assert contract["metadataDataVersion"] == "2026.08.25.3"
 
 
+def test_world_cache_validation_is_reused_until_current_snapshot_changes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    service.cache_root.mkdir(parents=True)
+    level, players = _synthetic_properties()
+
+    first_cache = service.cache_root / "world-cache-first.sqlite"
+    build_world_cache(first_cache, level, players, snapshot_id="first", source_observed_at=1)
+    database.record_snapshot_version("first", str(first_cache), 1, "success", make_current=True)
+
+    calls = 0
+    original_validate = validate_cache_file
+
+    def count_validation(path: Path) -> dict[str, int]:
+        nonlocal calls
+        calls += 1
+        return original_validate(path)
+
+    monkeypatch.setattr("palserver_console.world.service.validate_cache_file", count_validation)
+
+    status = service.status()
+    listing = service.list_resource(
+        "players", page=1, page_size=50, search=None, owner_id=None, base_id=None
+    )
+    items = cast(list[dict[str, object]], listing["items"])
+    player_id = str(items[0]["id"])
+    detail = service.get_entity("players", player_id)
+
+    assert status["snapshotId"] == "first"
+    assert detail["id"] == player_id
+    assert calls == 1
+
+    second_cache = service.cache_root / "world-cache-second.sqlite"
+    build_world_cache(second_cache, level, players, snapshot_id="second", source_observed_at=2)
+    database.record_snapshot_version("second", str(second_cache), 2, "success", make_current=True)
+
+    assert service.status()["snapshotId"] == "second"
+    service.list_resource("players", page=1, page_size=50, search=None, owner_id=None, base_id=None)
+    assert calls == 2
+
+
 def test_world_status_marks_cache_invalid_when_metadata_table_is_missing(
     tmp_path: Path,
 ) -> None:
