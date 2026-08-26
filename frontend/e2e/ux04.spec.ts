@@ -149,7 +149,10 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.locator(".world-overview-actions").getByRole("button", { name: /未知物品/ }).click();
   await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("metadata") === "unknown" && url.searchParams.get("scope") === "all")).toBeTruthy();
   await expect(page.locator(".inventory-context")).toContainText("资料未收录的物品");
-  await page.getByRole("button", { name: "返回全部仓库" }).click();
+  await page.locator(".inventory-toolbar").getByRole("button", { name: "清除筛选" }).click();
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
+  await expect(inventoryUrls.at(-1)?.searchParams.has("metadata")).toBeFalsy();
+  await expect(page.locator(".inventory-context")).toHaveCount(0);
   await page.getByRole("button", { name: /返回总览/ }).click();
   await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
   await expect(page.locator(".world-snapshot-bar")).toContainText("存档记录");
@@ -160,6 +163,15 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("scope") === "inventory")).toBeTruthy();
   await expect(page.getByLabel("库存范围").getByRole("button", { name: "库存" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator(".inventory-workspace")).toContainText("木材");
+  for (const scope of ["玩家", "据点", "世界", "全部"] as const) {
+    const beforeScopeChange = inventoryUrls.length;
+    await page.getByLabel("库存范围").getByRole("button", { name: scope }).click();
+    await expect.poll(() => inventoryUrls.slice(beforeScopeChange).some((url) => url.searchParams.get("scope") === ({ "玩家": "player", "据点": "base", "世界": "world", "全部": "all" } as const)[scope])).toBeTruthy();
+    const beforeClear = inventoryUrls.length;
+    await page.locator(".inventory-toolbar").getByRole("button", { name: "清除筛选" }).click();
+    await expect.poll(() => inventoryUrls.slice(beforeClear).some((url) => url.searchParams.get("scope") === "inventory" && !url.searchParams.has("ownerId") && !url.searchParams.has("baseId") && !url.searchParams.has("guildId") && !url.searchParams.has("metadata"))).toBeTruthy();
+    await expect(page.getByLabel("库存范围").getByRole("button", { name: "库存" })).toHaveAttribute("aria-pressed", "true");
+  }
   const woodSummary = page.locator(".inventory-item-summary").filter({ hasText: "木材" });
   await expect(woodSummary).toContainText("库存总量");
   await expect(woodSummary).toContainText("存放记录");
@@ -232,6 +244,10 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await drawer.getByRole("button", { name: "在仓库中查看" }).click();
   await expect(page.locator(".inventory-context")).toContainText("玩家库存：Alice");
   await expect(page.locator(".inventory-workspace")).toContainText("3");
+  await page.locator(".inventory-toolbar").getByRole("button", { name: "清除筛选" }).click();
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
+  await expect(inventoryUrls.at(-1)?.searchParams.has("ownerId")).toBeFalsy();
+  await expect(page.locator(".inventory-context")).toHaveCount(0);
   await tabs.getByRole("tab", { name: "帕鲁" }).click();
 
   await expect(page.locator(".pal-roster")).toContainText("FuturePal");
@@ -315,6 +331,10 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await drawer.getByRole("button", { name: "在仓库中查看" }).click();
   await expect(page.locator(".inventory-context")).toContainText("公会关联仓库：测试工会");
   await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("guildId") === "guild-1")).toBeTruthy();
+  await page.locator(".inventory-toolbar").getByRole("button", { name: "清除筛选" }).click();
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
+  await expect(inventoryUrls.at(-1)?.searchParams.has("guildId")).toBeFalsy();
+  await expect(page.locator(".inventory-context")).toHaveCount(0);
 
   await page.getByRole("tab", { name: "据点" }).click();
   await page.getByRole("button", { name: "据点一号" }).click();
@@ -325,7 +345,15 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer).toContainText("与帕鲁名册“需要关注”使用同一存档快照规则");
   await expect(drawer).toContainText("工作帕鲁");
   await expect(drawer).toContainText("据点库存");
-  await page.keyboard.press("Escape");
+  await drawer.getByRole("button", { name: "在仓库中查看" }).click();
+  await expect(page.locator(".inventory-context")).toContainText("据点库存：据点一号");
+  await page.locator(".inventory-toolbar").getByRole("button", { name: "清除筛选" }).click();
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
+  await expect(inventoryUrls.at(-1)?.searchParams.has("baseId")).toBeFalsy();
+  await expect(page.locator(".inventory-context")).toHaveCount(0);
+  await page.getByRole("tab", { name: "据点" }).click();
+  await page.getByRole("button", { name: "据点一号" }).click();
+  await drawer.getByRole("button", { name: "关闭详情" }).click();
   await expect(page.locator(".world-entity-drawer:not(.empty)")).toBeHidden();
   await expect(page.getByRole("button", { name: "据点一号" })).toBeFocused();
   await page.getByLabel("状态筛选").selectOption("guilded");
@@ -341,4 +369,80 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(page.getByText(/SNAPSHOT_PARSE_FAILED/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
+});
+
+test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async ({ page }, testInfo) => {
+  const snapshot = {
+    contract: worldContract, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1,
+    snapshotId: "race", stale: false, errorCode: null, error: null, parsing: false, parseStatus: "ready", reparseGeneration: 0,
+    parseDurationMs: null, peakMemoryBytes: null, cacheSizeBytes: null, gameTimeTicks: null,
+    dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
+    counts: { players: 0, pals: 0, guilds: 0, bases: 0, containers: 0, inventory_items: 2, work_pals: 0 },
+    overview: { assets: { players: 0, pals: 0, palSpecies: 0, itemTypes: 2, itemQuantity: 2, bases: 0, guilds: 0 }, actions: { attentionPals: 0, luckyPals: 0, bossPals: 0, unassignedPals: 0, unknownItems: 0, unknownPalMetadata: 0, careUnavailable: 0 } },
+  };
+  const coverage = snapshot.dataCoverage;
+  const item = (itemId: string, name: string) => ({ itemId, name, category: "材料", rarity: null, metadataKnown: true, metadataLabel: null, totalQuantity: 1, locationCount: 2 });
+  const group = (locationType: "player" | "base", label: string) => ({ locationType, groupId: `${locationType}-1`, label, quantitySum: 1, locationCount: 1, containerCount: 1 });
+  const detail = (itemId: string, groups: object[], locations: object[]) => ({ itemId, groups, locations, page: 1, pageSize: 100, total: locations.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: "race", stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: coverage });
+  const location = (id: number, label: string, locationType: "player" | "base") => ({ id, locationType, locationLabel: label, ownerId: null, ownerName: null, guildId: null, guildName: null, baseId: null, baseName: null, slotIndex: 0, quantity: 1, containerId: `container-${id}`, mapObjectType: null, mapObjectInstanceId: null, worldPosition: null });
+  let releaseOldItem: () => void = () => undefined;
+  const oldItemReleased = new Promise<void>((resolve) => { releaseOldItem = resolve; });
+  let markOldItemStarted: () => void = () => undefined;
+  const oldItemStarted = new Promise<void>((resolve) => { markOldItemStarted = resolve; });
+  let releaseOldGroup: () => void = () => undefined;
+  const oldGroupReleased = new Promise<void>((resolve) => { releaseOldGroup = resolve; });
+  let markOldGroupStarted: () => void = () => undefined;
+  const oldGroupStarted = new Promise<void>((resolve) => { markOldGroupStarted = resolve; });
+
+  await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
+  await page.route("**/api/shell/status", (route) => route.fulfill({ json: shell }));
+  await page.route("**/api/server/settings", (route) => route.fulfill({ json: { executablePath: shell.executablePath, launchArguments: "" } }));
+  await page.route("**/api/operations/health", (route) => route.fulfill({ json: { observedAt: 1, capacity: { state: "ok", freeBytes: 1, totalBytes: 1, minimumFreeBytes: 1, copyBytes: 1, requiredFreeBytes: 1, warningFreeBytes: 1, sourceErrorCode: null, errorCode: null }, directories: [], world: { state: "healthy", lastSuccessAt: 1, snapshotId: "race", parsing: false, errorCode: null, cacheSizeBytes: 0 }, backups: { state: "healthy", lastSuccessAt: 1, itemCount: 0, validCount: 0, invalidCount: 0, totalBytes: 0, errorCode: null }, background: [], alerts: [] } }));
+  await page.route("**/api/live/**", (route) => route.fulfill({ json: { data: {}, source: "rest", observedAt: 1, stale: false, errorCode: null } }));
+  await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
+  await page.route("**/api/world/**", async (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname === "/api/world/snapshots/current") return route.fulfill({ json: snapshot });
+    if (url.pathname === "/api/world/inventories") return route.fulfill({ json: { items: [item("A", "物品 A"), item("B", "物品 B")], categories: ["材料"], page: 1, pageSize: 60, total: 2, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: "race", stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: coverage, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "test", errorCode: null } } });
+    if (url.pathname === "/api/world/inventories/A") {
+      markOldItemStarted();
+      await oldItemReleased;
+      return route.fulfill({ json: detail("A", [group("player", "过期 A 分组")], []) }).catch(() => undefined);
+    }
+    if (url.pathname === "/api/world/inventories/B") {
+      const locationType = url.searchParams.get("locationType");
+      if (!locationType) return route.fulfill({ json: detail("B", [group("player", "玩家分组"), group("base", "据点分组")], []) });
+      if (locationType === "player") {
+        markOldGroupStarted();
+        await oldGroupReleased;
+        return route.fulfill({ json: detail("B", [group("player", "玩家分组"), group("base", "据点分组")], [location(1, "过期玩家位置", "player")]) }).catch(() => undefined);
+      }
+      return route.fulfill({ json: detail("B", [group("player", "玩家分组"), group("base", "据点分组")], [location(2, "最新据点位置", "base")]) });
+    }
+    return route.fulfill({ status: 404, json: { errorCode: "WORLD_TEST_UNROUTED", message: url.pathname } });
+  });
+
+  await page.goto("/");
+  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
+  await page.getByRole("button", { name: "世界数据" }).click();
+  await page.getByRole("tab", { name: "仓库" }).click();
+  const itemA = page.locator(".inventory-item-summary").filter({ hasText: "物品 A" });
+  const itemB = page.locator(".inventory-item-summary").filter({ hasText: "物品 B" });
+  await itemA.click();
+  await oldItemStarted;
+  await itemB.click();
+  await expect(page.locator(".inventory-locations")).toContainText("玩家分组");
+  releaseOldItem();
+  await page.waitForTimeout(50);
+  await expect(page.locator(".inventory-locations")).toContainText("玩家分组");
+  await expect(page.locator(".inventory-locations")).not.toContainText("过期 A 分组");
+
+  await page.locator(".inventory-location-group-summary").filter({ hasText: "玩家分组" }).click();
+  await oldGroupStarted;
+  await page.locator(".inventory-location-group-summary").filter({ hasText: "据点分组" }).click();
+  await expect(page.locator(".inventory-location-details")).toContainText("最新据点位置");
+  releaseOldGroup();
+  await page.waitForTimeout(50);
+  await expect(page.locator(".inventory-location-details")).toContainText("最新据点位置");
+  await expect(page.locator(".inventory-location-details")).not.toContainText("过期玩家位置");
 });

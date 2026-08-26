@@ -38,7 +38,15 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   const [locationError, setLocationError] = useState("");
   const nextRequestSignal = useAbortableRequest();
   const loadSequence = useRef(0);
+  const locationAbortController = useRef<AbortController | null>(null);
+  const locationRequestSequence = useRef(0);
   const pageSize = 60;
+
+  const invalidateLocationRequest = useCallback(() => {
+    locationRequestSequence.current += 1;
+    locationAbortController.current?.abort();
+    locationAbortController.current = null;
+  }, []);
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -84,13 +92,22 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    invalidateLocationRequest();
     setExpanded(null);
     setLocations(null);
     setExpandedGroup(null);
+    setLocationLoading(false);
     setLocationError("");
-  }, [snapshotId, context]);
+  }, [context, invalidateLocationRequest, snapshotId]);
+  useEffect(() => () => invalidateLocationRequest(), [invalidateLocationRequest]);
 
   const loadLocations = useCallback(async (item: WorldInventoryItem, group: WorldInventoryLocationGroup | null, nextPage = 1, previous: WorldInventoryDetailResponse | null = null) => {
+    const sequence = ++locationRequestSequence.current;
+    locationAbortController.current?.abort();
+    const controller = new AbortController();
+    locationAbortController.current = controller;
+    const { signal } = controller;
+    const isCurrentRequest = () => sequence === locationRequestSequence.current && !signal.aborted;
     setLocationLoading(true);
     setLocationError("");
     try {
@@ -106,25 +123,32 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
           if (group.groupId) query.set("groupId", group.groupId);
         }
         try {
-          const next = await requestJson<WorldInventoryDetailResponse>(`/api/world/inventories/${encodeURIComponent(item.itemId)}?${query}`);
+          const next = await requestJson<WorldInventoryDetailResponse>(`/api/world/inventories/${encodeURIComponent(item.itemId)}?${query}`, { signal });
+          if (!isCurrentRequest()) return;
           if (next.snapshotId !== currentSnapshotId) {
             currentSnapshotId = await onSnapshotReplaced();
+            if (!isCurrentRequest()) return;
             continue;
           }
           setLocations(previous ? { ...next, locations: [...previous.locations, ...next.locations] } : next);
           break;
         } catch (caught) {
           if (caught instanceof ApiRequestError && caught.code === "SNAPSHOT_REPLACED" && attempt === 0) {
+            if (!isCurrentRequest()) return;
             currentSnapshotId = await onSnapshotReplaced();
+            if (!isCurrentRequest()) return;
             continue;
           }
           throw caught;
         }
       }
     } catch (caught) {
-      if (!isAbortError(caught)) setLocationError(caught instanceof Error ? caught.message : "物品位置读取失败");
+      if (isCurrentRequest() && !isAbortError(caught)) setLocationError(caught instanceof Error ? caught.message : "物品位置读取失败");
     } finally {
-      setLocationLoading(false);
+      if (isCurrentRequest()) {
+        if (locationAbortController.current === controller) locationAbortController.current = null;
+        setLocationLoading(false);
+      }
     }
   }, [context, onSnapshotReplaced, snapshotId]);
 
@@ -140,13 +164,17 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
     setCategory("");
     setSort("name");
     setPage(1);
+    onClearContext();
   }
 
   function toggleItem(item: WorldInventoryItem) {
+    invalidateLocationRequest();
     if (expanded?.itemId === item.itemId) {
       setExpanded(null);
       setLocations(null);
       setExpandedGroup(null);
+      setLocationLoading(false);
+      setLocationError("");
       return;
     }
     setExpanded(item);
@@ -156,8 +184,12 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   }
 
   function toggleGroup(item: WorldInventoryItem, group: WorldInventoryLocationGroup) {
+    invalidateLocationRequest();
     if (expandedGroup?.locationType === group.locationType && expandedGroup.groupId === group.groupId) {
       setExpandedGroup(null);
+      setLocations((current) => current ? { ...current, locations: [] } : current);
+      setLocationLoading(false);
+      setLocationError("");
       return;
     }
     setExpandedGroup(group);
@@ -166,7 +198,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   }
 
   const totalPages = result?.total ? Math.ceil(result.total / pageSize) : 1;
-  const hasFilters = Boolean(appliedSearch || category || sort !== "name" || context.scope !== "inventory" || context.ownerId || context.baseId || context.guildId);
+  const hasFilters = Boolean(appliedSearch || category || sort !== "name" || context.scope !== "inventory" || context.ownerId || context.baseId || context.guildId || context.metadata);
   const allUnknown = Boolean(result?.items.length) && result!.items.every((item) => !item.metadataKnown);
   const quantityLabel = ({ inventory: "库存总量", player: "玩家总量", base: "据点总量", world: "世界容器总量", all: "全世界总量" } as const)[context.scope];
 
