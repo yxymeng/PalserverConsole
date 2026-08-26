@@ -10,6 +10,8 @@ import { activityLabel, careReasonLabels, careSummaryLabel, diseaseLabel, physic
 
 type Marker = "all" | "lucky" | "boss";
 type CareFilter = "all" | "attention";
+type LocationFilter = "all" | "player" | "base" | "unassigned";
+export type PalRosterContext = { marker?: Marker; care?: CareFilter; location?: LocationFilter; label?: string; token: number };
 type Sort = "balanced" | "name" | "level" | "rarity" | "averageIv" | "workSuitability";
 type AptitudeFilters = {
   minLevel: string; minRank: string; minRarity: string;
@@ -37,11 +39,12 @@ const elementLabels: Record<string, string> = {
   Ice: "冰", Ground: "地面", Dark: "暗", Dragon: "龙",
 };
 
-export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: string | null | undefined; onSnapshotReplaced: () => Promise<string | null> }) {
+export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate }: { snapshotId: string | null | undefined; context?: PalRosterContext; onSnapshotReplaced: () => Promise<string | null>; onNavigate?: (resource: "players" | "bases", id: string) => void }) {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [marker, setMarker] = useState<Marker>("all");
   const [care, setCare] = useState<CareFilter>("all");
+  const [location, setLocation] = useState<LocationFilter>("all");
   const [sort, setSort] = useState<Sort>("balanced");
   const [draftAptitude, setDraftAptitude] = useState<AptitudeFilters>(EMPTY_APTITUDE_FILTERS);
   const [appliedAptitude, setAppliedAptitude] = useState<AptitudeFilters>(EMPTY_APTITUDE_FILTERS);
@@ -77,6 +80,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
         page: String(page), pageSize: String(PAGE_SIZE), marker, care, sort, snapshotId: requestedSnapshotId,
       });
       if (appliedSearch) query.set("search", appliedSearch);
+      if (location !== "all") query.set("location", location);
       for (const key of ["minLevel", "minRank", "minRarity", "minHpIv", "minAttackIv", "minDefenseIv", "minAverageIv"] as const) {
         if (appliedAptitude[key]) query.set(key, appliedAptitude[key]);
       }
@@ -116,7 +120,19 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
         setLoadingMore(false);
       }
     }
-  }, [appliedAptitude, appliedSearch, care, marker, onSnapshotReplaced, snapshotId, sort]);
+  }, [appliedAptitude, appliedSearch, care, location, marker, onSnapshotReplaced, snapshotId, sort]);
+
+  useEffect(() => {
+    if (!context) return;
+    setSearch("");
+    setAppliedSearch("");
+    setMarker(context.marker || "all");
+    setCare(context.care || "all");
+    setLocation(context.location || "all");
+    setSort("balanced");
+    setDraftAptitude(EMPTY_APTITUDE_FILTERS);
+    setAppliedAptitude(EMPTY_APTITUDE_FILTERS);
+  }, [context]);
 
   useEffect(() => {
     setItems([]);
@@ -169,6 +185,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
     setAppliedSearch("");
     setMarker("all");
     setCare("all");
+    setLocation("all");
     setSort("balanced");
     setDraftAptitude(EMPTY_APTITUDE_FILTERS);
     setAppliedAptitude(EMPTY_APTITUDE_FILTERS);
@@ -196,10 +213,11 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
   }
 
   const hasAptitudeFilters = Object.entries(appliedAptitude).some(([key, value]) => ["workSuitabilities", "passiveSkills"].includes(key) ? (value as string[]).length > 0 : key !== "minWorkLevel" && Boolean(value));
-  const hasFilters = Boolean(appliedSearch) || marker !== "all" || care !== "all" || sort !== "balanced" || hasAptitudeFilters;
+  const hasFilters = Boolean(appliedSearch) || marker !== "all" || care !== "all" || location !== "all" || sort !== "balanced" || hasAptitudeFilters;
   const canLoadMore = items.length < total;
   return <section className="pal-roster" aria-label="帕鲁名册">
     <header className="pal-roster-heading"><div><h2>帕鲁名册</h2><p>按稳定快照分批读取；照护信息来自存档快照，不是实时监控。</p></div><span>{total ? `已载入 ${items.length} / ${total}` : "等待快照"}</span></header>
+    {context?.label && <p className="world-navigation-context" role="status">当前来自总览：{context.label}</p>}
     {careSummary && <PalCareSummary summary={careSummary} />}
     {metadata?.status === "unavailable" && <p className="pal-metadata-warning" role="status"><AlertCircle size={17} aria-hidden="true" /><span>固定版本元数据当前不可用；名册仍保持只读可浏览，稀有度和工作适应性显示为“资料未收录”。</span><code>{metadata.errorCode || "WORLD_METADATA_UNAVAILABLE"}</code></p>}
     <form className="pal-roster-toolbar" onSubmit={submitSearch}>
@@ -231,6 +249,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
       {appliedSearch && <button type="button" onClick={() => { setSearch(""); setAppliedSearch(""); }}>搜索：{appliedSearch}<X size={13} /></button>}
       {marker !== "all" && <button type="button" onClick={() => setMarker("all")}>{marker === "lucky" ? "闪光" : "头目"}<X size={13} /></button>}
       {care !== "all" && <button type="button" onClick={() => setCare("all")}>需要关注<X size={13} /></button>}
+      {location !== "all" && <button type="button" onClick={() => setLocation("all")}>未归属帕鲁<X size={13} /></button>}
       {sort !== "balanced" && <button type="button" onClick={() => setSort("balanced")}>排序：{{ name: "名称", level: "等级", rarity: "物种稀有度", averageIv: "平均个体值", workSuitability: "工作适应性" }[sort]}<X size={13} /></button>}
       {(["minLevel", "minRank", "minRarity", "minHpIv", "minAttackIv", "minDefenseIv", "minAverageIv"] as const).map((key) => appliedAptitude[key] && <button type="button" key={key} onClick={() => removeAppliedAptitude(key)}>{{ minLevel: "等级", minRank: "星级", minRarity: "稀有度", minHpIv: "生命个体值", minAttackIv: "攻击个体值", minDefenseIv: "防御个体值", minAverageIv: "平均个体值" }[key]} ≥ {appliedAptitude[key]}<X size={13} /></button>)}
       {appliedAptitude.workSuitabilities.map((type) => <button type="button" key={type} onClick={() => removeWorkSuitability(type)}>{workSuitabilityLabels[type] || type} ≥ {appliedAptitude.minWorkLevel || "1"} 级<X size={13} /></button>)}
@@ -242,7 +261,7 @@ export function PalRoster({ snapshotId, onSnapshotReplaced }: { snapshotId: stri
       {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "没有符合条件的帕鲁" : "当前没有可用世界快照"}</strong><p>{snapshotId ? "尝试清除已应用筛选，或使用其他名称和 ID 搜索。" : "完成只读解析后可浏览名册。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除已应用筛选</button>}</div>}
     </div>
     {canLoadMore && <button className="quiet-button pal-roster-more" type="button" disabled={loadingMore} onClick={() => void loadPage(Math.floor(items.length / PAGE_SIZE) + 1, true)}>{loadingMore ? <><LoaderCircle className="spin" size={17} />正在加载</> : `加载更多（还有 ${total - items.length} 条）`}</button>}
-    <PalRosterDrawer state={drawer} onClose={closeDrawer} />
+    <PalRosterDrawer state={drawer} onClose={closeDrawer} onNavigate={(target, id) => { closeDrawer(); onNavigate?.(target, id); }} />
   </section>;
 }
 
@@ -299,7 +318,7 @@ function PalRosterTraits({ item }: { item: WorldPalRosterItem }) {
 
 type DrawerState = { item: WorldPalRosterItem; detail: (WorldPalDetail & { snapshotId: string }) | null; loading: boolean; error: string };
 
-function PalRosterDrawer({ state, onClose }: { state: DrawerState | null; onClose: () => void }) {
+function PalRosterDrawer({ state, onClose, onNavigate }: { state: DrawerState | null; onClose: () => void; onNavigate: (resource: "players" | "bases", id: string) => void }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const drawerRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
@@ -338,10 +357,10 @@ function PalRosterDrawer({ state, onClose }: { state: DrawerState | null; onClos
   if (!state) return null;
   const data = state.detail || state.item;
   const pal = resolvePal(data as unknown as Record<string, unknown>);
-  return createPortal(<><button className="pal-roster-backdrop" type="button" tabIndex={-1} aria-label="关闭帕鲁详情遮罩" onClick={onClose} /><aside ref={drawerRef} className="pal-roster-drawer" role="dialog" aria-modal="true" aria-label="帕鲁详情"><header><div className="world-drawer-title"><span className="world-entity-avatar world-pal-avatar"><img src={pal.icon} alt="" /></span><div><h2>{pal.displayName}</h2><p>{pal.speciesName}</p></div></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={18} /></button></header>{state.loading ? <div className="pal-roster-drawer-state"><LoaderCircle className="spin" size={24} /><strong>正在读取帕鲁详情</strong><p>名册结果仍保留，可随时关闭。</p></div> : state.error ? <div className="pal-roster-drawer-state error" role="alert"><AlertCircle size={24} /><strong>详情读取失败</strong><p>已保留名册结果。请关闭后重试，或检查当前快照状态。</p><code>{state.error}</code></div> : <PalRosterDetail data={data} pal={pal} />}</aside></>, document.body);
+  return createPortal(<><button className="pal-roster-backdrop" type="button" tabIndex={-1} aria-label="关闭帕鲁详情遮罩" onClick={onClose} /><aside ref={drawerRef} className="pal-roster-drawer" role="dialog" aria-modal="true" aria-label="帕鲁详情"><header><div className="world-drawer-title"><span className="world-entity-avatar world-pal-avatar"><img src={pal.icon} alt="" /></span><div><h2>{pal.displayName}</h2><p>{pal.speciesName}</p></div></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={18} /></button></header>{state.loading ? <div className="pal-roster-drawer-state"><LoaderCircle className="spin" size={24} /><strong>正在读取帕鲁详情</strong><p>名册结果仍保留，可随时关闭。</p></div> : state.error ? <div className="pal-roster-drawer-state error" role="alert"><AlertCircle size={24} /><strong>详情读取失败</strong><p>已保留名册结果。请关闭后重试，或检查当前快照状态。</p><code>{state.error}</code></div> : <PalRosterDetail data={data} pal={pal} onNavigate={onNavigate} />}</aside></>, document.body);
 }
 
-function PalRosterDetail({ data, pal }: { data: WorldPalDetail | WorldPalRosterItem; pal: ReturnType<typeof resolvePal> }) {
+function PalRosterDetail({ data, pal, onNavigate }: { data: WorldPalDetail | WorldPalRosterItem; pal: ReturnType<typeof resolvePal>; onNavigate: (resource: "players" | "bases", id: string) => void }) {
   const record = data as unknown as WorldRow;
   const location = "locationType" in data ? locationLabels[data.locationType] : value(record.locationType) || value(record.assignment);
   const care = (data as WorldPalDetail | WorldPalRosterItem).care;
@@ -350,6 +369,8 @@ function PalRosterDetail({ data, pal }: { data: WorldPalDetail | WorldPalRosterI
   return <div className="pal-roster-detail">
     <section className="world-relation-section pal-care-detail"><h3>照护状态 <small>来自存档快照</small></h3><PalCareDetail care={care} /></section>
     <dl className="world-detail-grid"><div><dt>等级</dt><dd>{value(record.level)}</dd></div><div><dt>星级</dt><dd>{pal.rank ?? 0}</dd></div><div><dt>归属</dt><dd>{location}</dd></div><div><dt>主人</dt><dd>{value(record.ownerName) || value((record.owner as WorldRow | undefined)?.name)}</dd></div><div><dt>据点</dt><dd>{value(record.baseName) || value((record.base as WorldRow | undefined)?.name)}</dd></div><div><dt>物种稀有度</dt><dd>{aptitude.speciesRarity ?? "资料未收录"}</dd></div></dl>
+    {typeof record.ownerPlayerId === "string" && record.ownerPlayerId && <button className="world-relation-link" type="button" onClick={() => onNavigate("players", record.ownerPlayerId as string)}>查看主人详情<small>{record.ownerPlayerId}</small></button>}
+    {typeof record.baseId === "string" && record.baseId && <button className="world-relation-link" type="button" onClick={() => onNavigate("bases", record.baseId as string)}>查看据点详情<small>{record.baseId}</small></button>}
     <section className="world-relation-section pal-aptitude-detail"><h3>个体值 <small>生命 / 攻击 / 防御</small></h3><dl><div><dt>生命</dt><dd>{formatIv(aptitude.ivs.hp)}</dd></div><div><dt>攻击</dt><dd>{formatIv(aptitude.ivs.attack)}</dd></div><div><dt>防御</dt><dd>{formatIv(aptitude.ivs.defense)}</dd></div><div><dt>平均</dt><dd>{formatIv(aptitude.ivs.average)}</dd></div></dl></section>
     <section className="world-relation-section pal-work-detail"><h3>工作适应性</h3>{aptitude.workSuitabilities.length ? <ul>{aptitude.workSuitabilities.map((work) => <li key={work.type}><span>{workSuitabilityLabels[work.type] || work.type}</span><strong>{work.level} 级</strong></li>)}</ul> : <p>{aptitude.metadataKnown ? "无工作适应性" : <><code>{pal.characterId}</code> · 资料未收录</>}</p>}</section>
     <PalSkillSection title="被动技能" skills={skills.passive} kind="passive" />

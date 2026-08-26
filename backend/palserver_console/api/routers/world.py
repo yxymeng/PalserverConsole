@@ -97,6 +97,7 @@ def router(deps: AppDependencies) -> APIRouter:
         workSuitability: str | None = None,
         minWorkLevel: int = 1,
         passiveSkill: str | None = None,
+        location: str = "all",
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
@@ -112,6 +113,8 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_PAL_ROSTER_SORT", "帕鲁排序方式不正确。")
         if care not in {"all", "attention"}:
             return error_response(422, "INVALID_PAL_ROSTER_CARE", "帕鲁照护筛选条件不正确。")
+        if location not in {"all", "player", "base", "unassigned"}:
+            return error_response(422, "INVALID_PAL_ROSTER_LOCATION", "帕鲁归属筛选条件不正确。")
         minimums = (minLevel, minRank, minRarity, minHpIv, minAttackIv, minDefenseIv, minAverageIv)
         if any(value is not None and value < 0 for value in minimums):
             return error_response(422, "INVALID_PAL_APTITUDE_FILTER", "帕鲁资质最低值不能小于 0。")
@@ -154,6 +157,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 work_suitabilities=work_suitabilities,
                 min_work_level=minWorkLevel,
                 passive_skills=passive_skills,
+                location=location,
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:
@@ -172,6 +176,7 @@ def router(deps: AppDependencies) -> APIRouter:
         baseId: str | None = None,
         guildId: str | None = None,
         sort: str = "name",
+        metadata: str = "all",
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
         denied = require_authenticated_request(request, deps.auth)
@@ -187,6 +192,8 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_INVENTORY_SCOPE", "仓库范围筛选条件不正确。")
         if sort not in {"name", "quantity"}:
             return error_response(422, "INVALID_INVENTORY_SORT", "仓库排序方式不正确。")
+        if metadata not in {"all", "unknown"}:
+            return error_response(422, "INVALID_INVENTORY_METADATA", "物品资料筛选条件不正确。")
         try:
             return deps.world.list_inventory(
                 page=page,
@@ -198,6 +205,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 base_id=baseId,
                 guild_id=guildId,
                 sort=sort,
+                metadata=metadata,
                 snapshot_id=snapshotId,
             )
         except WorldDataError as error:

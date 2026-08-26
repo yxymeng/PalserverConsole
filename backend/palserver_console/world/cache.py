@@ -389,6 +389,53 @@ def query_world_metadata_status(path: Path) -> dict[str, object]:
     }
 
 
+def query_world_overview(path: Path) -> dict[str, object]:
+    """Aggregate the overview lobby from one immutable cache snapshot."""
+
+    connection = sqlite3.connect(f"file:{path.resolve(strict=True).as_posix()}?mode=ro", uri=True)
+    try:
+        row = connection.execute(
+            "SELECT "
+            "(SELECT COUNT(*) FROM players), "
+            "(SELECT COUNT(*) FROM pals), "
+            "(SELECT COUNT(DISTINCT character_id) FROM pals WHERE character_id <> ''), "
+            "(SELECT COUNT(DISTINCT item_id) FROM inventory_items), "
+            "(SELECT COALESCE(SUM(quantity), 0) FROM inventory_items), "
+            "(SELECT COUNT(*) FROM bases), "
+            "(SELECT COUNT(*) FROM guilds), "
+            "(SELECT COUNT(*) FROM pals WHERE is_lucky = 1), "
+            "(SELECT COUNT(*) FROM pals WHERE is_boss = 1), "
+            "(SELECT COUNT(*) FROM pals WHERE "
+            " (owner_player_id IS NULL OR owner_player_id = '') "
+            " AND (base_id IS NULL OR base_id = '')), "
+            "(SELECT COUNT(DISTINCT item_id) FROM inventory_items WHERE metadata_known = 0), "
+            "(SELECT COUNT(*) FROM pals WHERE metadata_known = 0)"
+        ).fetchone()
+        care = _pal_care_summary(connection)
+        return {
+            "assets": {
+                "players": int(row[0]),
+                "pals": int(row[1]),
+                "palSpecies": int(row[2]),
+                "itemTypes": int(row[3]),
+                "itemQuantity": int(row[4]),
+                "bases": int(row[5]),
+                "guilds": int(row[6]),
+            },
+            "actions": {
+                "attentionPals": care["attention"],
+                "luckyPals": int(row[7]),
+                "bossPals": int(row[8]),
+                "unassignedPals": int(row[9]),
+                "unknownItems": int(row[10]),
+                "unknownPalMetadata": int(row[11]),
+                "careUnavailable": care["unavailable"],
+            },
+        }
+    finally:
+        connection.close()
+
+
 def validate_cache_file(path: Path) -> dict[str, int]:
     resolved = path.resolve(strict=True)
     if not resolved.is_file() or resolved.suffix.casefold() != ".sqlite":
@@ -570,13 +617,14 @@ def query_inventory(
     base_id: str | None,
     sort: str,
     guild_id: str | None = None,
+    metadata: str = "all",
 ) -> tuple[list[dict[str, object]], int, list[str]]:
     """Aggregate immutable item slots before they leave the server."""
 
     if scope not in {"inventory", "all", "player", "base", "world"} or sort not in {
         "name",
         "quantity",
-    }:
+    } or metadata not in {"all", "unknown"}:
         raise ValueError("Unknown inventory query.")
     clauses, parameters = _inventory_filters(
         search=search,
@@ -585,6 +633,7 @@ def query_inventory(
         owner_id=owner_id,
         base_id=base_id,
         guild_id=guild_id,
+        metadata=metadata,
     )
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     order = {
@@ -619,6 +668,7 @@ def query_inventory(
             owner_id=owner_id,
             base_id=base_id,
             guild_id=guild_id,
+            metadata=metadata,
         )
         category_where = (
             f" WHERE {' AND '.join([*category_clauses, 'ii.item_category IS NOT NULL'])}"
@@ -754,6 +804,7 @@ def _inventory_filters(
     owner_id: str | None,
     base_id: str | None,
     guild_id: str | None,
+    metadata: str = "all",
 ) -> tuple[list[str], list[object]]:
     clauses: list[str] = []
     parameters: list[object] = []
@@ -776,6 +827,8 @@ def _inventory_filters(
     if guild_id:
         clauses.append("ii.guild_id = ?")
         parameters.append(guild_id)
+    if metadata == "unknown":
+        clauses.append("ii.metadata_known = 0")
     if category:
         clauses.append("ii.item_category = ?")
         parameters.append(category)
@@ -936,6 +989,7 @@ def query_pal_roster(
     work_suitabilities: Sequence[str] = (),
     min_work_level: int = 1,
     passive_skills: Sequence[str] = (),
+    location: str = "all",
 ) -> tuple[list[dict[str, object]], int]:
     """Query the immutable cache in a stable roster order without loading all Pals."""
 
@@ -943,6 +997,7 @@ def query_pal_roster(
         marker not in {"all", "lucky", "boss"}
         or sort not in {"balanced", "name", "level", "rarity", "averageIv", "workSuitability"}
         or care not in {"all", "attention"}
+        or location not in {"all", "player", "base", "unassigned"}
         or any(name not in _WORK_SUITABILITY_TYPES for name in work_suitabilities)
         or any(not name.strip() for name in passive_skills)
     ):
@@ -959,6 +1014,15 @@ def query_pal_roster(
     if care == "attention":
         clauses.append(
             "(p.current_hp = 0 OR p.disease IS NOT NULL OR p.hunger < 20 OR p.sanity < 50)"
+        )
+    if location == "player":
+        clauses.append("p.owner_player_id IS NOT NULL AND p.owner_player_id <> ''")
+    elif location == "base":
+        clauses.append("p.base_id IS NOT NULL AND p.base_id <> ''")
+    elif location == "unassigned":
+        clauses.append(
+            "(p.owner_player_id IS NULL OR p.owner_player_id = '') "
+            "AND (p.base_id IS NULL OR p.base_id = '')"
         )
     for value, column in (
         (min_level, "p.level"),

@@ -9,11 +9,14 @@ test("世界数据筛选与排序交给完整数据查询处理", () => {
   expect(source).toContain('query.set("status", statusFilter)');
   expect(source).toContain('query.set("sort", sortKey)');
   expect(source).not.toContain("matchesRelationFilter");
-  expect(source).toContain("setResource(next);\n    setResult(null);");
+  expect(source).toContain("entityStateCache.current[next]");
+  expect(source).toContain("scrollPositions.current[workspace]");
   expect(source).toContain('label: "总览"');
   expect(source).toContain('label: "帕鲁名册"');
   expect(source).toContain('label: "仓库"');
   expect(source).toContain("InventoryWorkspace");
+  expect(source).toContain("WorldOverviewLobby");
+  expect(source).toContain('metadata: "unknown"');
   expect(source).not.toContain('workspace="inventories"');
 });
 

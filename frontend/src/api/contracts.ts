@@ -118,8 +118,19 @@ export type WorldSnapshotSummary = WorldSnapshotContext & {
     inventory_items: number;
     work_pals: number;
   };
+  overview?: WorldOverview | null;
 };
 export type WorldStatus = WorldSnapshotSummary;
+export type WorldOverview = {
+  assets: {
+    players: number; pals: number; palSpecies: number; itemTypes: number;
+    itemQuantity: number; bases: number; guilds: number;
+  };
+  actions: {
+    attentionPals: number; luckyPals: number; bossPals: number; unassignedPals: number;
+    unknownItems: number; unknownPalMetadata: number; careUnavailable: number;
+  };
+};
 export type WorldReparseResponse = { message: string; reparseGeneration: number };
 
 export type WorldPlayerListItem = {

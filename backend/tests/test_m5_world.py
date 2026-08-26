@@ -34,6 +34,7 @@ from palserver_console.world.cache import (
     query_pal_care_summary,
     query_pal_passive_skill_options,
     query_pal_roster,
+    query_world_overview,
     read_cache_metadata,
     validate_cache_file,
 )
@@ -596,6 +597,20 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
     assert unknown_items[0]["rarity"] == "稀有"
     assert unknown_items[0]["metadataKnown"] is False
     assert unknown_items[0]["metadataLabel"] == "资料未收录"
+    metadata_unknown, metadata_unknown_total, _ = query_inventory(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        category=None,
+        scope="all",
+        owner_id=None,
+        base_id=None,
+        sort="name",
+        metadata="unknown",
+    )
+    assert metadata_unknown_total == 1
+    assert [item["itemId"] for item in metadata_unknown] == ["FutureOre"]
     empty_items, empty_total, empty_categories = query_inventory(
         cache,
         page=1,
@@ -610,6 +625,38 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
     assert empty_items == []
     assert empty_total == 0
     assert empty_categories == []
+
+
+def test_world_overview_aggregates_assets_and_actionable_counts(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    with sqlite3.connect(cache) as connection:
+        connection.execute("UPDATE pals SET is_lucky = 0, is_boss = 0")
+        connection.execute(
+            "UPDATE pals SET is_lucky = 1, is_boss = 1, metadata_known = 0, "
+            "owner_player_id = NULL, base_id = NULL WHERE id = (SELECT id FROM pals LIMIT 1)"
+        )
+        connection.execute("UPDATE inventory_items SET metadata_known = 0")
+
+    overview = query_world_overview(cache)
+    assets = cast(dict[str, int], overview["assets"])
+    actions = cast(dict[str, int], overview["actions"])
+
+    assert assets == {
+        "players": 1,
+        "pals": 2,
+        "palSpecies": 2,
+        "itemTypes": 1,
+        "itemQuantity": 3,
+        "bases": 2,
+        "guilds": 0,
+    }
+    assert actions["luckyPals"] == 1
+    assert actions["bossPals"] == 1
+    assert actions["unassignedPals"] >= 1
+    assert actions["unknownItems"] == 1
+    assert actions["unknownPalMetadata"] >= 1
 
 
 def test_inventory_world_locations_scopes_and_group_summaries(
@@ -1015,7 +1062,7 @@ def test_base_and_guild_asset_details_use_only_stable_relations(tmp_path: Path) 
         str(uuid.UUID(int=401)), str(uuid.UUID(int=402))
     }
     assert guild_item_types == 2
-    assert sum(int(item["totalQuantity"]) for item in guild_items) == 15
+    assert sum(cast(int, item["totalQuantity"]) for item in guild_items) == 15
     assert empty_guild is not None
     assert empty_guild["assetSummary"] == {
         "memberCount": 0,
@@ -1177,6 +1224,17 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
     assert unknown[0]["id"] == "pal-01599"
     assert unknown[0]["locationType"] == "unassigned"
     assert cast(dict[str, Any], unknown[0]["aptitude"])["metadataLabel"] == "资料未收录"
+    unassigned, unassigned_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search=None,
+        marker="all",
+        sort="balanced",
+        location="unassigned",
+    )
+    assert unassigned_total == 1_600
+    assert all(item["locationType"] == "unassigned" for item in unassigned)
 
     with sqlite3.connect(cache) as connection:
         connection.executemany(

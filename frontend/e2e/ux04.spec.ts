@@ -65,6 +65,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       reparseGeneration: incompatible ? 0 : reparseRequests,
       dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
       counts: { players: 1, pals: 3, guilds: 1, bases: 1, inventory_items: 1, work_pals: 1 },
+      overview: { assets: { players: 1, pals: 3, palSpecies: 2, itemTypes: 2, itemQuantity: 26, bases: 1, guilds: 1 }, actions: { attentionPals: 1, luckyPals: 1, bossPals: 0, unassignedPals: 2, unknownItems: 1, unknownPalMetadata: 1, careUnavailable: 2 } },
     } });
     }
     if (path === "/api/world/reparse") {
@@ -81,7 +82,8 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const careFilter = new URL(route.request().url()).searchParams.get("care");
       const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }];
       const sorted = sort === "name" ? [rosterPals[2], rosterPals[0], rosterPals[1]] : rosterPals;
-      const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : sorted;
+      const location = new URL(route.request().url()).searchParams.get("location");
+      const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : location === "unassigned" ? rosterPals.slice(1) : sorted;
       return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, passiveSkills: palSkills.passive, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     if (path === "/api/world/inventories") {
@@ -90,7 +92,9 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const scope = requestUrl.searchParams.get("scope") || "all";
       const wood = (totalQuantity: number, locationCount: number) => ({ itemId: "Wood", name: "木材", category: "材料", rarity: "普通", metadataKnown: true, metadataLabel: null, totalQuantity, locationCount });
       const unknown = { itemId: "FutureOre", name: null, category: null, rarity: null, metadataKnown: false, metadataLabel: "资料未收录", totalQuantity: 4, locationCount: 1 };
-      const items = scope === "player" ? [wood(3, 1)] : scope === "base" ? [wood(9, 2), unknown] : scope === "world" ? [wood(6, 3)] : scope === "inventory" ? [wood(12, 3), unknown] : [wood(22, 7), unknown];
+      const metadata = requestUrl.searchParams.get("metadata");
+      const scopedItems = scope === "player" ? [wood(3, 1)] : scope === "base" ? [wood(9, 2), unknown] : scope === "world" ? [wood(6, 3)] : scope === "inventory" ? [wood(12, 3), unknown] : [wood(22, 7), unknown];
+      const items = metadata === "unknown" ? scopedItems.filter((item) => !item.metadataKnown) : scopedItems;
       return route.fulfill({ json: { items, categories: ["材料"], page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     if (path === "/api/world/inventories/Wood") {
@@ -135,7 +139,17 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(tabs).toContainText("仓库");
   await expect(tabs).toContainText("公会");
   await expect(tabs).toContainText("据点");
-  await expect(page.getByRole("heading", { name: "总览聚合将在后续 ticket 交付" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
+  await expect(page.locator(".world-overview-assets")).toContainText("2 个物种");
+  await expect(page.locator(".world-overview-assets")).toContainText("26 件物品");
+  await page.waitForTimeout(500);
+  await page.screenshot({ path: `../.impeccable/review/${testInfo.project.name}.png`, fullPage: true });
+  await page.locator(".world-overview-actions").getByRole("button", { name: /未知物品/ }).click();
+  await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("metadata") === "unknown" && url.searchParams.get("scope") === "all")).toBeTruthy();
+  await expect(page.locator(".inventory-context")).toContainText("资料未收录的物品");
+  await page.getByRole("button", { name: "返回全部仓库" }).click();
+  await page.getByRole("button", { name: /返回总览/ }).click();
+  await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
   await expect(page.locator(".world-snapshot-bar")).toContainText("存档记录");
   await expect(page.locator(".world-snapshot-bar")).toContainText("解析完成");
   await expect(page.locator(".world-snapshot-bar")).toContainText("不会修改真实 .sav");
@@ -300,7 +314,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer).toContainText("据点库存");
   if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
   await page.getByLabel("状态筛选").selectOption("guilded");
-  await page.getByLabel("排序方式").selectOption("id");
+  await page.getByLabel("排序方式", { exact: true }).selectOption("id");
   await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("status") === "guilded" && url.searchParams.get("sort") === "id" && url.searchParams.get("snapshotId") === "world")).toBeTruthy();
   await expect(page.getByRole("button", { name: "清除筛选条件" })).toBeVisible();
   await page.getByRole("button", { name: "重新解析" }).click();

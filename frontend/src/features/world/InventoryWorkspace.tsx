@@ -11,6 +11,7 @@ export type InventoryContext = {
   baseId?: string;
   guildId?: string;
   label?: string;
+  metadata?: "unknown";
 };
 
 type InventorySort = "name" | "quantity";
@@ -57,6 +58,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
         if (context.ownerId) query.set("ownerId", context.ownerId);
         if (context.baseId) query.set("baseId", context.baseId);
         if (context.guildId) query.set("guildId", context.guildId);
+        if (context.metadata) query.set("metadata", context.metadata);
         try {
           const next = await requestJson<WorldInventoryResponse>(`/api/world/inventories?${query}`, { signal });
           if (next.snapshotId !== currentSnapshotId) {

@@ -31,6 +31,7 @@ from .cache import (
     query_pal_passive_skill_options,
     query_pal_roster,
     query_world_metadata_status,
+    query_world_overview,
     read_cache_metadata,
     validate_cache_file,
 )
@@ -327,6 +328,7 @@ class WorldSnapshotService:
         collected_at: int | None = None
         parsed_at: int | None = None
         game_time_ticks: int | None = None
+        overview: dict[str, object] | None = None
         if current:
             try:
                 persisted = json.loads(str(current["parse_result"]))
@@ -347,6 +349,7 @@ class WorldSnapshotService:
                 if raw_game_time_ticks is not None:
                     game_time_ticks = max(0, int(raw_game_time_ticks))
                 counts = validate_cache_file(cache_path)
+                overview = query_world_overview(cache_path)
                 cache_available = True
             except WorldDataError as cache_error:
                 error = (cache_error.code, str(cache_error))
@@ -412,6 +415,7 @@ class WorldSnapshotService:
             "cacheSizeBytes": cache_size,
             "gameTimeTicks": game_time_ticks,
             "counts": counts,
+            "overview": overview,
         }
 
     def list_resource(
@@ -476,6 +480,7 @@ class WorldSnapshotService:
         work_suitabilities: tuple[str, ...] = (),
         min_work_level: int = 1,
         passive_skills: tuple[str, ...] = (),
+        location: str = "all",
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -497,6 +502,7 @@ class WorldSnapshotService:
             work_suitabilities=work_suitabilities,
             min_work_level=min_work_level,
             passive_skills=passive_skills,
+            location=location,
         )
         state = self._status_for_snapshot(current)
         return {
@@ -531,6 +537,7 @@ class WorldSnapshotService:
         base_id: str | None,
         sort: str,
         guild_id: str | None = None,
+        metadata: str = "all",
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
@@ -544,6 +551,7 @@ class WorldSnapshotService:
             owner_id=owner_id,
             base_id=base_id,
             guild_id=guild_id,
+            metadata=metadata,
             sort=sort,
         )
         state = self._status_for_snapshot(current)
