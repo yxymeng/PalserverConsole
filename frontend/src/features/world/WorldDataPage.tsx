@@ -79,6 +79,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const entityStateCache = useRef<Partial<Record<PrimaryWorldResource, EntityBrowserSnapshot>>>({});
   const scrollPositions = useRef<Partial<Record<WorkspaceKey, number>>>({});
   const previousSnapshotId = useRef<string | null | undefined>(undefined);
+  const detailReturnFocusRef = useRef<HTMLElement | null>(null);
   const snapshotId = status?.snapshotId;
 
   const refreshSnapshot = useCallback(async () => {
@@ -251,7 +252,8 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     }
   }
 
-  const openDetail = useCallback(async (nextResource: PrimaryWorldResource, id: string, preserveCurrent = false) => {
+  const openDetail = useCallback(async (nextResource: PrimaryWorldResource, id: string, preserveCurrent = false, trigger?: HTMLElement) => {
+    if (!selected) detailReturnFocusRef.current = trigger || (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     setDetailLoading(true);
     setError("");
     try {
@@ -274,6 +276,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     const previous = detailHistory.at(-1) || null;
     setDetailHistory((current) => current.slice(0, -1));
     setSelected(previous);
+    if (!previous) window.requestAnimationFrame(() => detailReturnFocusRef.current?.focus());
   }
 
   const displayedItems = result?.items || [];
@@ -283,6 +286,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
 
   return <div className="page-stack world-page">
     <WorldSnapshotBar status={status} message={message} reparseError={reparseError} reparsing={reparsing} onReparse={() => void reparse()} />
+    {error && <WorldRequestFailure error={error} onRetry={() => void load()} />}
     <div className="world-tabs world-workspace-tabs" role="tablist" aria-label="世界资产工作区">
       {WORKSPACES.map(({ key, label, icon: Icon, countKey }) => <button key={key} className={workspace === key ? "active" : ""} type="button" role="tab" id={`world-workspace-tab-${key}`} aria-selected={workspace === key} aria-controls={`world-workspace-${key}`} onClick={() => chooseWorkspace(key)}><Icon size={17} /><span>{label}</span>{countKey && <strong>{status?.counts[countKey] ?? "-"}</strong>}</button>)}
     </div>
@@ -301,7 +305,6 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
           {hasFilters && <button className="world-clear-button" type="button" aria-label="清除筛选条件" onClick={clearFilters}><X size={15} />清除</button>}
           <span className="world-result-count">当前 {displayedItems.length} 条</span>
         </form>
-        {error && <p className="form-error" role="alert">{error}</p>}
         {message && <p className="form-success" role="status">{message}</p>}
         <section className={`world-table world-table-${resource} ${showListLoading ? "is-loading" : ""}`} aria-live="polite" aria-busy={listLoading}>
           <div className="world-table-head" style={{ "--world-columns": columns.length } as CSSProperties}>{columns.map((column) => <span key={column.key}>{column.label}</span>)}</div>
@@ -310,9 +313,9 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
             return <div className="world-table-row" data-selected={isSelected || undefined} style={{ "--world-columns": columns.length } as CSSProperties} key={String(item.id || `${resource}-${index}`)}>{columns.map((column, columnIndex) => {
             const cell = worldCell(item, column.key);
             const palGender = resource === "pals" && column.key === "displayName" ? genderLabel(item) : null;
-            return <span key={column.key} data-key={column.key} data-label={column.label} title={cell}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} aria-current={isSelected ? "true" : undefined} onClick={() => void openDetail(resource, String(item.id))}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && <PalGenderIcon item={item} />}</button> : cell}</span>;
+            return <span key={column.key} data-key={column.key} data-label={column.label} title={cell}>{columnIndex === 0 && item.id ? <button className="world-link world-entity-link" type="button" aria-label={`${cell}${palGender ? `，${palGender}` : ""}`} aria-current={isSelected ? "true" : undefined} onClick={(event) => void openDetail(resource, String(item.id), false, event.currentTarget)}><EntityMarker resource={resource} item={item} /><span className="world-entity-label">{cell}</span>{resource === "pals" && <PalGenderIcon item={item} />}</button> : cell}</span>;
           })}</div>;
-          }) : <div className="world-empty-state"><Database size={22} /><strong>{result ? hasFilters ? "没有符合条件的数据" : `暂无${RESOURCE_LABELS[resource]}数据` : "正在读取世界数据"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : "解析成功后，实体会显示在这里。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
+          }) : <div className="world-empty-state"><Database size={22} /><strong>{result ? hasFilters ? "没有符合条件的数据" : `暂无${RESOURCE_LABELS[resource]}数据` : snapshotId ? "正在读取世界数据" : "当前没有可用世界快照"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : snapshotId ? "解析成功后，实体会显示在这里。" : "完成只读解析后可浏览此工作区；错误状态会保留在快照条中。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
         </section>
         <section className="audit-footer"><span>共 {result?.total || 0} 条，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
       </section>
@@ -390,12 +393,18 @@ function WorldTableSkeleton({ columns }: { columns: number }) {
   return <div className="world-table-skeleton" aria-hidden="true">{Array.from({ length: 5 }, (_, row) => <div className="world-table-row" style={{ "--world-columns": columns } as CSSProperties} key={row}>{Array.from({ length: columns }, (_, column) => <span className="world-skeleton-line" key={column} />)}</div>)}</div>;
 }
 
-function EntityDrawer({ detail, loading, canGoBack, onClose, onNavigate, onShowInventory }: { detail: EntityDetail | null; loading: boolean; canGoBack: boolean; onClose: () => void; onNavigate: (resource: PrimaryWorldResource, id: string) => void; onShowInventory: (context: InventoryContext) => void }) {
+function WorldRequestFailure({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return <section className="world-request-failure" role="alert"><CircleAlert size={18} aria-hidden="true" /><div><strong>世界数据请求失败</strong><p>当前页面没有写入任何存档；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={onRetry}>重新尝试</button></section>;
+}
+
+type EntityDrawerProps = { detail: EntityDetail | null; loading: boolean; canGoBack: boolean; onClose: () => void; onNavigate: (resource: PrimaryWorldResource, id: string) => void; onShowInventory: (context: InventoryContext) => void; drawerRef?: { current: HTMLElement | null }; closeButtonRef?: { current: HTMLButtonElement | null }; modal?: boolean };
+
+function EntityDrawer({ detail, loading, canGoBack, onClose, onNavigate, onShowInventory, drawerRef, closeButtonRef, modal = false }: EntityDrawerProps) {
   if (!detail) return <aside className="world-entity-drawer empty" aria-label="世界实体详情"><Database size={24} /><h2>{loading ? "正在读取详情..." : "选择一个实体"}</h2><p>从左侧列表选择玩家、帕鲁、公会或据点，查看属性和可用关联。</p></aside>;
 
   const { data, resource } = detail;
-  return <aside className="world-entity-drawer" role="dialog" aria-modal="false" aria-label="世界实体详情">
-    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : <span className="world-detail-id"><small>{resource === "bases" ? "Base ID" : resource === "guilds" ? "Guild ID" : "Pal ID"}</small>{valueOf(data, "id")}</span>}</p></div></div><button className="icon-button bordered" type="button" title={canGoBack ? "返回上一详情" : "关闭详情"} aria-label={canGoBack ? "返回上一详情" : "关闭详情"} onClick={onClose}>{canGoBack ? <ArrowLeft size={18} /> : <X size={18} />}</button></header>
+  return <aside ref={drawerRef} className="world-entity-drawer" role="dialog" aria-modal={modal} aria-label="世界实体详情">
+    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{resource === "pals" && <PalGenderIcon item={data} />}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : <span className="world-detail-id"><small>{resource === "bases" ? "Base ID" : resource === "guilds" ? "Guild ID" : "Pal ID"}</small>{valueOf(data, "id")}</span>}</p></div></div><button ref={closeButtonRef} className="icon-button bordered" type="button" title={canGoBack ? "返回上一详情" : "关闭详情"} aria-label={canGoBack ? "返回上一详情" : "关闭详情"} onClick={onClose}>{canGoBack ? <ArrowLeft size={18} /> : <X size={18} />}</button></header>
     <div className="world-detail-properties">
       {resource === "players" && <PlayerDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
       {resource === "pals" && <PalDetail data={data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
@@ -454,9 +463,44 @@ function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps) {
   </>;
 }
 
-function EntityDetailLayer(props: Parameters<typeof EntityDrawer>[0]) {
+function EntityDetailLayer(props: EntityDrawerProps) {
   const isMobile = useIsMobile();
-  const content = <>{props.detail && <button className="world-drawer-backdrop" type="button" aria-label="关闭详情遮罩" onClick={props.onClose} />}<EntityDrawer {...props} /></>;
+  const drawerRef = useRef<HTMLElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const onCloseRef = useRef(props.onClose);
+  useEffect(() => { onCloseRef.current = props.onClose; }, [props.onClose]);
+  useEffect(() => {
+    if (!props.detail) return;
+    const appRoot = document.getElementById("root");
+    const focusableSelector = "button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (!isMobile || event.key !== "Tab") return;
+      const focusable = Array.from(drawerRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || []);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    if (isMobile && appRoot) appRoot.inert = true;
+    window.addEventListener("keydown", onKeyDown);
+    if (isMobile) window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    return () => {
+      if (isMobile && appRoot) appRoot.inert = false;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [isMobile, props.detail]);
+  const content = <>{props.detail && <button className="world-drawer-backdrop" type="button" tabIndex={-1} aria-label="关闭详情遮罩" onClick={props.onClose} />}<EntityDrawer {...props} drawerRef={drawerRef} closeButtonRef={closeButtonRef} modal={isMobile} /></>;
   return isMobile && props.detail ? createPortal(content, document.body) : content;
 }
 

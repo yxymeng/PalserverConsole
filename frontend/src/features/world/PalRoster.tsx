@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 
 import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldPalSkill, WorldPalSkills, WorldRow } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
+import { useIsMobile } from "../../hooks/use-mobile";
 import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { mergePalRosterPage } from "./palRosterState";
 import { activityLabel, careReasonLabels, careSummaryLabel, diseaseLabel, physicalHealthLabel } from "./palCare";
@@ -18,6 +19,7 @@ type AptitudeFilters = {
   minHpIv: string; minAttackIv: string; minDefenseIv: string; minAverageIv: string;
   workSuitabilities: string[]; passiveSkills: string[]; minWorkLevel: string;
 };
+type UpdateAptitude = <K extends keyof AptitudeFilters>(key: K, value: AptitudeFilters[K]) => void;
 
 const PAGE_SIZE = 60;
 const EMPTY_APTITUDE_FILTERS: AptitudeFilters = { minLevel: "", minRank: "", minRarity: "", minHpIv: "", minAttackIv: "", minDefenseIv: "", minAverageIv: "", workSuitabilities: [], passiveSkills: [], minWorkLevel: "1" };
@@ -57,10 +59,13 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const [mobileAptitudeFiltersOpen, setMobileAptitudeFiltersOpen] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
   const returnFocusRef = useRef<HTMLButtonElement | null>(null);
   const aptitudeFiltersRef = useRef<HTMLDetailsElement | null>(null);
+  const mobileAptitudeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const isMobile = useIsMobile();
 
   const loadPage = useCallback(async (page: number, append: boolean, requestedSnapshotId = snapshotId, retried = false) => {
     requestRef.current?.abort();
@@ -168,16 +173,22 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
 
   function submitSearch(event: FormEvent) {
     event.preventDefault();
+    applyFilters();
+  }
+
+  function applyFilters() {
     setAppliedSearch(search.trim());
     setAppliedAptitude({
       ...draftAptitude,
       workSuitabilities: [...draftAptitude.workSuitabilities],
       passiveSkills: [...draftAptitude.passiveSkills],
     });
-    if (window.matchMedia("(max-width: 760px)").matches && aptitudeFiltersRef.current?.open) {
-      aptitudeFiltersRef.current.open = false;
-      aptitudeFiltersRef.current.querySelector("summary")?.focus();
-    }
+    if (mobileAptitudeFiltersOpen) closeMobileAptitudeFilters();
+  }
+
+  function closeMobileAptitudeFilters() {
+    setMobileAptitudeFiltersOpen(false);
+    window.requestAnimationFrame(() => mobileAptitudeTriggerRef.current?.focus());
   }
 
   function clearFilters() {
@@ -231,18 +242,10 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
       </div>
       <label className="world-control"><span>排序</span><select aria-label="帕鲁名册排序" value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="balanced">均衡</option><option value="name">名称</option><option value="level">等级</option><option value="rarity">物种稀有度</option><option value="averageIv">平均个体值</option><option value="workSuitability">工作适应性</option></select></label>
       {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除已应用筛选</button>}
-      <details ref={aptitudeFiltersRef} className="pal-aptitude-filters">
+      {isMobile ? <button ref={mobileAptitudeTriggerRef} className="pal-aptitude-trigger" type="button" onClick={() => setMobileAptitudeFiltersOpen(true)}><span>资质、工作与被动技能</span><small>多项工作和被动技能均须全部具备</small><ChevronDown size={16} aria-hidden="true" /></button> : <details ref={aptitudeFiltersRef} className="pal-aptitude-filters">
         <summary><span>资质、工作与被动技能</span><small>多项工作和被动技能均须全部具备</small><ChevronDown size={16} aria-hidden="true" /></summary>
-        <div className="pal-aptitude-filter-grid">
-          {([
-            ["minLevel", "最低等级", 0], ["minRank", "最低星级", 0], ["minRarity", "最低物种稀有度", 0],
-            ["minHpIv", "最低生命个体值", 0], ["minAttackIv", "最低攻击个体值", 0], ["minDefenseIv", "最低防御个体值", 0], ["minAverageIv", "最低平均个体值", 0],
-          ] as const).map(([key, label, min]) => <label key={key}><span>{label}</span><input aria-label={label} type="number" min={min} max={key.includes("Iv") ? 100 : undefined} inputMode="numeric" value={draftAptitude[key]} onChange={(event) => updateAptitude(key, event.target.value)} placeholder="不限" /></label>)}
-          <fieldset className="pal-work-filter"><legend>工作适应性</legend><p>所选项目必须全部达到同一最低等级。</p><label className="pal-work-level"><span>每项至少</span><select aria-label="最低工作等级" value={draftAptitude.minWorkLevel} onChange={(event) => updateAptitude("minWorkLevel", event.target.value)}>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 级</option>)}</select></label><div>{Object.entries(workSuitabilityLabels).map(([type, label]) => <label key={type}><input type="checkbox" checked={draftAptitude.workSuitabilities.includes(type)} onChange={() => updateAptitude("workSuitabilities", draftAptitude.workSuitabilities.includes(type) ? draftAptitude.workSuitabilities.filter((name) => name !== type) : [...draftAptitude.workSuitabilities, type])} /><span>{label}</span></label>)}</div></fieldset>
-          <fieldset className="pal-passive-filter"><legend>被动技能</legend><p>所选被动技能必须全部具备。</p>{passiveSkillOptions.length ? <div>{passiveSkillOptions.map((skill) => <label key={skill.id}><input type="checkbox" checked={draftAptitude.passiveSkills.includes(skill.id)} onChange={() => updateAptitude("passiveSkills", draftAptitude.passiveSkills.includes(skill.id) ? draftAptitude.passiveSkills.filter((id) => id !== skill.id) : [...draftAptitude.passiveSkills, skill.id])} /><span>{skillDisplayName(skill)}</span>{skill.rank !== null && <small>阶级 {skill.rank}</small>}</label>)}</div> : <p className="pal-passive-empty">当前快照没有可筛选的被动技能。</p>}</fieldset>
-          <button className="primary-button pal-aptitude-apply" type="submit">应用资质筛选</button>
-        </div>
-      </details>
+        <AptitudeFilterFields filters={draftAptitude} passiveSkillOptions={passiveSkillOptions} onUpdate={updateAptitude} />
+      </details>}
     </form>
     {hasFilters && <div className="pal-applied-filters" aria-label="已应用筛选">
       <span>已应用</span>
@@ -255,14 +258,67 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
       {appliedAptitude.workSuitabilities.map((type) => <button type="button" key={type} onClick={() => removeWorkSuitability(type)}>{workSuitabilityLabels[type] || type} ≥ {appliedAptitude.minWorkLevel || "1"} 级<X size={13} /></button>)}
       {appliedAptitude.passiveSkills.map((id) => <button type="button" key={id} onClick={() => removePassiveSkill(id)}>{skillDisplayName(passiveSkillOptions.find((skill) => skill.id === id) || { id, name: null, description: null, sourceName: null, rank: null, element: null, power: null, cooldown: null, metadataKnown: false })}<X size={13} /></button>)}
     </div>}
-    {error && <p className="form-error" role="alert">名册读取失败；已保留当前结果。<code>{error}</code></p>}
+    {error && <section className="world-request-failure" role="alert"><AlertCircle size={18} aria-hidden="true" /><div><strong>帕鲁名册请求失败</strong><p>已保留当前结果；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void loadPage(1, false)}>重新尝试</button></section>}
     <div className="pal-roster-table" aria-busy={loading} aria-live="polite">
       <div className="pal-roster-head"><span>帕鲁</span><span>等级 / 星级</span><span>资质</span><span>工作适应性</span><span>被动技能</span><span>个体标记</span><span>照护状态</span><span>归属</span></div>
-      {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "没有符合条件的帕鲁" : "当前没有可用世界快照"}</strong><p>{snapshotId ? "尝试清除已应用筛选，或使用其他名称和 ID 搜索。" : "完成只读解析后可浏览名册。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除已应用筛选</button>}</div>}
+      {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "没有符合条件的帕鲁" : "当前没有可用世界快照"}</strong><p>{snapshotId ? "尝试清除已应用筛选，或使用其他名称和 ID 搜索。" : "完成只读解析后可浏览名册；错误状态会保留在快照条中。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除已应用筛选</button>}</div>}
     </div>
     {canLoadMore && <button className="quiet-button pal-roster-more" type="button" disabled={loadingMore} onClick={() => void loadPage(Math.floor(items.length / PAGE_SIZE) + 1, true)}>{loadingMore ? <><LoaderCircle className="spin" size={17} />正在加载</> : `加载更多（还有 ${total - items.length} 条）`}</button>}
     <PalRosterDrawer state={drawer} onClose={closeDrawer} onNavigate={(target, id) => { closeDrawer(); onNavigate?.(target, id); }} />
+    {isMobile && <MobileAptitudeFilters open={mobileAptitudeFiltersOpen} filters={draftAptitude} passiveSkillOptions={passiveSkillOptions} onUpdate={updateAptitude} onApply={applyFilters} onClose={closeMobileAptitudeFilters} />}
   </section>;
+}
+
+function AptitudeFilterFields({ filters, passiveSkillOptions, onUpdate }: { filters: AptitudeFilters; passiveSkillOptions: WorldPalSkill[]; onUpdate: UpdateAptitude }) {
+  return <div className="pal-aptitude-filter-grid">
+    {([
+      ["minLevel", "最低等级", 0], ["minRank", "最低星级", 0], ["minRarity", "最低物种稀有度", 0],
+      ["minHpIv", "最低生命个体值", 0], ["minAttackIv", "最低攻击个体值", 0], ["minDefenseIv", "最低防御个体值", 0], ["minAverageIv", "最低平均个体值", 0],
+    ] as const).map(([key, label, min]) => <label key={key}><span>{label}</span><input aria-label={label} type="number" min={min} max={key.includes("Iv") ? 100 : undefined} inputMode="numeric" value={filters[key]} onChange={(event) => onUpdate(key, event.target.value)} placeholder="不限" /></label>)}
+    <fieldset className="pal-work-filter"><legend>工作适应性</legend><p>所选项目必须全部达到同一最低等级。</p><label className="pal-work-level"><span>每项至少</span><select aria-label="最低工作等级" value={filters.minWorkLevel} onChange={(event) => onUpdate("minWorkLevel", event.target.value)}>{Array.from({ length: 10 }, (_, index) => <option key={index + 1} value={index + 1}>{index + 1} 级</option>)}</select></label><div>{Object.entries(workSuitabilityLabels).map(([type, label]) => <label key={type}><input type="checkbox" checked={filters.workSuitabilities.includes(type)} onChange={() => onUpdate("workSuitabilities", filters.workSuitabilities.includes(type) ? filters.workSuitabilities.filter((name) => name !== type) : [...filters.workSuitabilities, type])} /><span>{label}</span></label>)}</div></fieldset>
+    <fieldset className="pal-passive-filter"><legend>被动技能</legend><p>所选被动技能必须全部具备。</p>{passiveSkillOptions.length ? <div>{passiveSkillOptions.map((skill) => <label key={skill.id}><input type="checkbox" checked={filters.passiveSkills.includes(skill.id)} onChange={() => onUpdate("passiveSkills", filters.passiveSkills.includes(skill.id) ? filters.passiveSkills.filter((id) => id !== skill.id) : [...filters.passiveSkills, skill.id])} /><span>{skillDisplayName(skill)}</span>{skill.rank !== null && <small>阶级 {skill.rank}</small>}</label>)}</div> : <p className="pal-passive-empty">当前快照没有可筛选的被动技能。</p>}</fieldset>
+    <button className="primary-button pal-aptitude-apply" type="submit">应用资质筛选</button>
+  </div>;
+}
+
+function MobileAptitudeFilters({ open, filters, passiveSkillOptions, onUpdate, onApply, onClose }: { open: boolean; filters: AptitudeFilters; passiveSkillOptions: WorldPalSkill[]; onUpdate: UpdateAptitude; onApply: () => void; onClose: () => void }) {
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const appRoot = document.getElementById("root");
+    const focusableSelector = "button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || []);
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    if (appRoot) appRoot.inert = true;
+    window.addEventListener("keydown", onKeyDown);
+    window.requestAnimationFrame(() => closeRef.current?.focus());
+    return () => {
+      if (appRoot) appRoot.inert = false;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+  if (!open) return null;
+  return createPortal(<><button className="pal-aptitude-backdrop" type="button" tabIndex={-1} aria-label="关闭高级筛选遮罩" onClick={onClose} /><aside ref={dialogRef} className="pal-aptitude-filters pal-aptitude-filter-layer" role="dialog" aria-modal="true" aria-label="资质、工作与被动技能"><header><div><h3>资质、工作与被动技能</h3><p>多项工作和被动技能均须全部具备。</p></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭高级筛选" onClick={onClose}><X size={18} /></button></header><form onSubmit={(event) => { event.preventDefault(); onApply(); }}><AptitudeFilterFields filters={filters} passiveSkillOptions={passiveSkillOptions} onUpdate={onUpdate} /></form></aside></>, document.body);
 }
 
 function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (item: WorldPalRosterItem, trigger: HTMLButtonElement) => void }) {

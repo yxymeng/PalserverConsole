@@ -41,10 +41,26 @@ describe("世界资产台快照条", () => {
     });
   });
 
+  it("失败且没有缓存时仍保留英文错误标识", () => {
+    expect(presentWorldSnapshot(status({ snapshotId: null, parseStatus: "failed", errorCode: "WORLD_PARSE_FAILED" }))).toMatchObject({
+      label: "存档快照不可用",
+      tone: "danger",
+      errorIdentifier: "WORLD_PARSE_FAILED",
+    });
+  });
+
   it("解析中不会把旧缓存误报为实时数据", () => {
     expect(presentWorldSnapshot(status({ parsing: true, stale: true }))).toMatchObject({
       label: "正在解析新存档快照",
       tone: "loading",
+    });
+  });
+
+  it("当前成功快照明确是只读快照，而不是实时状态", () => {
+    expect(presentWorldSnapshot(status())).toMatchObject({
+      label: "存档快照可用",
+      tone: "ready",
+      impact: "数据不是服务器实时状态。",
     });
   });
 });

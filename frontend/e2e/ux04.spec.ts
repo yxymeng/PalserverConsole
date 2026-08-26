@@ -206,7 +206,11 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.getByRole("button", { name: "Alice" }).click();
   const drawer = page.getByLabel("世界实体详情");
   await expect(page.locator('.world-table-row[data-selected="true"]')).toContainText("Alice");
-  if (testInfo.project.name === "mobile") await expect(drawer).toHaveAttribute("role", "dialog");
+  if (testInfo.project.name === "mobile") {
+    await expect(drawer).toHaveAttribute("role", "dialog");
+    await expect(drawer).toHaveAttribute("aria-modal", "true");
+    await expect(drawer.getByRole("button", { name: "关闭详情" })).toBeFocused();
+  }
   await expect(drawer).toContainText("已发现帕鲁种类");
   await expect(drawer).toContainText("累计捕获帕鲁数量");
   await expect(drawer).toContainText("已完成野外头目项目");
@@ -242,7 +246,12 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(palRow).not.toContainText("base-1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
   await page.getByText("资质、工作与被动技能", { exact: true }).click();
-  if (testInfo.project.name === "mobile") await expect(page.locator(".pal-aptitude-filters[open]")).toHaveCSS("position", "fixed");
+  if (testInfo.project.name === "mobile") {
+    const aptitudeDialog = page.getByRole("dialog", { name: "资质、工作与被动技能" });
+    await expect(aptitudeDialog).toHaveAttribute("aria-modal", "true");
+    await expect(aptitudeDialog).toHaveCSS("position", "fixed");
+    await expect(aptitudeDialog.getByRole("button", { name: "关闭高级筛选" })).toBeFocused();
+  }
   await page.getByLabel("最低物种稀有度").fill("1");
   await page.getByLabel("最低工作等级").selectOption("1");
   await page.getByLabel("手工作业", { exact: true }).check();
@@ -250,6 +259,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.getByRole("checkbox", { name: /传说/ }).check();
   await page.getByRole("button", { name: "应用资质筛选" }).click();
   await expect.poll(() => rosterUrls.some((url) => url.searchParams.get("minRarity") === "1" && url.searchParams.get("workSuitability") === "Handcraft,Transport" && url.searchParams.get("minWorkLevel") === "1" && url.searchParams.get("passiveSkill") === "Legend")).toBeTruthy();
+  if (testInfo.project.name === "mobile") await expect(page.getByRole("button", { name: /资质、工作与被动技能/ })).toBeFocused();
   await expect(page.getByLabel("已应用筛选")).toContainText("手工作业 ≥ 1 级");
   await expect(page.getByLabel("已应用筛选")).toContainText("搬运 ≥ 1 级");
   await expect(page.getByLabel("已应用筛选")).toContainText("传说");
@@ -312,7 +322,9 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(drawer).toContainText("与帕鲁名册“需要关注”使用同一存档快照规则");
   await expect(drawer).toContainText("工作帕鲁");
   await expect(drawer).toContainText("据点库存");
-  if (testInfo.project.name === "mobile") await drawer.getByRole("button", { name: "关闭详情" }).click();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".world-entity-drawer:not(.empty)")).toBeHidden();
+  await expect(page.getByRole("button", { name: "据点一号" })).toBeFocused();
   await page.getByLabel("状态筛选").selectOption("guilded");
   await page.getByLabel("排序方式", { exact: true }).selectOption("id");
   await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("status") === "guilded" && url.searchParams.get("sort") === "id" && url.searchParams.get("snapshotId") === "world")).toBeTruthy();

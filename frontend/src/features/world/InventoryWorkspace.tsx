@@ -185,7 +185,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
       <label className="world-control"><span>排序</span><select aria-label="仓库排序方式" value={sort} onChange={(event) => { setSort(event.target.value as InventorySort); setPage(1); }}><option value="name">名称</option><option value="quantity">总量（高到低）</option></select></label>
       {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除筛选</button>}
     </form>
-    {error && <p className="form-error" role="alert">{error}</p>}
+    {error && <section className="world-request-failure" role="alert"><Archive size={18} aria-hidden="true" /><div><strong>仓库请求失败</strong><p>当前页面没有写入任何存档；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void load()}>重新尝试</button></section>}
     <div className="inventory-results" aria-live="polite" aria-busy={loading}>
       {loading ? <div className="inventory-loading"><LoaderCircle className="spin" size={20} />正在聚合仓库…</div> : result?.items.length ? result.items.map((item) => <article className="inventory-item" key={item.itemId} data-expanded={expanded?.itemId === item.itemId || undefined}>
         <button className="inventory-item-summary" type="button" aria-expanded={expanded?.itemId === item.itemId} onClick={() => toggleItem(item)}>
@@ -197,7 +197,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
         </button>
         {expanded?.itemId === item.itemId && <section className="inventory-locations" aria-label={`${item.name || item.itemId}的存放分布`}>
           <h3>存放分布 <small>{item.locationCount} 条记录</small></h3>
-          {locationError && <p className="form-error" role="alert">{locationError}</p>}
+          {locationError && <section className="world-request-failure compact" role="alert"><Archive size={17} aria-hidden="true" /><div><strong>存放分布读取失败</strong><p>已保留仓库汇总；请重试读取此物品的位置。</p><code>{locationError}</code></div><button className="quiet-button" type="button" onClick={() => void loadLocations(item, expandedGroup)}>重新读取位置</button></section>}
           {locationLoading && !locations ? <p className="inventory-location-loading"><LoaderCircle className="spin" size={16} />正在汇总存放分布…</p> : locations?.groups.map((group) => {
             const groupExpanded = expandedGroup?.locationType === group.locationType && expandedGroup.groupId === group.groupId;
             const countLabel = group.locationType === "world" ? `${group.containerCount}处` : group.locationType === "unassigned" ? `${group.locationCount}条` : null;
@@ -215,7 +215,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
             </div>;
           })}
         </section>}
-      </article>) : <div className="world-empty-state"><Archive size={22} /><strong>{result ? hasFilters ? "没有符合条件的物品" : "当前存档快照没有库存" : "正在读取仓库"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : "解析成功后，玩家、据点和公会仓库中的物品会在这里按总量聚合。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
+      </article>) : <div className="world-empty-state"><Archive size={22} /><strong>{result ? hasFilters ? "没有符合条件的物品" : "当前存档快照没有库存" : snapshotId ? "正在读取仓库" : "当前没有可用世界快照"}</strong><p>{hasFilters ? "清除搜索或筛选条件后再试。" : snapshotId ? "解析成功后，玩家、据点和公会仓库中的物品会在这里按总量聚合。" : "完成只读解析后可浏览仓库；错误状态会保留在快照条中。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选条件</button>}</div>}
     </div>
     <footer className="audit-footer inventory-footer"><span>共 {result?.total || 0} 种物品，第 {result?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" type="button" title="上一页" disabled={page <= 1 || loading} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" type="button" title="下一页" disabled={page >= totalPages || loading} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></footer>
   </section>;
