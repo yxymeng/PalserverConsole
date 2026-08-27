@@ -139,7 +139,13 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     if (workspace !== "overview") return;
     const controller = new AbortController();
     void requestJson<LiveValue<unknown>>("/api/live/players", { signal: controller.signal })
-      .then((response) => setOnlinePlayerCount(livePlayersFrom(response.data).length))
+      .then((response) => {
+        setOnlinePlayerCount(
+          response.stale || response.errorCode
+            ? null
+            : livePlayersFrom(response.data).length,
+        );
+      })
       .catch((caught) => { if (!isAbortError(caught)) setOnlinePlayerCount(null); });
     return () => controller.abort();
   }, [workspace, snapshotId]);

@@ -74,3 +74,24 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }, test
   await expect(page.getByRole("button", { name: "状态测试玩家" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
+
+test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }, testInfo) => {
+  await routeShell(page);
+  let livePlayers = { data: [{}, {}, {}], source: "rest", observedAt: 1, stale: false, errorCode: null as string | null };
+  await page.route("**/api/live/players", (route) => route.fulfill({ json: livePlayers }));
+  await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
+
+  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("3 / 1");
+
+  livePlayers = { ...livePlayers, stale: true };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("— / 1");
+
+  livePlayers = { ...livePlayers, stale: false, errorCode: "LIVE_PLAYERS_UNAVAILABLE" };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("— / 1");
+});
