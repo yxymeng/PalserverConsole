@@ -5,7 +5,8 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24 <25",
+    "npm": ">=11.17"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,
