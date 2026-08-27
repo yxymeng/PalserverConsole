@@ -3,11 +3,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from ...application_updates import ApplicationUpdateError
 from ...dependencies import AppDependencies
 from ...lifecycle import LifecycleError
 from ...maintenance import NotificationError
 from ..contract import operation_public
 from ..schemas import (
+    ApplicationUpdateRequest,
     NotificationSettingsRequest,
     NotificationStatusResponse,
     SteamCmdUpdateRequest,
@@ -79,5 +81,42 @@ def router(deps: AppDependencies) -> APIRouter:
             peer_ip=peer_ip(request),
         )
         return operation_public(operation)
+
+    @api.get("/api/maintenance/application-update", response_model=None, tags=["maintenance"])
+    def application_update_status(
+        request: Request,
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            return deps.application_updates.check()
+        except ApplicationUpdateError as error:
+            return error_response(502, error.code, str(error))
+
+    @api.post("/api/maintenance/application-update", response_model=None, tags=["maintenance"])
+    def install_application_update(
+        request: Request, payload: ApplicationUpdateRequest
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_local_write(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            result = deps.application_updates.prepare(payload.expectedVersion)
+        except ApplicationUpdateError as error:
+            status = 409 if error.code in {
+                "PORTABLE_REQUIRED",
+                "RELEASE_CHANGED",
+                "RELEASE_ASSET_MISSING",
+            } else 502
+            return error_response(status, error.code, str(error))
+        deps.audit.record(
+            "console.application_update",
+            result="scheduled",
+            detail={"version": result["version"]},
+            peer_ip=peer_ip(request),
+        )
+        deps.application_updates.schedule_shutdown()
+        return result
 
     return api

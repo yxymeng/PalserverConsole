@@ -22,6 +22,14 @@ Windows 便携版由 64 位 CPython 3.13 构建，并在 `Program/` 内自带 Py
 
 ## 升级与回退
 
+v0.2.0 起可在“维护 → 服务器更新 → PalServerConsole 更新”中点击“检查更新”。控制台只读取
+维护者发布到固定 GitHub 仓库的 latest Release；发现精确命名的 Windows portable asset 后，
+本机管理员可点击更新。更新包下载到 `data\application-updates\`，校验结构后由外部 helper
+等待控制台退出，再调用下述同一 `upgrade-portable.ps1` 流程并重新启动当前实例。
+
+源码运行模式和 LAN 会话不能自动安装；它们仍可查看 Release 链接。v0.1.1 本身没有这一入口，
+所以首次升级到 v0.2.0 需要按下面的手工方式完成。
+
 1. 关闭 PalServerConsole，确认 `PalServerConsole.exe` 没有继续运行。
 2. 将新版本压缩包解压到另一个目录，保留旧安装目录不动。
 3. 在旧安装目录运行：

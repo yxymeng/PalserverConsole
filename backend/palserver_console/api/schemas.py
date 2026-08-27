@@ -136,4 +136,8 @@ class SteamCmdUpdateRequest(BaseModel):
     )
 
 
+class ApplicationUpdateRequest(BaseModel):
+    expectedVersion: str = Field(pattern=r"^\d+\.\d+\.\d+$")
+
+
 ApiOperationKind = Literal["start", "save", "stop", "restart"]

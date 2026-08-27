@@ -4,7 +4,7 @@ import type { WorldSnapshotSummary } from "../../api/contracts";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 
 const status = (overrides: Partial<WorldSnapshotSummary> = {}): WorldSnapshotSummary => ({
-  contract: { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" },
+  contract: { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 15, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" },
   source: "save-snapshot",
   observedAt: 1,
   sourceObservedAt: 1,

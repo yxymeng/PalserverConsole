@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from . import __version__
+from .application_updates import ApplicationUpdateService
 from .audit import AuditService
 from .auth import AuthStore
 from .backups import BackupService
@@ -41,6 +43,7 @@ class AppDependencies:
     operational_health: OperationalHealthService
     notifications: NotificationService
     updates: SteamCmdUpdateService
+    application_updates: ApplicationUpdateService
 
 
 class DependencyFactory(Protocol):
@@ -156,6 +159,12 @@ class DefaultDependencyFactory:
             world_data,
             backups,
         )
+        application_updates = ApplicationUpdateService(
+            __version__,
+            settings.data_dir,
+            instance_id=settings.instance_id,
+            port=settings.port,
+        )
 
         return AppDependencies(
             settings=settings,
@@ -172,6 +181,7 @@ class DefaultDependencyFactory:
             operational_health=operational_health,
             notifications=notifications,
             updates=updates,
+            application_updates=application_updates,
         )
 
 

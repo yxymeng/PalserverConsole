@@ -306,6 +306,9 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     upgrade_script = (project_root / "scripts" / "upgrade-portable.ps1").read_text(
         encoding="utf-8-sig"
     )
+    application_update_helper = (
+        project_root / "scripts" / "apply-downloaded-update.ps1"
+    ).read_text(encoding="utf-8-sig")
     portable_readme = (project_root / "docs" / "windows-portable.md").read_text(encoding="utf-8")
 
     assert '"%~dp0PalServerConsole.exe"' in source_launcher
@@ -353,6 +356,9 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "System.Security.Cryptography.SHA256" in upgrade_script
     assert "unlisted file" in upgrade_script
     assert "Program rollback completed" in upgrade_script
+    assert "apply-downloaded-update.ps1" in build_script
+    assert "CONSOLE_EXIT_TIMEOUT" in application_update_helper
+    assert "Start-Process" in application_update_helper
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
     assert "未签名" in portable_readme

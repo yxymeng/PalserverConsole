@@ -357,9 +357,14 @@ def _complete_progress_save() -> dict[str, Any]:
                 "PaldeckUnlockFlag": _progress_map({"SheepBall": True, "CatMage": False}),
                 "PalCaptureCount": _progress_map({"SheepBall": 4, "CatMage": 3}),
                 "FastTravelPointUnlockFlag": _progress_map({"Start": True, "Hill": True}),
+                "RelicObtainForInstanceFlag": _progress_map(
+                    {"Relic_A": True, "Relic_B": False}
+                ),
+                "NoteObtainForInstanceFlag": _progress_map({"Memo_A": True}),
                 "FindAreaFlagMap": _progress_map({"Grassland": True}),
                 "NormalBossDefeatFlag": _progress_map({"BOSS_1": True, "BOSS_2": False}),
                 "TowerBossDefeatFlag": _progress_map({"TOWER_1": True, "TOWER_2": True}),
+                "NormalDungeonClearCount": _property(3, "IntProperty"),
                 "FixedDungeonClearCount": _property(5, "IntProperty"),
                 "OilrigClearCount": _property(2, "IntProperty"),
             }
@@ -381,11 +386,13 @@ def test_synthetic_player_progress_distinguishes_complete_partial_missing_and_ab
         "values": {
             "discoveredPalSpecies": 1,
             "capturedPals": 7,
-            "fastTravelPoints": 2,
+            "fastTravel": 2,
+            "relics": 1,
+            "memos": 1,
             "exploredAreas": 1,
             "fieldBosses": 1,
             "towerBosses": 2,
-            "dungeonClears": 5,
+            "dungeonClears": 8,
             "oilRigClears": 2,
             "technologyPoints": 12,
             "ancientTechnologyPoints": 3,
@@ -436,6 +443,50 @@ def test_synthetic_player_progress_distinguishes_complete_partial_missing_and_ab
     assert rows[0]["lastRecordedAt"]
     assert detail is not None
     assert detail["progress"] == complete
+
+
+def test_real_derived_player_progress_golden_baseline() -> None:
+    fixture_path = (
+        Path(__file__).parents[2] / "fixtures" / "golden" / "player-progress-v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    source = fixture["sourceFields"]
+
+    def flags(prefix: str, count: int) -> dict[str, Any]:
+        return _progress_map({f"{prefix}_{index:03d}": True for index in range(count)})
+
+    progress = world_cache._player_progress(
+        {
+            "RecordData": _property(
+                {
+                    "NormalDungeonClearCount": _property(
+                        source["NormalDungeonClearCount"], "IntProperty"
+                    ),
+                    "FixedDungeonClearCount": _property(
+                        source["FixedDungeonClearCount"], "IntProperty"
+                    ),
+                    "RelicObtainForInstanceFlag": flags(
+                        "relic", source["RelicObtainForInstanceFlagTrueCount"]
+                    ),
+                    "FastTravelPointUnlockFlag": flags(
+                        "travel", source["FastTravelPointUnlockFlagTrueCount"]
+                    ),
+                    "NoteObtainForInstanceFlag": flags(
+                        "memo", source["NoteObtainForInstanceFlagTrueCount"]
+                    ),
+                }
+            ),
+            "TechnologyPoint": _property(source["TechnologyPoint"], "IntProperty"),
+        }
+    )
+
+    progress_values = cast(dict[str, int], progress["values"])
+    unavailable = cast(list[str], progress["unavailable"])
+    for field, expected in fixture["expected"].items():
+        if expected is None:
+            assert field in unavailable
+        else:
+            assert progress_values[field] == expected
 
 
 def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None:
@@ -638,6 +689,22 @@ def test_world_overview_aggregates_assets_and_actionable_counts(tmp_path: Path) 
             "owner_player_id = NULL, base_id = NULL WHERE id = (SELECT id FROM pals LIMIT 1)"
         )
         connection.execute("UPDATE inventory_items SET metadata_known = 0")
+        inventory_columns = (
+            "container_id, slot_index, item_id, item_name, item_category, item_rarity, "
+            "metadata_known, quantity, owner_kind, owner_id, guild_id, base_id, "
+            "map_object_type, map_object_instance_id, world_x, world_y, world_z"
+        )
+        inventory_insert = (
+            f"INSERT INTO inventory_items({inventory_columns}) "
+            f"VALUES({', '.join('?' for _ in range(17))})"
+        )
+        for values in (
+            ("base-box", 0, "BaseStone", "石头", "Material", "Common", 1, 7, "base_inventory", None, None, "base-1", None, None, None, None, None),
+            ("guild-box", 0, "GuildWood", "木材", "Material", "Common", 1, 5, "guild_inventory", None, "guild-1", None, None, None, None, None, None),
+            ("world-box", 0, "WorldLoot", "世界物品", "Material", "Common", 1, 11, "world", None, None, None, "TreasureBox", "world-object", 1.0, 2.0, 3.0),
+            ("unknown-box", 0, "UnassignedLoot", "未知位置物品", "Material", "Common", 1, 13, "unassigned", None, None, None, None, None, None, None, None),
+        ):
+            connection.execute(inventory_insert, values)
 
     overview = query_world_overview(cache)
     assets = cast(dict[str, int], overview["assets"])
@@ -647,8 +714,8 @@ def test_world_overview_aggregates_assets_and_actionable_counts(tmp_path: Path) 
         "players": 1,
         "pals": 2,
         "palSpecies": 2,
-        "itemTypes": 1,
-        "itemQuantity": 3,
+        "itemTypes": 3,
+        "itemQuantity": 15,
         "bases": 2,
         "guilds": 0,
     }
@@ -1675,6 +1742,9 @@ def test_pal_care_reads_real_save_field_shapes_without_treating_raw_food_as_perc
                 ),
                 "BaseCampWorkerEventType": _property(
                     "EPalBaseCampWorkerEventType::DodgeWork", "EnumProperty"
+                ),
+                "CurrentWorkSuitability": _property(
+                    "EPalWorkSuitability::Mining", "EnumProperty"
                 ),
             },
         )
@@ -2894,7 +2964,17 @@ def test_current_sanitized_save_uses_detailed_m5_decoder(tmp_path: Path) -> None
         disease_value = world_cache._enum_text(save_parameter.get("WorkerSick"))
         if disease_value and world_cache._enum_key(disease_value) not in {"none", "healthy"}:
             expected["disease"] = disease_value
-        activity_value = world_cache._enum_text(save_parameter.get("CurrentWorkSuitability"))
+        activity_value = world_cache._enum_text(
+            world_cache._first_present(
+                save_parameter,
+                "Activity",
+                "PalActivity",
+                "WorkState",
+                "WorkStatus",
+                "BaseCampWorkerEventType",
+                "CurrentWorkSuitability",
+            )
+        )
         if activity_value and world_cache._enum_key(activity_value) != "none":
             expected["activity"] = activity_value
         full_stomach = world_cache._save_number(save_parameter, "FullStomach")

@@ -2,7 +2,7 @@ import { AlertTriangle, Archive, ArrowLeft, Boxes, ChevronLeft, ChevronRight, Ci
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import { createPortal } from "react-dom";
 
-import type { AuthStatus, WorldBaseDetail, WorldBaseListItem, WorldContainerReference, WorldEntityListItem, WorldEntityListResponse, WorldGuildDetail, WorldGuildListItem, WorldPalCareSummary, WorldPalDetail, WorldPalListItem, WorldPlayerDetail, WorldPlayerListItem, WorldReparseResponse, WorldSnapshotContext, WorldStatus } from "../../api/contracts";
+import type { AuthStatus, LiveValue, WorldBaseDetail, WorldBaseListItem, WorldContainerReference, WorldEntityListItem, WorldEntityListResponse, WorldGuildDetail, WorldGuildListItem, WorldPalCareSummary, WorldPalDetail, WorldPalListItem, WorldPlayerDetail, WorldPlayerListItem, WorldReparseResponse, WorldSnapshotContext, WorldStatus } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { useIsMobile } from "../../hooks/use-mobile";
@@ -59,6 +59,7 @@ const SORT_OPTIONS: Record<Exclude<PrimaryWorldResource, "pals">, { value: SortK
 
 export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<WorldStatus | null>(null);
+  const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceKey>("overview");
   const [resource, setResource] = useState<PrimaryWorldResource>("players");
   const [inventoryContext, setInventoryContext] = useState<InventoryContext>({ scope: "inventory" });
@@ -134,6 +135,14 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   }, [appliedSearch, nextRequestSignal, page, resource, sortKey, statusFilter, workspace]);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (workspace !== "overview") return;
+    const controller = new AbortController();
+    void requestJson<LiveValue<unknown>>("/api/live/players", { signal: controller.signal })
+      .then((response) => setOnlinePlayerCount(livePlayersFrom(response.data).length))
+      .catch((caught) => { if (!isAbortError(caught)) setOnlinePlayerCount(null); });
+    return () => controller.abort();
+  }, [workspace, snapshotId]);
   useEffect(() => {
     if (previousSnapshotId.current !== undefined && previousSnapshotId.current !== snapshotId) {
       entityStateCache.current = {};
@@ -300,10 +309,14 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     </div>
     {workspaceHistory.length > 0 && <button className="world-context-return" type="button" onClick={returnWorkspace}><ArrowLeft size={16} />返回{WORKSPACES.find((item) => item.key === workspaceHistory.at(-1)?.workspace)?.label || "上一处"}<span>保留原筛选、结果与详情上下文</span></button>}
     <main className="world-workspace">
-      <section id="world-workspace-overview" role="tabpanel" aria-labelledby="world-workspace-tab-overview" hidden={workspace !== "overview"}><WorldOverviewLobby status={status} onChooseResource={(target) => chooseResource(target, true)} onShowInventory={(context) => openInventory(context, true)} onShowPals={openPalSummary} /></section>
+      <section id="world-workspace-overview" role="tabpanel" aria-labelledby="world-workspace-tab-overview" hidden={workspace !== "overview"}><WorldOverviewLobby status={status} onlinePlayerCount={onlinePlayerCount} onChooseResource={(target) => chooseResource(target, true)} onShowInventory={(context) => openInventory(context, true)} onShowPals={openPalSummary} /></section>
       <section id="world-workspace-inventories" role="tabpanel" aria-labelledby="world-workspace-tab-inventories" hidden={workspace !== "inventories"}>{visitedWorkspaces.has("inventories") && <InventoryWorkspace key={snapshotId || "none"} snapshotId={snapshotId} context={inventoryContext} onSnapshotReplaced={refreshSnapshot} onContextChange={setInventoryContext} onClearContext={() => setInventoryContext({ scope: "inventory" })} />}</section>
       <section id="world-workspace-pals" role="tabpanel" aria-labelledby="world-workspace-tab-pals" hidden={workspace !== "pals"}>{visitedWorkspaces.has("pals") && <PalRoster key={snapshotId || "none"} snapshotId={snapshotId} context={palContext} onSnapshotReplaced={refreshSnapshot} onNavigate={(target, id) => void openDetail(target, id, true)} />}</section>
-      {(["players", "bases", "guilds"] as const).map((panel) => <section key={panel} id={`world-workspace-${panel}`} role="tabpanel" aria-labelledby={`world-workspace-tab-${panel}`} hidden={workspace !== panel}>{workspace === panel && <div className="world-browser">
+      {(["players", "bases", "guilds"] as const).map((panel) => <section key={panel} id={`world-workspace-${panel}`} role="tabpanel" aria-labelledby={`world-workspace-tab-${panel}`} hidden={workspace !== panel}>{workspace === panel && <div className="world-browser" data-has-detail={Boolean(selected) || undefined}>
+      <header className="world-module-heading world-browser-heading">
+        <div><p className="world-module-kicker">{panel === "players" ? "角色与进度" : panel === "bases" ? "生产与归属" : "成员与聚合资产"}</p><h2>{RESOURCE_LABELS[panel]}</h2><p>{panel === "players" ? "查看角色等级、公会关系与可用的世界进度；缺失字段不会显示为零。" : panel === "bases" ? "按稳定 Base ID 查看工作帕鲁、照护状态与据点库存。" : "按稳定 Guild ID 查看成员、据点、帕鲁与仓库的聚合关系。"}</p></div>
+        <span className="world-module-total">{result ? `共 ${result.total.toLocaleString()} ${panel === "players" ? "名玩家" : panel === "bases" ? "个据点" : "个公会"}` : "等待快照"}</span>
+      </header>
       <section className="world-list-panel" aria-label={`${RESOURCE_LABELS[resource]}列表`}>
         <form className="world-toolbar" onSubmit={submitSearch}>
           <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索世界数据" placeholder="搜索名称或稳定 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
@@ -371,7 +384,7 @@ function WorldSnapshotBar({ status, message, reparseError, reparsing, onReparse 
   </section>;
 }
 
-function WorldOverviewLobby({ status, onChooseResource, onShowInventory, onShowPals }: { status: WorldStatus | null; onChooseResource: (resource: PrimaryWorldResource) => void; onShowInventory: (context: InventoryContext) => void; onShowPals: (context: Omit<PalRosterContext, "token">) => void }) {
+function WorldOverviewLobby({ status, onlinePlayerCount, onChooseResource, onShowInventory, onShowPals }: { status: WorldStatus | null; onlinePlayerCount: number | null; onChooseResource: (resource: PrimaryWorldResource) => void; onShowInventory: (context: InventoryContext) => void; onShowPals: (context: Omit<PalRosterContext, "token">) => void }) {
   const overview = status?.overview;
   const diagnosticsRef = useRef<HTMLDetailsElement | null>(null);
   const coverageIncomplete = status?.dataCoverage.state !== "complete" || status.stale || Boolean(status.errorCode);
@@ -384,26 +397,30 @@ function WorldOverviewLobby({ status, onChooseResource, onShowInventory, onShowP
   }
   if (!overview) return <section className="world-overview-empty"><LayoutDashboard size={24} /><div><h2>总览等待可用快照</h2><p>成功完成一次只读解析后，这里会汇总资产规模与需要进一步查看的事项。</p></div></section>;
   const assetItems = [
-    { label: "玩家", value: overview.assets.players, detail: "已记录角色", icon: Users, action: () => onChooseResource("players") },
-    { label: "帕鲁", value: overview.assets.pals, detail: `${overview.assets.palSpecies.toLocaleString()} 个物种`, icon: PawPrint, action: () => onShowPals({ label: "全部帕鲁" }) },
-    { label: "仓库", value: overview.assets.itemTypes, detail: `${overview.assets.itemQuantity.toLocaleString()} 件物品`, icon: Boxes, action: () => onShowInventory({ scope: "all", label: "全世界物品" }) },
-    { label: "据点", value: overview.assets.bases, detail: "稳定 ID 关联", icon: Warehouse, action: () => onChooseResource("bases") },
-    { label: "公会", value: overview.assets.guilds, detail: "成员与资产", icon: Users, action: () => onChooseResource("guilds") },
+    { label: "玩家", value: `${onlinePlayerCount === null ? "—" : onlinePlayerCount.toLocaleString()} / ${overview.assets.players.toLocaleString()}`, unit: "名", detail: "在线 / 全部玩家", icon: Users, action: () => onChooseResource("players") },
+    { label: "帕鲁", value: overview.assets.pals.toLocaleString(), unit: "只", detail: `${overview.assets.palSpecies.toLocaleString()} 种帕鲁`, icon: PawPrint, action: () => onShowPals({ label: "全部帕鲁" }) },
+    { label: "仓库物品", value: overview.assets.itemTypes.toLocaleString(), unit: "种", detail: `玩家、据点与公会合计 ${overview.assets.itemQuantity.toLocaleString()} 件`, icon: Boxes, action: () => onShowInventory({ scope: "inventory", label: "持有库存" }) },
+    { label: "据点", value: overview.assets.bases.toLocaleString(), unit: "个", detail: "按 Base ID 关联", icon: Warehouse, action: () => onChooseResource("bases") },
+    { label: "公会", value: overview.assets.guilds.toLocaleString(), unit: "个", detail: "成员与资产聚合", icon: Users, action: () => onChooseResource("guilds") },
   ];
   const actionItems = [
     { label: "需要关注", value: overview.actions.attentionPals, icon: HeartPulse, tone: "danger", action: () => onShowPals({ care: "attention", label: "需要关注" }) },
     { label: "闪光帕鲁", value: overview.actions.luckyPals, icon: Sparkles, action: () => onShowPals({ marker: "lucky", label: "闪光帕鲁" }) },
     { label: "头目帕鲁", value: overview.actions.bossPals, icon: Crown, action: () => onShowPals({ marker: "boss", label: "头目帕鲁" }) },
-    { label: "未归属帕鲁", value: overview.actions.unassignedPals, icon: PawPrint, action: () => onShowPals({ location: "unassigned", label: "未归属帕鲁" }) },
-    { label: "未知物品", value: overview.actions.unknownItems, icon: PackageOpen, action: () => onShowInventory({ scope: "all", metadata: "unknown", label: "资料未收录的物品" }) },
-    { label: "解析完整性", value: completenessCount, icon: CircleAlert, tone: completenessCount ? "warning" : "healthy", action: showDiagnostics },
+    { label: "数据完整性", value: completenessCount, icon: CircleAlert, tone: completenessCount ? "warning" : "healthy", action: showDiagnostics },
   ];
   return <div className="world-overview-lobby">
-    <header className="world-overview-heading"><div><h2>世界资产总览</h2><p>先确认快照可信度，再进入当前世界的资产与待查看事项。</p></div><span className={status?.stale ? "warning" : "healthy"}>{status?.stale ? "旧缓存可用" : "当前快照可用"}</span></header>
-    <section className="world-overview-section" aria-labelledby="world-assets-heading"><h3 id="world-assets-heading">资产规模</h3><div className="world-overview-assets">{assetItems.map(({ label, value, detail, icon: Icon, action }) => <button type="button" key={label} onClick={action}><Icon size={18} aria-hidden="true" /><span><strong>{label}</strong><small>{detail}</small></span><b>{value.toLocaleString()}</b></button>)}</div></section>
-    <section className="world-overview-section" aria-labelledby="world-actions-heading"><div className="world-overview-section-title"><h3 id="world-actions-heading">需要处理或进一步查看</h3><p>数量为零的项目仍可进入对应筛选结果核对。</p></div><div className="world-overview-actions">{actionItems.map(({ label, value, icon: Icon, tone, action }) => <button className={tone || ""} type="button" key={label} onClick={action}><Icon size={18} aria-hidden="true" /><span>{label}</span><strong>{value.toLocaleString()}</strong></button>)}</div></section>
+    <header className="world-overview-heading"><div><p className="world-module-kicker">只读存档快照</p><h2>世界资产总览</h2><p>关键规模直接标明计量单位；点击任一指标可进入对应工作区。</p></div><span className={status?.stale ? "warning" : "healthy"}>{status?.stale ? "旧缓存可用" : "当前快照可用"}</span></header>
+    <section className="world-overview-section" aria-labelledby="world-assets-heading"><div className="world-overview-section-title"><h3 id="world-assets-heading">资产规模</h3><p>仓库只统计玩家背包、据点箱子和公会箱子，不计世界容器</p></div><div className="world-overview-assets">{assetItems.map(({ label, value, unit, detail, icon: Icon, action }) => <button type="button" key={label} onClick={action}><span className="world-overview-asset-icon"><Icon size={19} aria-hidden="true" /></span><span className="world-overview-asset-copy"><strong>{label}</strong><small>{detail}</small></span><span className="world-overview-asset-value"><b>{value}</b><em>{unit}</em></span></button>)}</div></section>
+    <section className="world-overview-section" aria-labelledby="world-actions-heading"><div className="world-overview-section-title"><h3 id="world-actions-heading">进一步查看</h3><p>保留有明确浏览价值的入口</p></div><div className="world-overview-actions">{actionItems.map(({ label, value, icon: Icon, tone, action }) => <button className={tone || ""} type="button" key={label} onClick={action}><span className="world-overview-action-icon"><Icon size={18} aria-hidden="true" /></span><span>{label}</span><strong>{value.toLocaleString()}</strong><small>点击查看</small></button>)}</div></section>
     <details ref={diagnosticsRef} className="world-overview-diagnostics"><summary tabIndex={-1}>技术诊断与数据覆盖</summary><dl><div><dt>Snapshot ID</dt><dd><code>{status?.snapshotId || "WORLD_CACHE_UNAVAILABLE"}</code></dd></div><div><dt>数据覆盖</dt><dd>{status?.dataCoverage.state === "complete" ? "完整" : "不可用"}</dd></div><div><dt>帕鲁元数据未收录</dt><dd>{overview.actions.unknownPalMetadata.toLocaleString()}</dd></div><div><dt>照护字段不可用</dt><dd>{overview.actions.careUnavailable.toLocaleString()}</dd></div><div><dt>解析耗时</dt><dd>{status?.parseDurationMs === null ? "不可用" : `${status?.parseDurationMs} ms`}</dd></div><div><dt>缓存大小</dt><dd>{status?.cacheSizeBytes === null ? "不可用" : `${Math.round((status?.cacheSizeBytes || 0) / 1024).toLocaleString()} KB`}</dd></div></dl></details>
   </div>;
+}
+
+function livePlayersFrom(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+  if (data && typeof data === "object" && Array.isArray((data as Record<string, unknown>).players)) return livePlayersFrom((data as Record<string, unknown>).players);
+  return [];
 }
 
 function WorldTableSkeleton({ columns }: { columns: number }) {

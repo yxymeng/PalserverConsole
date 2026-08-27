@@ -79,12 +79,13 @@ $frontendRoot = Join-Path $projectRoot "frontend"
 $frontendDist = Join-Path $frontendRoot "dist"
 $portableEntry = Join-Path $PSScriptRoot "portable-entry.py"
 $portableLauncherSource = Join-Path $PSScriptRoot "portable-launcher.cs"
+$applicationUpdateHelper = Join-Path $PSScriptRoot "apply-downloaded-update.ps1"
 $licenseCollector = Join-Path $PSScriptRoot "collect-third-party-licenses.py"
 $projectLicense = Join-Path $projectRoot "LICENSE"
 $thirdPartyNotices = Join-Path $projectRoot "THIRD_PARTY_NOTICES.md"
 $appIcon = Join-Path $projectRoot "branding\PalServerConsole.ico"
 
-foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $licenseCollector, $projectLicense, $thirdPartyNotices, $appIcon)) {
+foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $applicationUpdateHelper, $licenseCollector, $projectLicense, $thirdPartyNotices, $appIcon)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required build input is missing: $required"
     }
@@ -283,6 +284,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\windows-portable.md") -Destination (Join-Path $packageStage "README-portable.md")
     Copy-Item -LiteralPath (Join-Path $projectRoot "start-console.bat") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "upgrade-portable.ps1") -Destination $packageStage
+    Copy-Item -LiteralPath $applicationUpdateHelper -Destination $packageStage
     Set-Content -LiteralPath (Join-Path $portableData ".keep") -Value "User data is created here and is never replaced by upgrade-portable.ps1." -Encoding ASCII
 
     $selfCheckData = Join-Path $temporaryRoot "self-check-data"

@@ -46,6 +46,15 @@ async function routeMaintenanceApis(page: Page, healthFailure: boolean, onHealth
     restoreRecovery: { active: false, journal: null }, observedAt: 1, stale: false, errorCode: null,
   } }));
   await page.route("**/api/backups/restore/recovery", (route) => route.fulfill({ json: { active: false, journal: null } }));
+  await page.route("**/api/maintenance/application-update", (route) => route.fulfill({ json: {
+    currentVersion: "0.2.0",
+    latestVersion: "0.3.0",
+    updateAvailable: true,
+    portable: true,
+    releaseUrl: "https://github.com/yxymeng/PalserverConsole/releases/tag/v0.3.0",
+    publishedAt: "2026-08-27T00:00:00Z",
+    assetSizeBytes: 123,
+  } }));
 }
 
 async function openMaintenance(page: Page, mobile: boolean) {
@@ -69,6 +78,10 @@ test("Block 3：非 health hash 加载顶部健康状态并支持刷新", async 
   await page.goto("/#maintenance-update");
   await openMaintenance(page, testInfo.project.name === "mobile");
   await expect(page.getByRole("heading", { name: "服务器更新" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "PalServerConsole 更新" })).toBeVisible();
+  await page.getByRole("button", { name: "检查更新", exact: true }).click();
+  await expect(page.getByText("发现新版本 v0.3.0。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "更新至 v0.3.0" })).toBeVisible();
   await expectHealthSummary(page, "运行正常", testInfo.project.name === "mobile");
 
   const requestsBeforeRefresh = healthRequests;

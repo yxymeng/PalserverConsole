@@ -5,7 +5,7 @@ import { ensureWorldContract } from "./worldContract";
 const current = {
   queryVersion: 1,
   cacheSchema: "world-asset-cache",
-  cacheSchemaVersion: 14,
+  cacheSchemaVersion: 15,
   metadataSchema: "palserver-console-world-metadata",
   metadataSchemaVersion: 1,
   metadataDataVersion: "2026.08.25.3",

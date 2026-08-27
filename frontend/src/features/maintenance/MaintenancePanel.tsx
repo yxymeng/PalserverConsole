@@ -4,12 +4,21 @@ import { useEffect, useState, type FormEvent } from "react";
 import type { AuthStatus, NotificationStatus, Operation, ShellStatus } from "../../api/contracts";
 import { createIdempotencyKey, requestJson } from "../../api/client";
 import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
+import { BlurFade } from "../../components/ui/blur-fade";
 
 type UpdateProps = {
   auth: AuthStatus;
   status: ShellStatus | null;
   onOperation: (operation: Operation) => void;
 };
+
+const NOTIFICATION_EVENTS = [
+  { key: "planned", label: "计划", detail: "维护任务进入倒计时", icon: CalendarClock },
+  { key: "started", label: "开始", detail: "服务器进入维护流程", icon: Play },
+  { key: "completed", label: "完成", detail: "维护操作成功结束", icon: CheckCircle2 },
+  { key: "cancelled", label: "取消", detail: "维护在执行前被取消", icon: CircleX },
+  { key: "failed", label: "失败", detail: "附带可诊断的错误信息", icon: TriangleAlert },
+] as const;
 
 export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
   const [steamcmdPath, setSteamcmdPath] = useState("");
@@ -48,11 +57,12 @@ export function MaintenancePanel({ auth, status, onOperation }: UpdateProps) {
   }
 
   const canCheckUpdate = status?.serverState === "running";
-  return <section className="maintenance-section maintenance-update" id="maintenance-update" aria-labelledby="maintenance-update-title">
-    <div className="section-heading">
-      <div><h2 id="maintenance-update-title">服务器更新</h2><p>SteamCMD 检查与更新必须由本机管理员明确确认后执行。</p></div>
+  return <section className="maintenance-section maintenance-update" id="maintenance-server-update" aria-labelledby="maintenance-server-update-title">
+    <div className="section-heading maintenance-card-heading">
+      <span className="maintenance-card-icon"><Download aria-hidden="true" /></span>
+      <div><h2 id="maintenance-server-update-title">服务器更新</h2><p>SteamCMD 检查与更新必须由本机管理员明确确认后执行。</p></div>
     </div>
-    <div className="maintenance-update-summary"><span>当前实例：{status?.instanceId || "default"}</span><span>当前版本：由 SteamCMD 检查时读取</span><span>更新状态：{canCheckUpdate ? "可检查更新" : "等待服务器运行"}</span></div>
+    <div className="maintenance-update-summary"><span><small>当前实例</small><strong>{status?.instanceId || "default"}</strong></span><span><small>版本来源</small><strong>SteamCMD 检查</strong></span><span><small>更新状态</small><strong>{canCheckUpdate ? "可检查更新" : "等待服务器运行"}</strong></span></div>
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="form-success" role="status">{message}</p>}
     {!auth.local && <div className="notice-band"><ShieldCheck size={20} /><span>维护更新只能在控制台本机修改。</span></div>}
@@ -73,6 +83,7 @@ export function MaintenanceNotificationsPanel({ auth }: { auth: AuthStatus }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState(0);
 
   useEffect(() => {
     void requestJson<NotificationStatus>("/api/maintenance/notifications")
@@ -102,27 +113,25 @@ export function MaintenanceNotificationsPanel({ auth }: { auth: AuthStatus }) {
     }
   }
 
+  const activeEvent = NOTIFICATION_EVENTS[selectedEvent];
+  const ActiveEventIcon = activeEvent.icon;
+  const notificationState = notification.enabled ? "已启用" : notification.configured ? "已配置，当前停用" : "尚未配置";
+
   return <section className="maintenance-section maintenance-notifications" id="maintenance-notifications" aria-labelledby="maintenance-notifications-title">
-    <section className="notification-heading"><div><span className="notification-heading-icon"><BellRing aria-hidden="true" /></span><div><h2 id="maintenance-notifications-title">维护通知</h2><p>将关键维护节点发送到团队 Webhook，密钥写入后不会再次显示。</p></div></div><div className="notification-status" aria-label="通知状态" data-enabled={notification.enabled || undefined}><span aria-hidden="true" /><div><small>当前状态</small><strong>{notification.enabled ? "已启用" : notification.configured ? "已配置，等待启用" : "尚未配置"}</strong></div></div></section>
+    <BlurFade duration={0.24} offset={5}><header className="notification-heading"><div><span className="notification-heading-icon"><BellRing aria-hidden="true" /></span><div><h2 id="maintenance-notifications-title">维护通知</h2><p>把维护进度发送到一个 HTTPS Webhook；玩家数据、配置内容和密钥不会进入通知。</p></div></div><div className="notification-status" aria-label="通知状态" data-enabled={notification.enabled || undefined} data-configured={notification.configured || undefined}><span aria-hidden="true" /><div><small>发送状态</small><strong>{notificationState}</strong></div></div></header></BlurFade>
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="form-success" role="status">{message}</p>}
     {!auth.local && <div className="notice-band"><ShieldCheck size={20} /><span>通知密钥只能在控制台本机修改。</span></div>}
     <div className="notification-layout">
-      <section className="notification-events" aria-label="通知覆盖事件"><header><div><span>发送范围</span><h3>维护生命周期</h3></div><small>5 类事件</small></header><div>
-        <article><CalendarClock aria-hidden="true" /><span><strong>计划</strong><small>维护任务进入倒计时</small></span></article>
-        <article><Play aria-hidden="true" /><span><strong>开始</strong><small>服务器进入维护流程</small></span></article>
-        <article><CheckCircle2 aria-hidden="true" /><span><strong>完成</strong><small>维护操作成功结束</small></span></article>
-        <article><CircleX aria-hidden="true" /><span><strong>取消</strong><small>维护在执行前被取消</small></span></article>
-        <article><TriangleAlert aria-hidden="true" /><span><strong>失败</strong><small>附带可诊断错误信息</small></span></article>
-      </div><p><ShieldCheck aria-hidden="true" />只发送维护事件，不包含玩家数据、配置内容或密钥。</p></section>
-      {auth.local && <form className="notification-form" onSubmit={saveNotifications}>
-        <div className="notification-form-title"><div><h3>Webhook 连接</h3><p>留空已配置字段，可保持现有值不变。</p></div><label className="notification-switch"><input type="checkbox" checked={notification.enabled} onChange={(event) => setNotification({ ...notification, enabled: event.target.checked })} /><span aria-hidden="true" /><strong>{notification.enabled ? "启用" : "停用"}</strong></label></div>
-        <label htmlFor="notification-webhook"><Webhook aria-hidden="true" /><span>HTTPS Webhook 地址</span></label>
-        <input id="notification-webhook" type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={notification.configured ? "已配置；留空可保持不变" : "https://..."} />
-        <label htmlFor="notification-secret"><KeyRound aria-hidden="true" /><span>Webhook 密钥</span></label>
-        <input id="notification-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={notification.configured ? "已配置；留空可保持不变" : "首次启用时必填"} />
-        <button className="primary-button" type="submit" disabled={busy}><Save size={18} />保存通知设置</button>
-      </form>}
+      <BlurFade className="notification-events-motion" delay={0.04} duration={0.24} offset={5}><section className="notification-events" aria-label="通知覆盖事件"><header><div><h3>发送范围</h3><p>选择阶段查看对应通知内容。</p></div><small>固定 5 类</small></header><div className="notification-event-tabs" role="tablist" aria-label="维护通知阶段">
+        {NOTIFICATION_EVENTS.map((item, index) => { const Icon = item.icon; return <button key={item.key} type="button" role="tab" aria-selected={selectedEvent === index} aria-controls="notification-event-detail" onClick={() => setSelectedEvent(index)}><Icon aria-hidden="true" /><span>{item.label}</span></button>; })}
+      </div><div className="notification-event-detail" id="notification-event-detail" role="tabpanel"><ActiveEventIcon aria-hidden="true" /><div><strong>{activeEvent.label}</strong><p>{activeEvent.detail}</p></div></div><footer><ShieldCheck aria-hidden="true" /><span>只发送阶段、结果与必要的错误标识。</span></footer></section></BlurFade>
+      {auth.local && <BlurFade className="notification-form-motion" delay={0.08} duration={0.24} offset={5}><form className="notification-form" onSubmit={saveNotifications}>
+        <header className="notification-form-title"><div><h3>Webhook 连接</h3><p>{notification.configured ? "连接已保存；地址或密钥留空时保持现有值。" : "填写接收地址和密钥，然后启用发送。"}</p></div><label className="notification-switch"><input type="checkbox" checked={notification.enabled} onChange={(event) => setNotification({ ...notification, enabled: event.target.checked })} /><span aria-hidden="true" /><strong>{notification.enabled ? "发送已开启" : "发送已停用"}</strong></label></header>
+        <div className="notification-fields"><label htmlFor="notification-webhook"><span><Webhook aria-hidden="true" /><strong>HTTPS Webhook 地址</strong></span><small>{notification.configured ? "留空保持已保存的地址" : "必须使用 HTTPS 地址"}</small></label><input id="notification-webhook" type="url" value={webhookUrl} onChange={(event) => setWebhookUrl(event.target.value)} placeholder={notification.configured ? "已配置；无需重复填写" : "https://..."} />
+        <label htmlFor="notification-secret"><span><KeyRound aria-hidden="true" /><strong>Webhook 密钥</strong></span><small>保存后不会再次显示</small></label><input id="notification-secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={notification.configured ? "已配置；无需重复填写" : "首次启用时填写"} /></div>
+        <footer className="notification-action"><span><ShieldCheck aria-hidden="true" />设置只保存在本机后端</span><button className="primary-button" type="submit" disabled={busy}><Save size={18} />{busy ? "正在保存" : "保存通知设置"}</button></footer>
+      </form></BlurFade>}
     </div>
   </section>;
 }

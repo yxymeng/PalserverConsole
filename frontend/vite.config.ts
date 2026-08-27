@@ -27,6 +27,24 @@ const versionInfoPlugin: Plugin = {
 };
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) return undefined;
+          if (
+            id.includes("/react/")
+            || id.includes("/react-dom/")
+            || id.includes("/scheduler/")
+            || id.includes("/@base-ui/")
+          ) return "ui-vendor";
+          if (id.includes("/motion/") || id.includes("/framer-motion/")) return "motion-vendor";
+          if (id.includes("/lucide-react/")) return "icons";
+          return undefined;
+        },
+      },
+    },
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
