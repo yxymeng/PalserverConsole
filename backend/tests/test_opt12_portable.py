@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -364,3 +365,91 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
+
+
+def test_portable_update_waits_for_current_installation_console_processes() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = (
+        project_root / "scripts" / "apply-downloaded-update.ps1"
+    ).read_text(encoding="utf-8-sig")
+
+    assert "function Get-CurrentInstallConsoleProcesses" in update_helper
+    assert 'Join-Path $InstallRootPath "PalServerConsole.exe"' in update_helper
+    assert 'Join-Path $InstallRootPath "Program\\PalServerConsole.exe"' in update_helper
+    assert "$process.MainModule.FileName" in update_helper
+    assert "$currentInstallProcesses.Count -eq 0" in update_helper
+    assert "CONSOLE_EXIT_TIMEOUT" in update_helper
+    assert update_helper.index("Get-CurrentInstallConsoleProcesses") < update_helper.index(
+        "& $upgradeScript"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_process_filter_scopes_to_the_current_installation(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "current"
+    other_install_root = tmp_path / "other"
+
+    def powershell_literal(path: Path) -> str:
+        return "'" + str(path).replace("'", "''") + "'"
+
+    script = f"""
+$helperPath = {powershell_literal(update_helper)}
+$installRoot = {powershell_literal(install_root)}
+$otherInstallRoot = {powershell_literal(other_install_root)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $helperPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Get-CurrentInstallConsoleProcesses"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+
+$currentRoot = Join-Path $installRoot "PalServerConsole.exe"
+$currentProgram = Join-Path $installRoot "Program\\PalServerConsole.exe"
+$otherRoot = Join-Path $otherInstallRoot "PalServerConsole.exe"
+$script:fakeProcesses = @(
+    [pscustomobject]@{{ Id = 101; MainModule = [pscustomobject]@{{ FileName = $currentRoot }} }},
+    [pscustomobject]@{{ Id = 102; MainModule = [pscustomobject]@{{ FileName = $currentProgram }} }},
+    [pscustomobject]@{{ Id = 103; MainModule = [pscustomobject]@{{ FileName = $otherRoot }} }}
+)
+function Get-Process {{
+    param([string]$Name, [object]$ErrorAction)
+    $script:fakeProcesses
+}}
+$matchingIds = @(
+    Get-CurrentInstallConsoleProcesses -InstallRootPath $installRoot |
+        ForEach-Object {{ $_.Id }}
+)
+$script:fakeProcesses = @($script:fakeProcesses[2])
+$otherInstallMatchCount = @(Get-CurrentInstallConsoleProcesses -InstallRootPath $installRoot).Count
+[pscustomobject]@{{
+    matchingIds = $matchingIds
+    otherInstallMatchCount = $otherInstallMatchCount
+}} |
+    ConvertTo-Json -Compress
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-EncodedCommand",
+            encoded,
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert json.loads(completed.stdout) == {
+        "matchingIds": [101, 102],
+        "otherInstallMatchCount": 0,
+    }

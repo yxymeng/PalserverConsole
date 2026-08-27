@@ -15,6 +15,30 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+function Get-CurrentInstallConsoleProcesses {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstallRootPath
+    )
+
+    $launcherPaths = @(
+        [System.IO.Path]::GetFullPath((Join-Path $InstallRootPath "PalServerConsole.exe")),
+        [System.IO.Path]::GetFullPath((Join-Path $InstallRootPath "Program\PalServerConsole.exe"))
+    )
+    foreach ($process in @(Get-Process -Name "PalServerConsole" -ErrorAction SilentlyContinue)) {
+        try {
+            $processPath = [System.IO.Path]::GetFullPath($process.MainModule.FileName)
+            if ($launcherPaths -contains $processPath) {
+                $process
+            }
+        }
+        catch {
+            continue
+        }
+    }
+}
+
 $installRootPath = [System.IO.Path]::GetFullPath($InstallRoot)
 $packageRootPath = [System.IO.Path]::GetFullPath($NewPackage)
 $upgradeScript = Join-Path $packageRootPath "upgrade-portable.ps1"
@@ -28,6 +52,18 @@ try {
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ([DateTime]::UtcNow -ge $deadline) {
             throw "CONSOLE_EXIT_TIMEOUT: PalServerConsole did not exit within 120 seconds."
+        }
+        Start-Sleep -Milliseconds 500
+    }
+    while ($true) {
+        $currentInstallProcesses = @(
+            Get-CurrentInstallConsoleProcesses -InstallRootPath $installRootPath
+        )
+        if ($currentInstallProcesses.Count -eq 0) {
+            break
+        }
+        if ([DateTime]::UtcNow -ge $deadline) {
+            throw "CONSOLE_EXIT_TIMEOUT: PalServerConsole processes for this installation did not exit within 120 seconds."
         }
         Start-Sleep -Milliseconds 500
     }
