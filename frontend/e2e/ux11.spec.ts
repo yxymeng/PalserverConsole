@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 15, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
 
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux11-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-ux11" };
