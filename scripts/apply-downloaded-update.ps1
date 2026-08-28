@@ -43,6 +43,45 @@ function Get-CurrentInstallConsoleProcesses {
     }
 }
 
+function Open-InstallUpdateGuard {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstallRootPath
+    )
+
+    $guardPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $InstallRootPath ".palserver-console-update.guard")
+    )
+    while ($true) {
+        try {
+            return [System.IO.File]::Open(
+                $guardPath,
+                [System.IO.FileMode]::OpenOrCreate,
+                [System.IO.FileAccess]::ReadWrite,
+                [System.IO.FileShare]::None
+            )
+        }
+        catch [System.IO.IOException] {
+            $win32Code = $_.Exception.HResult -band 0xFFFF
+            if ($win32Code -eq 32 -or $win32Code -eq 33) {
+                Start-Sleep -Milliseconds 50
+                continue
+            }
+            throw (
+                "UPDATE_GUARD_UNAVAILABLE: unable to acquire installation update guard. " +
+                $_.Exception.Message
+            )
+        }
+        catch {
+            throw (
+                "UPDATE_GUARD_UNAVAILABLE: unable to acquire installation update guard. " +
+                $_.Exception.Message
+            )
+        }
+    }
+}
+
 function Start-ConsoleLauncher {
     [CmdletBinding()]
     param(
@@ -83,78 +122,108 @@ function Set-UpdateLockOwner {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$UpdateLockPath,
-        [Parameter(Mandatory = $true)][string]$ExpectedLockId
+        [Parameter(Mandatory = $true)][string]$ExpectedLockId,
+        [Parameter(Mandatory = $true)][string]$InstallRootPath
     )
 
-    if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
-        throw "UPDATE_LOCK_MISSING: application update lock is missing."
-    }
+    $guard = $null
     try {
-        $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $guard = Open-InstallUpdateGuard -InstallRootPath $InstallRootPath
+        if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
+            throw "UPDATE_LOCK_MISSING: application update lock is missing."
+        }
+        try {
+            $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
+        }
+        if ([string]$lock.lockId -ne $ExpectedLockId) {
+            throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
+        }
+        $processStartedAt = [DateTimeOffset]::new(
+            (Get-Process -Id $PID).StartTime.ToUniversalTime()
+        ).ToUnixTimeMilliseconds() / 1000.0
+        $lockJson = [ordered]@{
+            lockId = $ExpectedLockId
+            pid = $PID
+            processStartedAt = $processStartedAt
+            phase = "helper"
+            instanceId = [string]$lock.instanceId
+            createdAt = $lock.createdAt
+        } | ConvertTo-Json
+        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        [System.IO.File]::WriteAllText($UpdateLockPath, $lockJson, $utf8NoBom)
     }
-    catch {
-        throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
+    finally {
+        if ($null -ne $guard) {
+            $guard.Dispose()
+        }
     }
-    if ([string]$lock.lockId -ne $ExpectedLockId) {
-        throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
-    }
-    $processStartedAt = [DateTimeOffset]::new(
-        (Get-Process -Id $PID).StartTime.ToUniversalTime()
-    ).ToUnixTimeMilliseconds() / 1000.0
-    $lockJson = [ordered]@{
-        lockId = $ExpectedLockId
-        pid = $PID
-        processStartedAt = $processStartedAt
-        phase = "helper"
-        instanceId = [string]$lock.instanceId
-        createdAt = $lock.createdAt
-    } | ConvertTo-Json
-    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-    [System.IO.File]::WriteAllText($UpdateLockPath, $lockJson, $utf8NoBom)
 }
 
 function Release-UpdateLockForLaunch {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$UpdateLockPath,
-        [Parameter(Mandatory = $true)][string]$ExpectedLockId
+        [Parameter(Mandatory = $true)][string]$ExpectedLockId,
+        [Parameter(Mandatory = $true)][string]$InstallRootPath
     )
 
-    if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
-        return
-    }
+    $guard = $null
     try {
-        $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
-    }
-    catch {
-        throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
-    }
-    $lockIdProperty = $lock.PSObject.Properties["lockId"]
-    if ($null -eq $lockIdProperty -or [string]$lockIdProperty.Value -ne $ExpectedLockId) {
-        throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
-    }
+        $guard = Open-InstallUpdateGuard -InstallRootPath $InstallRootPath
+        if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
+            return
+        }
+        try {
+            $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
+        }
+        $lockIdProperty = $lock.PSObject.Properties["lockId"]
+        if ($null -eq $lockIdProperty -or [string]$lockIdProperty.Value -ne $ExpectedLockId) {
+            throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
+        }
 
-    Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction Stop
+        Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction Stop
+    }
+    finally {
+        if ($null -ne $guard) {
+            $guard.Dispose()
+        }
+    }
 }
 
 function Remove-UpdateLockIfOwned {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)][string]$UpdateLockPath,
-        [Parameter(Mandatory = $true)][string]$ExpectedLockId
+        [Parameter(Mandatory = $true)][string]$ExpectedLockId,
+        [Parameter(Mandatory = $true)][string]$InstallRootPath
     )
 
-    if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
-        return
-    }
+    $guard = $null
     try {
-        $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $guard = Open-InstallUpdateGuard -InstallRootPath $InstallRootPath
+        if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
+            return
+        }
+        try {
+            $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        }
+        catch {
+            return
+        }
+        if ([string]$lock.lockId -eq $ExpectedLockId) {
+            Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction SilentlyContinue
+        }
     }
-    catch {
-        return
-    }
-    if ([string]$lock.lockId -eq $ExpectedLockId) {
-        Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction SilentlyContinue
+    finally {
+        if ($null -ne $guard) {
+            $guard.Dispose()
+        }
     }
 }
 
@@ -170,7 +239,10 @@ $exitCode = 0
 
 try {
     New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
-    Set-UpdateLockOwner -UpdateLockPath $updateLockPath -ExpectedLockId $UpdateLockId
+    Set-UpdateLockOwner `
+        -UpdateLockPath $updateLockPath `
+        -ExpectedLockId $UpdateLockId `
+        -InstallRootPath $installRootPath
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ([DateTime]::UtcNow -ge $deadline) {
@@ -208,7 +280,8 @@ try {
 
     Release-UpdateLockForLaunch `
         -UpdateLockPath $updateLockPath `
-        -ExpectedLockId $UpdateLockId
+        -ExpectedLockId $UpdateLockId `
+        -InstallRootPath $installRootPath
     Start-ConsoleLauncher -Launcher $launcher -InstallRootPath $installRootPath -InstanceId $InstanceId -Port $Port
 }
 catch {
@@ -217,7 +290,8 @@ catch {
     try {
         Release-UpdateLockForLaunch `
             -UpdateLockPath $updateLockPath `
-            -ExpectedLockId $UpdateLockId
+            -ExpectedLockId $UpdateLockId `
+            -InstallRootPath $installRootPath
         Restore-ConsoleLauncher -Launcher $launcher -InstallRootPath $installRootPath -InstanceId $InstanceId -Port $Port
     }
     catch {
@@ -226,7 +300,10 @@ catch {
     $exitCode = 1
 }
 finally {
-    Remove-UpdateLockIfOwned -UpdateLockPath $updateLockPath -ExpectedLockId $UpdateLockId
+    Remove-UpdateLockIfOwned `
+        -UpdateLockPath $updateLockPath `
+        -ExpectedLockId $UpdateLockId `
+        -InstallRootPath $installRootPath
 }
 
 exit $exitCode

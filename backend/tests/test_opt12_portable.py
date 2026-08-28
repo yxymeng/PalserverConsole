@@ -3,10 +3,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import subprocess
 import sys
+import time
 from contextlib import suppress
 from pathlib import Path
 
@@ -14,6 +16,7 @@ import psutil
 import pytest
 
 import palserver_console.__main__ as console_main
+from palserver_console.application_updates import _InstallUpdateGuard
 from palserver_console.config import AppSettings, default_settings
 from palserver_console.world import worker as world_worker
 
@@ -116,6 +119,94 @@ def _run_encoded_powershell(script: str) -> subprocess.CompletedProcess[str]:
 
 def _powershell_literal(value: Path | str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def _powershell_function_loader(helper_path: Path, function_names: tuple[str, ...]) -> str:
+    names = ", ".join(_powershell_literal(name) for name in function_names)
+    return f"""
+$helperPath = {_powershell_literal(helper_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $helperPath))
+foreach ($functionName in @({names})) {{
+    $definition = $parsed.Ast.FindAll({{
+        param($ast)
+        $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $ast.Name -eq $functionName
+    }}, $true) | Select-Object -First 1
+    if ($null -eq $definition) {{
+        throw "function missing: $functionName"
+    }}
+    . ([ScriptBlock]::Create($definition.Extent.Text))
+}}
+"""
+
+
+def _powershell_lock_owner_script(
+    helper_path: Path,
+    lock_path: Path,
+    install_root: Path,
+    expected_lock_id: str,
+    ready_path: Path,
+    result_path: Path,
+    *,
+    function_names: tuple[str, ...] = (
+        "Open-InstallUpdateGuard",
+        "Set-UpdateLockOwner",
+    ),
+) -> str:
+    loader = _powershell_function_loader(helper_path, function_names)
+    return f"""
+{loader}
+$utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+[System.IO.File]::WriteAllText({_powershell_literal(ready_path)}, "ready", $utf8NoBom)
+try {{
+    Set-UpdateLockOwner `
+        -UpdateLockPath {_powershell_literal(lock_path)} `
+        -ExpectedLockId {_powershell_literal(expected_lock_id)} `
+        -InstallRootPath {_powershell_literal(install_root)}
+    [System.IO.File]::WriteAllText({_powershell_literal(result_path)}, "success", $utf8NoBom)
+}}
+catch {{
+    [System.IO.File]::WriteAllText(
+        {_powershell_literal(result_path)},
+        $_.Exception.Message,
+        $utf8NoBom
+    )
+    exit 1
+}}
+"""
+
+
+def _wait_for_powershell_marker(
+    process: subprocess.Popen[str], marker: Path, *, timeout: float = 5.0
+) -> None:
+    deadline = time.monotonic() + timeout
+    while not marker.is_file():
+        if process.poll() is not None:
+            stdout, stderr = process.communicate()
+            raise AssertionError(f"PowerShell exited before marker: {stdout}\n{stderr}")
+        if time.monotonic() >= deadline:
+            raise AssertionError("PowerShell marker was not created in time")
+        time.sleep(0.01)
+
+
+def _assert_powershell_transfer_blocked(
+    process: subprocess.Popen[str], lock_path: Path, result_path: Path
+) -> None:
+    deadline = time.monotonic() + 0.5
+    while time.monotonic() < deadline and process.poll() is None and not result_path.exists():
+        time.sleep(0.01)
+    assert process.poll() is None, "PowerShell lock transfer completed while Python held the guard"
+    assert not result_path.exists()
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["phase"] == "prepare"
+
+
+def _terminate_powershell_process(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    with suppress(OSError):
+        process.kill()
+    with suppress(OSError, subprocess.TimeoutExpired):
+        process.wait(timeout=2)
 
 
 def _portable_upgrade_fixture(
@@ -822,7 +913,13 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Remove-UpdateLockIfOwned" in application_update_helper
     assert ".palserver-console-update.lock" in application_update_helper
     assert "finally" in application_update_helper
-    assert "Remove-UpdateLockIfOwned -UpdateLockPath $updateLockPath" in application_update_helper
+    assert (
+        "Remove-UpdateLockIfOwned `\n"
+        "        -UpdateLockPath $updateLockPath `\n"
+        "        -ExpectedLockId $UpdateLockId `\n"
+        "        -InstallRootPath $installRootPath"
+        in application_update_helper
+    )
     release_call = (
         "Release-UpdateLockForLaunch `\n"
         "        -UpdateLockPath $updateLockPath `\n"
@@ -1050,6 +1147,25 @@ def test_portable_update_waits_for_current_installation_console_processes() -> N
     assert "$process.MainModule.FileName" in update_helper
     assert "$currentInstallProcesses.Count -eq 0" in update_helper
     assert "CONSOLE_EXIT_TIMEOUT" in update_helper
+    assert "function Open-InstallUpdateGuard" in update_helper
+    assert "[System.IO.FileMode]::OpenOrCreate" in update_helper
+    assert "[System.IO.FileAccess]::ReadWrite" in update_helper
+    assert "[System.IO.FileShare]::None" in update_helper
+    assert "$win32Code -eq 32 -or $win32Code -eq 33" in update_helper
+    assert "UPDATE_GUARD_UNAVAILABLE" in update_helper
+    assert update_helper.count("Open-InstallUpdateGuard -InstallRootPath $InstallRootPath") == 3
+    for function_name in (
+        "Set-UpdateLockOwner",
+        "Release-UpdateLockForLaunch",
+        "Remove-UpdateLockIfOwned",
+    ):
+        function_start = update_helper.index(f"function {function_name}")
+        next_function = update_helper.find("\nfunction ", function_start + 1)
+        function_body = update_helper[
+            function_start : next_function if next_function >= 0 else len(update_helper)
+        ]
+        assert "finally" in function_body
+        assert "$guard.Dispose()" in function_body
     assert update_helper.index("Get-CurrentInstallConsoleProcesses") < update_helper.index(
         "& $upgradeScript"
     )
@@ -1183,10 +1299,166 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_python_update_guard_blocks_powershell_lock_handoff(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_id = "guard-blocking-lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": lock_id,
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "prepare",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    ready_path = tmp_path / "handoff.ready"
+    result_path = tmp_path / "handoff.result"
+    script = _powershell_lock_owner_script(
+        update_helper,
+        lock_path,
+        install_root,
+        lock_id,
+        ready_path,
+        result_path,
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    process = subprocess.Popen(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        with _InstallUpdateGuard(install_root):
+            _wait_for_powershell_marker(process, ready_path)
+            _assert_powershell_transfer_blocked(process, lock_path, result_path)
+            process_started_at = psutil.Process(process.pid).create_time()
+
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, f"{stdout}\n{stderr}"
+        assert result_path.read_text(encoding="utf-8") == "success"
+        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        assert metadata["lockId"] == lock_id
+        assert metadata["phase"] == "helper"
+        assert metadata["pid"] == process.pid
+        assert math.isclose(
+            float(metadata["processStartedAt"]), process_started_at, abs_tol=0.01
+        )
+        assert lock_path.read_bytes()[:3] != b"\xef\xbb\xbf"
+    finally:
+        _terminate_powershell_process(process)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_reclaimed_update_lock_is_not_resurrected_by_powershell_handoff(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_id = "reclaimed-lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": lock_id,
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "prepare",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    ready_path = tmp_path / "reclaim.ready"
+    result_path = tmp_path / "reclaim.result"
+    script = _powershell_lock_owner_script(
+        update_helper,
+        lock_path,
+        install_root,
+        lock_id,
+        ready_path,
+        result_path,
+    )
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    process = subprocess.Popen(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
+    )
+    try:
+        with _InstallUpdateGuard(install_root):
+            _wait_for_powershell_marker(process, ready_path)
+            _assert_powershell_transfer_blocked(process, lock_path, result_path)
+            lock_path.unlink()
+
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode != 0, f"{stdout}\n{stderr}"
+        assert "UPDATE_LOCK_MISSING" in result_path.read_text(encoding="utf-8")
+        assert not lock_path.exists()
+    finally:
+        _terminate_powershell_process(process)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_powershell_lock_handoff_wrong_lock_id_fails_closed(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": "another-update",
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "helper",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_lock = lock_path.read_bytes()
+    ready_path = tmp_path / "wrong-lock.ready"
+    result_path = tmp_path / "wrong-lock.result"
+    script = _powershell_lock_owner_script(
+        update_helper,
+        lock_path,
+        install_root,
+        "expected-update",
+        ready_path,
+        result_path,
+    )
+
+    completed = _run_encoded_powershell(script)
+
+    assert completed.returncode != 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "UPDATE_LOCK_OWNERSHIP_LOST" in result_path.read_text(encoding="utf-8")
+    assert lock_path.read_bytes() == original_lock
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
 def test_portable_update_helper_transfers_lock_ownership(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[2]
     update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
-    lock_path = tmp_path / ".palserver-console-update.lock"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
     lock_id = "transfer-lock"
     lock_path.write_text(
         json.dumps(
@@ -1202,20 +1474,16 @@ def test_portable_update_helper_transfers_lock_ownership(tmp_path: Path) -> None
         encoding="utf-8",
     )
 
-    def powershell_literal(path: Path) -> str:
-        return "'" + str(path).replace("'", "''") + "'"
-
     script = f"""
-$helperPath = {powershell_literal(update_helper)}
-$lockPath = {powershell_literal(lock_path)}
-$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $helperPath))
-$definition = $parsed.Ast.FindAll({{
-    param($ast)
-    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
-        $ast.Name -eq "Set-UpdateLockOwner"
-}}, $true) | Select-Object -First 1
-. ([ScriptBlock]::Create($definition.Extent.Text))
-Set-UpdateLockOwner -UpdateLockPath $lockPath -ExpectedLockId "{lock_id}"
+{_powershell_function_loader(
+        update_helper,
+        ("Open-InstallUpdateGuard", "Set-UpdateLockOwner"),
+    )}
+$lockPath = {_powershell_literal(lock_path)}
+Set-UpdateLockOwner `
+    -UpdateLockPath $lockPath `
+    -ExpectedLockId "{lock_id}" `
+    -InstallRootPath {_powershell_literal(install_root)}
 $lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json
 [pscustomobject]@{{
     lockId = $lock.lockId
