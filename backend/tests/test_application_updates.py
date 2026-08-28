@@ -17,6 +17,7 @@ from palserver_console.application_updates import (
     RELEASE_API_URL,
     ApplicationUpdateError,
     ApplicationUpdateService,
+    portable_application_update_in_progress,
 )
 
 
@@ -527,3 +528,88 @@ def test_application_update_lock_reclaims_abandoned_owner(
     assert reclaimed_lock == lock_path
     assert json.loads(lock_path.read_text(encoding="utf-8"))["lockId"] == lock_id
     service._release_update_lock(lock_path)
+
+
+def test_portable_application_update_in_progress_ignores_missing_lock(
+    tmp_path: Path,
+) -> None:
+    assert portable_application_update_in_progress(tmp_path / "missing-install") is False
+
+
+@pytest.mark.parametrize(
+    ("owner_process", "expected_in_progress"),
+    [
+        ("live", True),
+        ("access_denied", True),
+        ("dead", False),
+        ("reused", False),
+    ],
+)
+def test_portable_application_update_in_progress_reclaims_only_abandoned_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    owner_process: str,
+    expected_in_progress: bool,
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": "active",
+                "pid": 4321,
+                "processStartedAt": 100.0,
+                "phase": "helper",
+            }
+        ),
+        encoding="utf-8",
+    )
+    actual_process = psutil.Process
+
+    def process(pid: int) -> Any:
+        if pid != 4321:
+            return actual_process(pid)
+        if owner_process == "access_denied":
+            raise psutil.AccessDenied(pid)
+        if owner_process == "dead":
+            raise psutil.NoSuchProcess(pid)
+        start_time = 100.0 if owner_process == "live" else 101.0
+        return type("Owner", (), {"create_time": lambda self: start_time})()
+
+    monkeypatch.setattr(psutil, "Process", process)
+
+    assert portable_application_update_in_progress(install_root) is expected_in_progress
+    assert lock_path.exists() is expected_in_progress
+
+
+def test_portable_application_update_in_progress_blocks_malformed_lock(
+    tmp_path: Path,
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text("not-json", encoding="utf-8")
+
+    assert portable_application_update_in_progress(install_root) is True
+    assert lock_path.is_file()
+
+
+def test_portable_application_update_in_progress_keeps_incomplete_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps({"pid": 4321, "processStartedAt": 100.0, "phase": "helper"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        psutil,
+        "Process",
+        lambda _pid: pytest.fail("incomplete lock must not be reclaimed"),
+    )
+
+    assert portable_application_update_in_progress(install_root) is True
+    assert lock_path.is_file()

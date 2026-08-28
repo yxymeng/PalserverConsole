@@ -555,10 +555,26 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "UPDATE_FAILURE_RELAUNCH_FAILED" in application_update_helper
     assert '[string]$UpdateLockId' in application_update_helper
     assert "Set-UpdateLockOwner" in application_update_helper
+    assert "Release-UpdateLockForLaunch" in application_update_helper
     assert "Remove-UpdateLockIfOwned" in application_update_helper
     assert ".palserver-console-update.lock" in application_update_helper
     assert "finally" in application_update_helper
     assert "Remove-UpdateLockIfOwned -UpdateLockPath $updateLockPath" in application_update_helper
+    release_call = (
+        "Release-UpdateLockForLaunch `\n"
+        "        -UpdateLockPath $updateLockPath `\n"
+        "        -ExpectedLockId $UpdateLockId"
+    )
+    success_release = application_update_helper.index(release_call)
+    success_launch = application_update_helper.index(
+        "Start-ConsoleLauncher -Launcher $launcher", success_release
+    )
+    failure_release = application_update_helper.rindex(release_call)
+    failure_restore = application_update_helper.index(
+        "Restore-ConsoleLauncher -Launcher $launcher"
+    )
+    assert success_release < success_launch
+    assert failure_release < failure_restore
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
     assert '[string]$DataDirectory = ""' in upgrade_script

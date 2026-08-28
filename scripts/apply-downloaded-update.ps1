@@ -111,6 +111,30 @@ function Set-UpdateLockOwner {
     } | ConvertTo-Json | Set-Content -LiteralPath $UpdateLockPath -Encoding UTF8
 }
 
+function Release-UpdateLockForLaunch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$UpdateLockPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedLockId
+    )
+
+    if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
+        return
+    }
+    try {
+        $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
+    }
+    $lockIdProperty = $lock.PSObject.Properties["lockId"]
+    if ($null -eq $lockIdProperty -or [string]$lockIdProperty.Value -ne $ExpectedLockId) {
+        throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
+    }
+
+    Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction Stop
+}
+
 function Remove-UpdateLockIfOwned {
     [CmdletBinding()]
     param(
@@ -180,12 +204,18 @@ try {
         throw "UPDATE_RELAUNCH_FAILED: upgraded PalServerConsole.exe is missing."
     }
 
+    Release-UpdateLockForLaunch `
+        -UpdateLockPath $updateLockPath `
+        -ExpectedLockId $UpdateLockId
     Start-ConsoleLauncher -Launcher $launcher -InstallRootPath $installRootPath -InstanceId $InstanceId -Port $Port
 }
 catch {
     $updateError = $_
     $updateError | Out-File -LiteralPath $logPath -Append -Encoding utf8
     try {
+        Release-UpdateLockForLaunch `
+            -UpdateLockPath $updateLockPath `
+            -ExpectedLockId $UpdateLockId
         Restore-ConsoleLauncher -Launcher $launcher -InstallRootPath $installRootPath -InstanceId $InstanceId -Port $Port
     }
     catch {

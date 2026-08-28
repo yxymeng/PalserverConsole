@@ -222,9 +222,15 @@ class ApplicationUpdateService:
             return False
         if not isinstance(metadata, dict):
             return False
+        lock_id = metadata.get("lockId")
+        phase = metadata.get("phase")
         pid = metadata.get("pid")
         process_started_at = metadata.get("processStartedAt")
-        if isinstance(pid, bool) or not isinstance(pid, int):
+        if not isinstance(lock_id, str) or not lock_id:
+            return False
+        if not isinstance(phase, str) or not phase:
+            return False
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
             return False
         try:
             process = psutil.Process(pid)
@@ -236,6 +242,7 @@ class ApplicationUpdateService:
         if (
             isinstance(process_started_at, bool)
             or not isinstance(process_started_at, int | float)
+            or not math.isfinite(float(process_started_at))
         ):
             return False
         try:
@@ -377,6 +384,19 @@ def _portable_install_root() -> Path | None:
     program = Path(sys.executable).resolve().parent
     root = program.parent
     return root if program.name.casefold() == "program" else None
+
+
+def portable_application_update_in_progress(install_root: Path) -> bool:
+    lock_path = install_root / ".palserver-console-update.lock"
+    for _ in range(2):
+        if not lock_path.is_file():
+            return False
+        if ApplicationUpdateService._reclaim_abandoned_update_lock(lock_path):
+            continue
+        if not lock_path.is_file():
+            continue
+        return True
+    return lock_path.is_file()
 
 
 def _valid_release_asset_url(value: object, version: str) -> bool:

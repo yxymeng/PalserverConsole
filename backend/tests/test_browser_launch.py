@@ -92,6 +92,56 @@ def test_main_binds_application_shutdown_to_uvicorn_server(
     assert servers[0].should_exit is True
 
 
+def test_main_returns_before_database_when_portable_update_is_in_progress(
+    monkeypatch: MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(console_main, "_portable_update_blocks_launch", lambda: True)
+
+    def unexpected_database(*args: object, **kwargs: object) -> None:
+        pytest.fail("Database must not be initialized while an update is in progress")
+
+    monkeypatch.setattr(console_main, "Database", unexpected_database)
+
+    console_main.main([])
+
+    assert capsys.readouterr().out == (
+        "PalServerConsole application update is in progress. "
+        "Try again after the update completes.\n"
+    )
+
+
+def test_portable_update_gate_is_disabled_outside_frozen_package(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "palserver_console.__main__._portable_install_root", lambda: None
+    )
+
+    assert console_main._portable_update_blocks_launch() is False
+
+
+def test_portable_update_gate_uses_shared_installation_state(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    checked: list[Path] = []
+
+    def check(root: Path) -> bool:
+        checked.append(root)
+        return True
+
+    monkeypatch.setattr(
+        "palserver_console.__main__._portable_install_root", lambda: install_root
+    )
+    monkeypatch.setattr(
+        "palserver_console.__main__.portable_application_update_in_progress",
+        check,
+    )
+
+    assert console_main._portable_update_blocks_launch() is True
+    assert checked == [install_root]
+
+
 def test_browser_url_has_a_palserver_console_cache_key() -> None:
     assert console_main._browser_url("http://127.0.0.1:8223") == (
         "http://127.0.0.1:8223/?app=palserver-console"
