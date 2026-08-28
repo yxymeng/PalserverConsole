@@ -146,10 +146,11 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
           { signal: controller.signal },
         );
         if (!active) return;
+        const players = livePlayersFrom(response.data);
         setOnlinePlayerCount(
-          response.stale || response.errorCode
+          response.stale || response.errorCode || players === null
             ? null
-            : livePlayersFrom(response.data).length,
+            : players.length,
         );
       } catch (caught) {
         if (active && !isAbortError(caught)) setOnlinePlayerCount(null);
@@ -437,10 +438,14 @@ function WorldOverviewLobby({ status, onlinePlayerCount, onChooseResource, onSho
   </div>;
 }
 
-function livePlayersFrom(data: unknown): Record<string, unknown>[] {
-  if (Array.isArray(data)) return data.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object");
+function livePlayersFrom(data: unknown): Record<string, unknown>[] | null {
+  if (Array.isArray(data)) {
+    return data.every((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      ? data
+      : null;
+  }
   if (data && typeof data === "object" && Array.isArray((data as Record<string, unknown>).players)) return livePlayersFrom((data as Record<string, unknown>).players);
-  return [];
+  return null;
 }
 
 function WorldTableSkeleton({ columns }: { columns: number }) {

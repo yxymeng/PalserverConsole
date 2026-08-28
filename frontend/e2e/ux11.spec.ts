@@ -77,7 +77,7 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }, test
 
 test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }, testInfo) => {
   await routeShell(page);
-  let livePlayers = { data: [{}, {}, {}], source: "rest", observedAt: 1, stale: false, errorCode: null as string | null };
+  let livePlayers: { data: unknown; source: string; observedAt: number; stale: boolean; errorCode: string | null } = { data: [{}, {}, {}], source: "rest", observedAt: 1, stale: false, errorCode: null };
   await page.route("**/api/live/players", (route) => route.fulfill({ json: livePlayers }));
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
 
@@ -91,6 +91,16 @@ test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }
   await expect(playerMetric()).toContainText("— / 1");
 
   livePlayers = { ...livePlayers, stale: false, errorCode: "LIVE_PLAYERS_UNAVAILABLE" };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("— / 1");
+
+  livePlayers = { ...livePlayers, data: [], errorCode: null };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("0 / 1");
+
+  livePlayers = { ...livePlayers, data: { raw: "name,playeruid,steamid" } };
   await page.reload();
   await openWorldData(page, testInfo.project.name === "mobile");
   await expect(playerMetric()).toContainText("— / 1");

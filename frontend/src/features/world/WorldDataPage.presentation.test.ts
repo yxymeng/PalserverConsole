@@ -59,3 +59,12 @@ test("据点与公会详情复用照护和仓库关联语义", () => {
   expect(pageSource).toContain("Base ID");
   expect(inventorySource).toContain('query.set("guildId", context.guildId)');
 });
+
+test("在线玩家未知结构不会被当成零人", () => {
+  const pagePath = fileURLToPath(new URL("./WorldDataPage.tsx", import.meta.url));
+  const source = readFileSync(pagePath, "utf8");
+
+  expect(source).toContain("function livePlayersFrom(data: unknown): Record<string, unknown>[] | null");
+  expect(source).toContain("response.stale || response.errorCode || players === null");
+  expect(source).toContain("return null;");
+});

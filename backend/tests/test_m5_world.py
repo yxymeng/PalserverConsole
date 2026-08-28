@@ -2225,11 +2225,13 @@ def test_parser_crash_is_reported_without_exiting_process(
     database = Database(tmp_path / "data" / "app.db")
     database.migrate()
     service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 7, "", "decoder failed"),
-    )
+    class FailedWorker:
+        returncode = 7
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            return "", "decoder failed"
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FailedWorker())
 
     with pytest.raises(WorldDataError, match="Parser exited with code 7") as raised:
         service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1)
@@ -2246,12 +2248,18 @@ def test_frozen_worker_uses_portable_dispatcher(
     service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
     command: list[str] = []
 
-    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    class SuccessfulWorker:
+        returncode = 0
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            return '{"ok":true}', ""
+
+    def fake_popen(arguments: list[str], **_: object) -> SuccessfulWorker:
         command.extend(arguments)
-        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+        return SuccessfulWorker()
 
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
     assert command[:2] == [sys.executable, "--world-worker"]
@@ -2266,15 +2274,75 @@ def test_unfrozen_worker_uses_python_module_dispatch(
     service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
     command: list[str] = []
 
-    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    class SuccessfulWorker:
+        returncode = 0
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            return '{"ok":true}', ""
+
+    def fake_popen(arguments: list[str], **_: object) -> SuccessfulWorker:
         command.extend(arguments)
-        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+        return SuccessfulWorker()
 
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
     assert command[:3] == [sys.executable, "-m", "palserver_console.world.worker"]
+
+
+def test_world_stop_terminates_active_parser_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    started = threading.Event()
+    terminated = threading.Event()
+
+    class BlockingWorker:
+        returncode = None
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            started.set()
+            assert terminated.wait(timeout=2)
+            self.returncode = -15
+            return "", ""
+
+        def terminate(self) -> None:
+            terminated.set()
+
+        def wait(self, **_: object) -> int:
+            return 0
+
+        def kill(self) -> None:
+            terminated.set()
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: BlockingWorker())
+    errors: list[BaseException] = []
+
+    def run_worker() -> None:
+        try:
+            service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1)
+        except BaseException as error:
+            errors.append(error)
+
+    worker_thread = threading.Thread(
+        target=run_worker,
+        daemon=True,
+    )
+    service._thread = worker_thread
+    worker_thread.start()
+
+    assert started.wait(timeout=1)
+    service.stop()
+
+    assert terminated.is_set()
+    assert not worker_thread.is_alive()
+    assert service._active_worker is None
+    assert errors
+    assert isinstance(errors[0], WorldDataError)
+    assert errors[0].code == "PARSER_STOPPED"
 
 
 def _retention_pair(

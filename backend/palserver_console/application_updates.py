@@ -264,16 +264,42 @@ class ApplicationUpdateService:
         program_path = os.path.normcase(
             os.path.abspath(install_root / "Program" / "PalServerConsole.exe")
         )
-        for process in psutil.process_iter(["pid", "exe"]):
-            if process.pid == os.getpid():
-                continue
+        try:
+            processes = psutil.process_iter(["pid", "exe", "cmdline"])
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            return True
+        for process in processes:
             try:
-                executable = process.info.get("exe")
-            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                info = process.info
+                pid = int(info.get("pid", process.pid))
+                if pid <= 0 or pid == os.getpid():
+                    continue
+                executable = info.get("exe")
+                if isinstance(executable, str):
+                    if os.path.normcase(os.path.abspath(executable)) != program_path:
+                        continue
+                    cmdline = _normalized_process_cmdline(info.get("cmdline"))
+                    if cmdline is None:
+                        return True
+                else:
+                    cmdline = _normalized_process_cmdline(info.get("cmdline"))
+                    if cmdline is None:
+                        return True
+                    commandline_paths = {
+                        os.path.normcase(os.path.abspath(argument))
+                        for argument in cmdline
+                        if os.path.splitext(argument)[1].casefold() == ".exe"
+                    }
+                    if program_path not in commandline_paths:
+                        continue
+                if any(argument.casefold() == "--world-worker" for argument in cmdline):
+                    continue
+                return True
+            except psutil.NoSuchProcess:
+                # A process that disappeared during inspection is not a live peer.
                 continue
-            if isinstance(executable, str) and os.path.normcase(
-                os.path.abspath(executable)
-            ) == program_path:
+            except (psutil.AccessDenied, OSError, TypeError, ValueError):
+                # Fail closed when process metadata cannot be classified reliably.
                 return True
         return False
 
@@ -384,6 +410,14 @@ def _portable_install_root() -> Path | None:
     program = Path(sys.executable).resolve().parent
     root = program.parent
     return root if program.name.casefold() == "program" else None
+
+
+def _normalized_process_cmdline(value: object) -> tuple[str, ...] | None:
+    if not isinstance(value, list | tuple) or not value or any(
+        not isinstance(argument, str) for argument in value
+    ):
+        return None
+    return tuple(value)
 
 
 def portable_application_update_in_progress(install_root: Path) -> bool:

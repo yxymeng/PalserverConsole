@@ -332,6 +332,69 @@ function Backup-Database {
     return $backupDirectory
 }
 
+function Test-ReparsePoint {
+    param([Parameter(Mandatory = $true)][System.IO.FileSystemInfo]$Item)
+
+    return (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Get-ManagedDatabaseCandidates {
+    param(
+        [Parameter(Mandatory = $true)][string]$InstallRootPath,
+        [Parameter(Mandatory = $true)][string]$DataDirectoryPath
+    )
+
+    $candidates = [System.Collections.Generic.List[object]]::new()
+    $seenPaths = [System.Collections.Generic.HashSet[string]]::new(
+        [System.StringComparer]::OrdinalIgnoreCase
+    )
+    $addCandidate = {
+        param(
+            [Parameter(Mandatory = $true)][string]$DatabasePath,
+            [Parameter(Mandatory = $true)][string]$OwnerDataDirectory
+        )
+
+        try {
+            $database = Get-Item -LiteralPath $DatabasePath -Force -ErrorAction SilentlyContinue
+        }
+        catch {
+            throw "DATABASE_UNAVAILABLE: cannot inspect $DatabasePath ($($_.Exception.Message))"
+        }
+        if ($null -eq $database -or $database.PSIsContainer -or (Test-ReparsePoint $database)) {
+            return
+        }
+        $fullDatabasePath = [System.IO.Path]::GetFullPath($database.FullName)
+        if ($seenPaths.Add($fullDatabasePath)) {
+            [void]$candidates.Add([pscustomobject]@{
+                DatabasePath = $fullDatabasePath
+                DataDirectory = [System.IO.Path]::GetFullPath($OwnerDataDirectory)
+            })
+        }
+    }
+
+    $installDataDirectory = Join-Path $InstallRootPath "data"
+    $installDataItem = Get-Item -LiteralPath $installDataDirectory -Force -ErrorAction SilentlyContinue
+    if ($null -ne $installDataItem -and $installDataItem.PSIsContainer -and -not (Test-ReparsePoint $installDataItem)) {
+        & $addCandidate (Join-Path $installDataDirectory "app.db") $installDataDirectory
+        $instancesDirectory = Join-Path $installDataDirectory "instances"
+        $instancesItem = Get-Item -LiteralPath $instancesDirectory -Force -ErrorAction SilentlyContinue
+        if ($null -ne $instancesItem -and $instancesItem.PSIsContainer -and -not (Test-ReparsePoint $instancesItem)) {
+            foreach ($instance in @(Get-ChildItem -LiteralPath $instancesDirectory -Directory -Force)) {
+                if (Test-ReparsePoint $instance) {
+                    continue
+                }
+                & $addCandidate (Join-Path $instance.FullName "app.db") $instance.FullName
+            }
+        }
+    }
+
+    $explicitDataItem = Get-Item -LiteralPath $DataDirectoryPath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $explicitDataItem -and $explicitDataItem.PSIsContainer -and -not (Test-ReparsePoint $explicitDataItem)) {
+        & $addCandidate (Join-Path $DataDirectoryPath "app.db") $DataDirectoryPath
+    }
+    return @($candidates)
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "Program") -PathType Container) {
         $PSScriptRoot
@@ -401,9 +464,11 @@ else {
     $dataDirectory = [System.IO.Path]::GetFullPath($DataDirectory)
 }
 New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
-$databasePath = Join-Path $dataDirectory "app.db"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
-if (Test-Path -LiteralPath $databasePath -PathType Leaf) {
+$databaseCandidates = @(Get-ManagedDatabaseCandidates $installRootPath $dataDirectory)
+$databaseRecords = [System.Collections.Generic.List[object]]::new()
+foreach ($candidate in $databaseCandidates) {
+    $databasePath = [string]$candidate.DatabasePath
     foreach ($sidecar in @("$databasePath-wal", "$databasePath-shm", "$databasePath-journal")) {
         if (Test-Path -LiteralPath $sidecar -PathType Leaf) {
             throw "DATABASE_SIDECAR_PRESENT: $sidecar. Start the existing console once, stop it normally, then retry."
@@ -413,10 +478,21 @@ if (Test-Path -LiteralPath $databasePath -PathType Leaf) {
     if ($currentSchemaVersion -gt $metadata.MaximumSchemaVersion) {
         throw (
             "INCOMPATIBLE_DOWNGRADE: current data app.db schema version $currentSchemaVersion " +
-            "is newer than candidate support $($metadata.MaximumSchemaVersion)."
+            "at $databasePath is newer than candidate support $($metadata.MaximumSchemaVersion)."
         )
     }
-    $databaseBackup = Backup-Database $dataDirectory $databasePath $currentSchemaVersion $timestamp
+    [void]$databaseRecords.Add([pscustomobject]@{
+        DatabasePath = $databasePath
+        DataDirectory = [string]$candidate.DataDirectory
+        SchemaVersion = [uint32]$currentSchemaVersion
+    })
+}
+foreach ($database in $databaseRecords) {
+    $databaseBackup = Backup-Database `
+        ([string]$database.DataDirectory) `
+        ([string]$database.DatabasePath) `
+        ([uint32]$database.SchemaVersion) `
+        $timestamp
     Write-Host "已创建数据库升级前备份：$databaseBackup"
 }
 

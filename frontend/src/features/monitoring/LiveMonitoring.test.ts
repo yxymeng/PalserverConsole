@@ -38,6 +38,7 @@ test("在线玩家只有在快照成功返回后才显示空状态", () => {
   expect(playerDataState(null, "NETWORK_ERROR", 0)).toBe("error");
   expect(playerDataState(snapshot, "", 0)).toBe("empty");
   expect(playerDataState(snapshot, "", 1)).toBe("ready");
+  expect(playerDataState(snapshot, "", null)).toBe("error");
   expect(playerDataState({
     ...snapshot,
     players: { data: [], source: "rest", observedAt: 1, stale: false, errorCode: "REST_HTTP_ERROR" },

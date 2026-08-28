@@ -7,7 +7,7 @@ import threading
 import time
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import psutil
@@ -340,7 +340,10 @@ def test_application_update_rejects_other_instance_from_same_install_root(
         (),
         {
             "pid": os.getpid() + 1,
-            "info": {"exe": str(install_root / "Program" / "PalServerConsole.exe")},
+            "info": {
+                "exe": str(install_root / "Program" / "PalServerConsole.exe"),
+                "cmdline": [str(install_root / "Program" / "PalServerConsole.exe")],
+            },
         },
     )()
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: [peer])
@@ -408,6 +411,108 @@ def test_application_update_allows_other_install_root(
     _enable_graceful_shutdown(service)
 
     assert service.prepare(version)["restartScheduled"] is True
+
+
+def test_application_update_ignores_same_install_world_worker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    version = "0.2.0"
+    package = _release_zip(version)
+    release: dict[str, object] = {
+        "tag_name": f"v{version}",
+        "assets": [
+            {
+                "name": f"PalServerConsole-{version}-windows-x64.zip",
+                "browser_download_url": f"https://github.com/yxymeng/PalserverConsole/releases/download/v{version}/PalServerConsole-{version}-windows-x64.zip",
+                "size": len(package),
+            }
+        ],
+    }
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    (install_root / "apply-downloaded-update.ps1").write_text("fixture", encoding="utf-8")
+    program = install_root / "Program" / "PalServerConsole.exe"
+    peer = type(
+        "WorldWorkerProcess",
+        (),
+        {
+            "pid": os.getpid() + 1,
+            "info": {"exe": str(program), "cmdline": [str(program), "--world-worker"]},
+        },
+    )()
+    monkeypatch.setattr(psutil, "process_iter", lambda _attrs: [peer])
+    service = ApplicationUpdateService(
+        "0.1.1",
+        tmp_path / "data",
+        client_factory=_client_factory(release, package),
+        install_root=install_root,
+        process_runner=cast(Any, lambda *args, **kwargs: object()),
+    )
+    _enable_graceful_shutdown(service)
+
+    assert service.prepare(version)["restartScheduled"] is True
+
+
+@pytest.mark.parametrize("cmdline", [None, "unknown"])
+def test_application_update_fail_closed_when_same_install_cmdline_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, cmdline: object
+) -> None:
+    version = "0.2.0"
+    package = _release_zip(version)
+    release: dict[str, object] = {
+        "tag_name": f"v{version}",
+        "assets": [
+            {
+                "name": f"PalServerConsole-{version}-windows-x64.zip",
+                "browser_download_url": f"https://github.com/yxymeng/PalserverConsole/releases/download/v{version}/PalServerConsole-{version}-windows-x64.zip",
+                "size": len(package),
+            }
+        ],
+    }
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    (install_root / "apply-downloaded-update.ps1").write_text("fixture", encoding="utf-8")
+    program = install_root / "Program" / "PalServerConsole.exe"
+    peer = type(
+        "UnknownCommandLineProcess",
+        (),
+        {
+            "pid": os.getpid() + 1,
+            "info": {"exe": str(program), "cmdline": cmdline},
+        },
+    )()
+    monkeypatch.setattr(psutil, "process_iter", lambda _attrs: [peer])
+    service = ApplicationUpdateService(
+        "0.1.1",
+        tmp_path / "data",
+        client_factory=_client_factory(release, package),
+        install_root=install_root,
+        process_runner=cast(Any, lambda *args, **kwargs: object()),
+    )
+    _enable_graceful_shutdown(service)
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare(version)
+
+    assert raised.value.code == "APPLICATION_UPDATE_INSTANCES_RUNNING"
+
+
+def test_application_update_fail_closed_on_process_metadata_access_denied(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+
+    class AccessDeniedProcess:
+        pid = os.getpid() + 1
+
+        @property
+        def info(self) -> dict[str, object]:
+            raise psutil.AccessDenied(self.pid)
+
+    monkeypatch.setattr(psutil, "process_iter", lambda _attrs: [AccessDeniedProcess()])
+
+    assert ApplicationUpdateService._other_install_instances_running(install_root) is True
 
 
 def test_application_update_allows_own_program_and_root_launcher(

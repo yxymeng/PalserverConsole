@@ -100,6 +100,50 @@ def _run_upgrade(
     )
 
 
+def _portable_upgrade_fixture(
+    tmp_path: Path,
+    *,
+    default_schema: int = 8,
+    named_schemas: dict[str, int] | None = None,
+    maximum_schema_version: int = 8,
+) -> tuple[Path, Path, dict[str, Path]]:
+    project_root = Path(__file__).resolve().parents[2]
+    install_root = tmp_path / "installed"
+    (install_root / "Program").mkdir(parents=True)
+    (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
+    (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
+    _write_maintenance_scripts(install_root, "old")
+    databases = {"default": install_root / "data" / "app.db"}
+    _write_database(databases["default"], default_schema)
+    for instance_id, schema_version in (named_schemas or {}).items():
+        databases[instance_id] = install_root / "data" / "instances" / instance_id / "app.db"
+        _write_database(databases[instance_id], schema_version)
+
+    package_root = tmp_path / "candidate"
+    candidate_program = package_root / "Program"
+    candidate_program.mkdir(parents=True)
+    (candidate_program / "release.txt").write_text("new", encoding="utf-8")
+    candidate_launcher = package_root / "PalServerConsole.exe"
+    candidate_launcher.write_bytes(b"new-launcher")
+    candidate_update_helper, candidate_upgrade_script = _write_maintenance_scripts(
+        package_root, "new"
+    )
+    metadata_path = package_root / "metadata" / "build-info.json"
+    _write_build_metadata(metadata_path, maximum_schema_version)
+    _write_checksum_manifest(
+        package_root,
+        [
+            candidate_launcher,
+            candidate_program / "release.txt",
+            candidate_update_helper,
+            candidate_upgrade_script,
+            metadata_path,
+        ],
+    )
+    assert (project_root / "scripts" / "upgrade-portable.ps1").is_file()
+    return install_root, package_root, databases
+
+
 def test_frozen_default_settings_keep_data_outside_the_program_directory(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -268,7 +312,7 @@ def test_portable_upgrade_uses_named_instance_data_directory(tmp_path: Path) -> 
     (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
     _write_maintenance_scripts(install_root, "old")
     default_database = install_root / "data" / "app.db"
-    _write_database(default_database, schema_version=9)
+    _write_database(default_database, schema_version=8)
     named_data_directory = install_root / "data" / "instances" / "north"
     named_database = named_data_directory / "app.db"
     _write_database(named_database, schema_version=8)
@@ -311,8 +355,107 @@ def test_portable_upgrade_uses_named_instance_data_directory(tmp_path: Path) -> 
     ) == "upgrade script new"
     assert _schema_version(named_database) == 8
     assert len(list((named_data_directory / "upgrade-backups").glob("*/app.db"))) == 1
-    assert _schema_version(default_database) == 9
+    assert _schema_version(default_database) == 8
+    assert len(list((install_root / "data" / "upgrade-backups").glob("*/app.db"))) == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_upgrade_scans_and_backups_all_managed_databases(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, databases = _portable_upgrade_fixture(
+        tmp_path, named_schemas={"north": 8, "south": 8}
+    )
+    (install_root / "data" / "instances" / "empty").mkdir()
+
+    upgraded = _run_upgrade(
+        script,
+        install_root,
+        package_root,
+        data_directory=databases["north"].parent,
+    )
+
+    assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    for database in databases.values():
+        assert _schema_version(database) == 8
+        backups = list((database.parent / "upgrade-backups").glob("*/app.db"))
+        assert len(backups) == 1
+        assert _schema_version(backups[0]) == 8
+    assert not (install_root / "data" / "instances" / "empty" / "upgrade-backups").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_upgrade_rejects_incompatible_non_current_named_database(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, databases = _portable_upgrade_fixture(
+        tmp_path, named_schemas={"north": 8, "south": 9}
+    )
+
+    blocked = _run_upgrade(
+        script,
+        install_root,
+        package_root,
+        data_directory=databases["north"].parent,
+    )
+
+    output = f"{blocked.stdout}\n{blocked.stderr}"
+    assert blocked.returncode != 0
+    assert "INCOMPATIBLE_DOWNGRADE" in output
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"old-launcher"
+    assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "old"
     assert not (install_root / "data" / "upgrade-backups").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_upgrade_rejects_sidecar_in_non_current_named_database(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, databases = _portable_upgrade_fixture(
+        tmp_path, named_schemas={"north": 8, "south": 8}
+    )
+    sidecar = databases["south"].with_name("app.db-wal")
+    sidecar.write_bytes(b"pending wal")
+
+    blocked = _run_upgrade(
+        script,
+        install_root,
+        package_root,
+        data_directory=databases["north"].parent,
+    )
+
+    output = f"{blocked.stdout}\n{blocked.stderr}"
+    assert blocked.returncode != 0
+    assert "DATABASE_SIDECAR_PRESENT" in output
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"old-launcher"
+    assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "old"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_upgrade_does_not_follow_reparse_instance_directory(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, _ = _portable_upgrade_fixture(tmp_path)
+    outside = tmp_path / "outside"
+    outside_database = outside / "app.db"
+    _write_database(outside_database, schema_version=99)
+    link = install_root / "data" / "instances" / "linked"
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.symlink(outside, link, target_is_directory=True)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"directory symlink unavailable: {error}")
+
+    upgraded = _run_upgrade(script, install_root, package_root)
+
+    assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
+    assert _schema_version(outside_database) == 99
+    assert not (outside / "upgrade-backups").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -587,6 +730,11 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "$currentInstallProcesses = @(Get-CurrentInstallConsoleProcesses" in upgrade_script
     assert "Get-ReleaseManagedEntry" in upgrade_script
     assert "Assert-ReleaseManagedFileChecksum" in upgrade_script
+    assert "function Get-ManagedDatabaseCandidates" in upgrade_script
+    assert "function Test-ReparsePoint" in upgrade_script
+    assert 'Join-Path $installDataDirectory "instances"' in upgrade_script
+    assert "$databaseCandidates = @(Get-ManagedDatabaseCandidates" in upgrade_script
+    assert "DATABASE_SIDECAR_PRESENT" in upgrade_script
     assert 'Join-Path $packageRootPath "apply-downloaded-update.ps1"' in upgrade_script
     assert 'Join-Path $packageRootPath "upgrade-portable.ps1"' in upgrade_script
     assert "未签名" in portable_readme

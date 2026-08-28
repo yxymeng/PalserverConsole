@@ -332,7 +332,7 @@ def _players_from_value(value: object) -> list[dict[str, object]]:
 
 
 def _player_id(player: Mapping[str, object]) -> str:
-    for key in ("userId", "userid", "playerId", "id", "steamId"):
+    for key in ("userId", "userid", "playerId", "playerUid", "id", "steamId"):
         value = player.get(key)
         if value is not None and str(value):
             return str(value)

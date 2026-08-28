@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import csv
+import io
 import json
 import logging
 import re
@@ -274,7 +276,15 @@ class PalServerRconClient:
         return self._command("Info")
 
     def players(self) -> Any:
-        return self._command("ShowPlayers")
+        payload = self._command("ShowPlayers")
+        if isinstance(payload, Mapping) and isinstance(payload.get("raw"), str):
+            payload = payload["raw"]
+        if not isinstance(payload, str):
+            raise SourceError(
+                "RCON_PLAYERS_UNSUPPORTED_FORMAT",
+                "RCON ShowPlayers response is not a supported text format.",
+            )
+        return _parse_showplayers_text(payload)
 
     def _command(self, command: str) -> Any:
         try:
@@ -341,6 +351,46 @@ def _parse_rcon_payload(payload: str) -> Any:
         return json.loads(payload)
     except json.JSONDecodeError:
         return {"raw": payload}
+
+
+def _parse_showplayers_text(payload: str) -> list[dict[str, str]]:
+    """Parse the documented ``name,playeruid,steamid`` ShowPlayers response."""
+
+    try:
+        rows = [
+            row
+            for row in csv.reader(io.StringIO(payload))
+            if any(cell.strip() for cell in row)
+        ]
+    except csv.Error as error:
+        raise SourceError(
+            "RCON_PLAYERS_UNSUPPORTED_FORMAT",
+            "RCON ShowPlayers response is not a supported CSV format.",
+        ) from error
+    if not rows or [cell.strip().casefold() for cell in rows[0]] != [
+        "name",
+        "playeruid",
+        "steamid",
+    ]:
+        raise SourceError(
+            "RCON_PLAYERS_UNSUPPORTED_FORMAT",
+            "RCON ShowPlayers response is missing the name,playeruid,steamid header.",
+        )
+    players: list[dict[str, str]] = []
+    for row in rows[1:]:
+        if len(row) != 3:
+            raise SourceError(
+                "RCON_PLAYERS_UNSUPPORTED_FORMAT",
+                "RCON ShowPlayers response contains a malformed player row.",
+            )
+        name, player_uid, steam_id = (value.strip() for value in row)
+        if not name or not player_uid or not steam_id:
+            raise SourceError(
+                "RCON_PLAYERS_UNSUPPORTED_FORMAT",
+                "RCON ShowPlayers response contains an incomplete player row.",
+            )
+        players.append({"name": name, "playerUid": player_uid, "steamId": steam_id})
+    return players
 
 
 @dataclass(frozen=True)
