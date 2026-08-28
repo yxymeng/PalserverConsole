@@ -100,6 +100,22 @@ def _run_upgrade(
     )
 
 
+def _run_encoded_powershell(script: str) -> subprocess.CompletedProcess[str]:
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+
+def _powershell_literal(value: Path | str) -> str:
+    return "'" + str(value).replace("'", "''") + "'"
+
+
 def _portable_upgrade_fixture(
     tmp_path: Path,
     *,
@@ -644,6 +660,7 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
         project_root / "scripts" / "apply-downloaded-update.ps1"
     ).read_text(encoding="utf-8-sig")
     portable_readme = (project_root / "docs" / "windows-portable.md").read_text(encoding="utf-8")
+    root_readme = (project_root / "README.md").read_text(encoding="utf-8-sig")
 
     assert '"%~dp0PalServerConsole.exe"' in source_launcher
     assert "PALSERVER_CONSOLE_DATA" in source_launcher
@@ -659,6 +676,17 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "QuoteArgument" in native_launcher
     assert "requirements-build.lock" in build_script
     assert "PyInstaller" in build_script
+    assert "function Assert-NpmPolicy" in build_script
+    assert "UNSUPPORTED_NPM_VERSION" in build_script
+    assert "function Assert-NpmInstallScriptsApproved" in build_script
+    assert "No packages with unreviewed install scripts" in build_script
+    assert "UNREVIEWED_INSTALL_SCRIPT" in build_script
+    assert build_script.index("Assert-NpmPolicy $npm.Source") < build_script.index(
+        "& $npm.Source ci"
+    )
+    assert build_script.index("Assert-NpmInstallScriptsApproved $npm.Source") < build_script.index(
+        "& $npm.Source run build"
+    )
     assert "--onedir" in build_script
     assert "--add-data" in build_script
     assert "checksums.sha256" in build_script
@@ -740,6 +768,98 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
+    assert "npm >= 11.17" in root_readme
+    assert "npm 11.17.0" in root_readme
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")
+@pytest.mark.parametrize("version", ["11.17.0", "12.0.0"])
+def test_portable_builder_accepts_supported_npm_versions(tmp_path: Path, version: str) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    npm_path = tmp_path / "npm.cmd"
+    npm_path.write_text(
+        f'@echo off\r\nif "%~1"=="--version" echo {version}\r\n', encoding="ascii"
+    )
+    script = f"""
+$buildPath = {_powershell_literal(project_root / "scripts" / "build-portable.ps1")}
+$npmPath = {_powershell_literal(npm_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $buildPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Assert-NpmPolicy"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+Assert-NpmPolicy -NpmPath $npmPath
+"""
+
+    completed = _run_encoded_powershell(script)
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "npm policy accepted" in completed.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")
+def test_portable_builder_rejects_unsupported_npm_before_install(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    npm_path = tmp_path / "npm.cmd"
+    npm_path.write_text('@echo off\r\nif "%~1"=="--version" echo 11.16.9\r\n', encoding="ascii")
+    script = f"""
+$buildPath = {_powershell_literal(project_root / "scripts" / "build-portable.ps1")}
+$npmPath = {_powershell_literal(npm_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $buildPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Assert-NpmPolicy"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+Assert-NpmPolicy -NpmPath $npmPath
+"""
+
+    completed = _run_encoded_powershell(script)
+
+    assert completed.returncode != 0
+    assert "UNSUPPORTED_NPM_VERSION" in f"{completed.stdout}\n{completed.stderr}"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")
+@pytest.mark.parametrize(
+    ("approval_output", "expected_success"),
+    [
+        ("No packages with unreviewed install scripts.", True),
+        ("Packages with unreviewed install scripts remain.", False),
+    ],
+)
+def test_portable_builder_enforces_install_script_policy(
+    tmp_path: Path, approval_output: str, expected_success: bool
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    npm_path = tmp_path / "npm.cmd"
+    npm_path.write_text(
+        f'@echo off\r\nif "%~1"=="approve-scripts" echo {approval_output}\r\n',
+        encoding="ascii",
+    )
+    script = f"""
+$buildPath = {_powershell_literal(project_root / "scripts" / "build-portable.ps1")}
+$npmPath = {_powershell_literal(npm_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $buildPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Assert-NpmInstallScriptsApproved"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+Assert-NpmInstallScriptsApproved -NpmPath $npmPath
+"""
+
+    completed = _run_encoded_powershell(script)
+
+    assert (completed.returncode == 0) is expected_success, (
+        f"{completed.stdout}\n{completed.stderr}"
+    )
+    if not expected_success:
+        assert "UNREVIEWED_INSTALL_SCRIPT" in f"{completed.stdout}\n{completed.stderr}"
 
 
 def test_portable_update_waits_for_current_installation_console_processes() -> None:

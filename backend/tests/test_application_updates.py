@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import math
 import os
 import threading
 import time
@@ -52,6 +53,51 @@ def _client_factory(release: dict[str, object], package: bytes) -> Any:
 
 def _enable_graceful_shutdown(service: ApplicationUpdateService) -> None:
     service.bind_shutdown_requester(lambda: None)
+
+
+class _FakeHelperProcess:
+    def __init__(self, *, returncode: int | None = None) -> None:
+        self.pid = os.getpid()
+        self.returncode = returncode
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+
+    def kill(self) -> None:
+        self.terminated = True
+        self.returncode = -9
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode if self.returncode is not None else 0
+
+
+def _handoff_runner(
+    lock_path: Path,
+    calls: list[list[str]] | None = None,
+    process: _FakeHelperProcess | None = None,
+) -> Any:
+    helper = process or _FakeHelperProcess()
+
+    def runner(command: list[str], **kwargs: object) -> _FakeHelperProcess:
+        if calls is not None:
+            calls.append(command)
+        metadata = json.loads(lock_path.read_text(encoding="utf-8-sig"))
+        metadata.update(
+            {
+                "pid": helper.pid,
+                "processStartedAt": psutil.Process(helper.pid).create_time(),
+                "phase": "helper",
+            }
+        )
+        lock_path.write_text(json.dumps(metadata), encoding="utf-8")
+        return helper
+
+    return runner
 
 
 def _write_update_lock(
@@ -125,9 +171,22 @@ def test_application_update_prepares_package_and_starts_external_helper(
     data_directory = tmp_path / "data" / "instances" / "north"
     calls: list[tuple[list[str], dict[str, object]]] = []
 
-    def runner(command: list[str], **kwargs: object) -> Any:
+    def runner(command: list[str], **kwargs: object) -> _FakeHelperProcess:
         calls.append((command, kwargs))
-        return object()
+        metadata = json.loads(
+            (install_root / ".palserver-console-update.lock").read_text(encoding="utf-8-sig")
+        )
+        metadata.update(
+            {
+                "pid": os.getpid(),
+                "processStartedAt": psutil.Process(os.getpid()).create_time(),
+                "phase": "helper",
+            }
+        )
+        (install_root / ".palserver-console-update.lock").write_text(
+            json.dumps(metadata), encoding="utf-8"
+        )
+        return _FakeHelperProcess()
 
     service = ApplicationUpdateService(
         "0.1.1",
@@ -136,7 +195,7 @@ def test_application_update_prepares_package_and_starts_external_helper(
         install_root=install_root,
         instance_id="north",
         port=18224,
-        process_runner=runner,
+        process_runner=cast(Any, runner),
     )
     _enable_graceful_shutdown(service)
 
@@ -160,7 +219,7 @@ def test_application_update_prepares_package_and_starts_external_helper(
     lock_metadata = json.loads(
         (install_root / ".palserver-console-update.lock").read_text(encoding="utf-8")
     )
-    assert lock_metadata["phase"] == "prepare"
+    assert lock_metadata["phase"] == "helper"
     assert lock_metadata["lockId"] == command[command.index("-UpdateLockId") + 1]
     assert lock_metadata["processStartedAt"] > 0
 
@@ -223,8 +282,7 @@ def test_application_update_rejects_overlapping_install_root(tmp_path: Path) -> 
     install_root.mkdir()
     (install_root / "apply-downloaded-update.ps1").write_text("fixture", encoding="utf-8")
 
-    def runner(command: list[str], **kwargs: object) -> Any:
-        return object()
+    runner = _handoff_runner(install_root / ".palserver-console-update.lock")
 
     first = ApplicationUpdateService(
         "0.1.1",
@@ -398,8 +456,7 @@ def test_application_update_allows_other_install_root(
     )()
     monkeypatch.setattr(psutil, "process_iter", lambda attrs: [peer])
 
-    def runner(*args: Any, **kwargs: Any) -> Any:
-        return object()
+    runner = _handoff_runner(install_root / ".palserver-console-update.lock")
 
     service = ApplicationUpdateService(
         "0.1.1",
@@ -441,12 +498,13 @@ def test_application_update_ignores_same_install_world_worker(
         },
     )()
     monkeypatch.setattr(psutil, "process_iter", lambda _attrs: [peer])
+    lock_path = install_root / ".palserver-console-update.lock"
     service = ApplicationUpdateService(
         "0.1.1",
         tmp_path / "data",
         client_factory=_client_factory(release, package),
         install_root=install_root,
-        process_runner=cast(Any, lambda *args, **kwargs: object()),
+        process_runner=_handoff_runner(lock_path),
     )
     _enable_graceful_shutdown(service)
 
@@ -549,9 +607,7 @@ def test_application_update_allows_own_program_and_root_launcher(
     monkeypatch.setattr(
         psutil, "process_iter", lambda attrs: [own_program, root_launcher]
     )
-
-    def runner(*args: Any, **kwargs: Any) -> Any:
-        return object()
+    runner = _handoff_runner(install_root / ".palserver-console-update.lock")
 
     service = ApplicationUpdateService(
         "0.1.1",
@@ -768,3 +824,191 @@ def test_portable_application_update_in_progress_keeps_incomplete_lock(
 
     assert portable_application_update_in_progress(install_root) is True
     assert lock_path.is_file()
+
+
+def test_concurrent_reclaimers_leave_only_one_active_update_owner(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": "abandoned",
+                "pid": 4321,
+                "processStartedAt": 100.0,
+                "phase": "prepare",
+            }
+        ),
+        encoding="utf-8",
+    )
+    actual_process = psutil.Process
+
+    def process(pid: int) -> Any:
+        if pid == 4321:
+            raise psutil.NoSuchProcess(pid)
+        return actual_process(pid)
+
+    monkeypatch.setattr(psutil, "Process", process)
+    barrier = threading.Barrier(2)
+    outcomes: list[tuple[str, str]] = []
+    outcome_lock = threading.Lock()
+
+    def contend(instance_id: str) -> None:
+        barrier.wait()
+        service = ApplicationUpdateService(
+            "0.1.1", tmp_path / "data" / instance_id, install_root=install_root
+        )
+        try:
+            _, lock_id = service._acquire_update_lock()
+            outcome = ("success", lock_id)
+        except ApplicationUpdateError as error:
+            outcome = ("error", error.code)
+        with outcome_lock:
+            outcomes.append(outcome)
+
+    threads = [
+        threading.Thread(target=contend, args=("north",)),
+        threading.Thread(target=contend, args=("south",)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+    assert all(not thread.is_alive() for thread in threads)
+    assert sorted(outcome[0] for outcome in outcomes) == ["error", "success"]
+    assert next(outcome[1] for outcome in outcomes if outcome[0] == "error") == (
+        "APPLICATION_UPDATE_IN_PROGRESS"
+    )
+    metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert metadata["lockId"] == next(
+        outcome[1] for outcome in outcomes if outcome[0] == "success"
+    )
+    ApplicationUpdateService._release_update_lock(lock_path)
+
+
+def _handoff_service_fixture(
+    tmp_path: Path,
+    runner: Any,
+    *,
+    timeout: float = 10.0,
+) -> tuple[ApplicationUpdateService, Path, Path, threading.Event]:
+    version = "0.2.0"
+    package = _release_zip(version)
+    release: dict[str, object] = {
+        "tag_name": f"v{version}",
+        "assets": [
+            {
+                "name": f"PalServerConsole-{version}-windows-x64.zip",
+                "browser_download_url": f"https://github.com/yxymeng/PalserverConsole/releases/download/v{version}/PalServerConsole-{version}-windows-x64.zip",
+                "size": len(package),
+            }
+        ],
+    }
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    (install_root / "apply-downloaded-update.ps1").write_text("fixture", encoding="utf-8")
+    data_directory = tmp_path / "data"
+    requested = threading.Event()
+    service = ApplicationUpdateService(
+        "0.1.1",
+        data_directory,
+        client_factory=_client_factory(release, package),
+        install_root=install_root,
+        process_runner=runner,
+        helper_handoff_timeout_seconds=timeout,
+    )
+    service.bind_shutdown_requester(requested.set)
+    return service, install_root, data_directory, requested
+
+
+def test_application_update_confirms_helper_handoff_before_shutdown(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+    service, install_root, _, requested = _handoff_service_fixture(
+        tmp_path, _handoff_runner(lock_path)
+    )
+
+    result = service.prepare("0.2.0")
+    assert result["restartScheduled"] is True
+    metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+    assert metadata["phase"] == "helper"
+    assert metadata["pid"] == os.getpid()
+    assert math.isclose(
+        float(metadata["processStartedAt"]), psutil.Process(os.getpid()).create_time(), abs_tol=0.01
+    )
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+    service.schedule_shutdown()
+    assert requested.wait(timeout=1.0)
+    assert install_root.is_dir()
+
+
+def test_application_update_handoff_timeout_terminates_helper_and_releases_lock(
+    tmp_path: Path,
+) -> None:
+    helper = _FakeHelperProcess()
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+
+    def runner(*args: Any, **kwargs: Any) -> _FakeHelperProcess:
+        return helper
+
+    service, _, _, requested = _handoff_service_fixture(tmp_path, runner, timeout=0.01)
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_TIMEOUT"
+    assert helper.terminated is True
+    assert not lock_path.exists()
+    assert not requested.is_set()
+
+
+def test_application_update_handoff_early_exit_does_not_shutdown(
+    tmp_path: Path,
+) -> None:
+    helper = _FakeHelperProcess(returncode=1)
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+    service, _, _, requested = _handoff_service_fixture(
+        tmp_path,
+        lambda *args, **kwargs: helper,
+        timeout=1.0,
+    )
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_FAILED"
+    assert not lock_path.exists()
+    assert not requested.is_set()
+
+
+def test_application_update_handoff_wrong_lock_id_is_not_deleted(
+    tmp_path: Path,
+) -> None:
+    helper = _FakeHelperProcess()
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+
+    def runner(*args: Any, **kwargs: Any) -> _FakeHelperProcess:
+        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        metadata.update(
+            {
+                "lockId": "wrong-lock-id",
+                "pid": helper.pid,
+                "processStartedAt": psutil.Process(helper.pid).create_time(),
+                "phase": "helper",
+            }
+        )
+        lock_path.write_text(json.dumps(metadata), encoding="utf-8")
+        return helper
+
+    service, _, _, requested = _handoff_service_fixture(tmp_path, runner)
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_FAILED"
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["lockId"] == "wrong-lock-id"
+    assert helper.terminated is True
+    assert not requested.is_set()

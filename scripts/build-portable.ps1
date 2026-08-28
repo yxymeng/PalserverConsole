@@ -15,6 +15,40 @@ function Assert-ExitCode {
     }
 }
 
+function Assert-NpmPolicy {
+    param([Parameter(Mandatory = $true)][string]$NpmPath)
+
+    $versionOutput = @(& $NpmPath --version 2>&1)
+    $versionExitCode = $LASTEXITCODE
+    $versionText = ($versionOutput | Out-String).Trim()
+    if ($versionExitCode -ne 0 -or $versionText -notmatch '^\s*(\d+)\.(\d+)(?:\.(\d+))?\s*$') {
+        throw "UNSUPPORTED_NPM_VERSION: npm >= 11.17 is required; detected '$versionText'."
+    }
+    $npmMajor = [int]$matches[1]
+    $npmMinor = [int]$matches[2]
+    if ($npmMajor -lt 11 -or ($npmMajor -eq 11 -and $npmMinor -lt 17)) {
+        throw "UNSUPPORTED_NPM_VERSION: npm >= 11.17 is required; detected $versionText."
+    }
+    Write-Host "[PalServerConsole] npm policy accepted: $versionText (requires >= 11.17)."
+
+    return $versionText
+}
+
+function Assert-NpmInstallScriptsApproved {
+    param([Parameter(Mandatory = $true)][string]$NpmPath)
+
+    $approvalOutput = @(& $NpmPath approve-scripts --allow-scripts-pending 2>&1)
+    $approvalExitCode = $LASTEXITCODE
+    $approvalOutput | ForEach-Object { Write-Host $_ }
+    $approvalText = ($approvalOutput | Out-String)
+    if (
+        $approvalExitCode -ne 0 -or
+        $approvalText -notmatch "No packages with unreviewed install scripts"
+    ) {
+        throw "UNREVIEWED_INSTALL_SCRIPT: npm.cmd approve-scripts did not confirm a clean install-script policy."
+    }
+}
+
 function Assert-BuildRuntime {
     param([Parameter(Mandatory = $true)][string]$PythonExecutable)
 
@@ -150,10 +184,12 @@ try {
     if ($null -eq $npm) {
         throw "npm.cmd was not found. Install Node.js 24 LTS on the build machine."
     }
+    Assert-NpmPolicy $npm.Source | Out-Null
     Set-Location -LiteralPath $frontendRoot
     Write-Host "[PalServerConsole] 正在按 package-lock.json 构建前端..."
     & $npm.Source ci
     Assert-ExitCode "npm.cmd ci"
+    Assert-NpmInstallScriptsApproved $npm.Source
     & $npm.Source run build
     Assert-ExitCode "npm.cmd run build"
     if (-not (Test-Path -LiteralPath (Join-Path $frontendDist "index.html") -PathType Leaf)) {

@@ -30,7 +30,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 以下步骤用于当前源码版本。构建出的 Windows 便携版解压后直接双击根目录的 `PalServerConsole.exe`；它自带运行时，普通使用者无需安装 Python 或 Node.js。详细说明见 [`docs/windows-portable.md`](docs/windows-portable.md)。
 
 1. 安装 **64 位 CPython 3.13**，并勾选 **Add Python to PATH**。其他 Python 版本不属于本项目的构建和验证范围。
-2. 安装 Node.js LTS。首次构建前端时需要，之后只有前端源码或锁文件发生变化时才需要重新构建。
+2. 安装 Node.js 24 LTS，并确认 npm >= 11.17（推荐/固定验证 npm 11.17.0）。首次构建前端时需要，之后只有前端源码或锁文件发生变化时才需要重新构建。
 3. 双击项目目录中的 `start-console.bat`。
 4. 浏览器访问 [http://127.0.0.1:8223/](http://127.0.0.1:8223/)。
 
@@ -118,7 +118,7 @@ npm.cmd run build
 npm.cmd run test:e2e
 ```
 
-构建 Windows 便携版（仅构建机需要 64 位 CPython 3.13 和 Node.js 24 LTS）：
+构建 Windows 便携版（仅构建机需要 64 位 CPython 3.13、Node.js 24 LTS 和 npm >= 11.17；推荐/固定验证 npm 11.17.0）：
 
 ```powershell
 .\scripts\build-portable.ps1
