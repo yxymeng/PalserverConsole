@@ -411,6 +411,12 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Restore-ConsoleLauncher" in application_update_helper
     assert "$updateError = $_" in application_update_helper
     assert "UPDATE_FAILURE_RELAUNCH_FAILED" in application_update_helper
+    assert ".palserver-console-update.lock" in application_update_helper
+    assert "finally" in application_update_helper
+    assert (
+        "Remove-Item -LiteralPath $updateLockPath -Force -ErrorAction SilentlyContinue"
+        in application_update_helper
+    )
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
     assert '[string]$DataDirectory = ""' in upgrade_script
@@ -437,6 +443,52 @@ def test_portable_update_waits_for_current_installation_console_processes() -> N
     assert update_helper.index("Get-CurrentInstallConsoleProcesses") < update_helper.index(
         "& $upgradeScript"
     )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    data_directory = tmp_path / "data"
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text("fixture", encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(update_helper),
+            "-WaitPid",
+            "999999",
+            "-InstallRoot",
+            str(install_root),
+            "-DataDirectory",
+            str(data_directory),
+            "-NewPackage",
+            str(tmp_path / "missing-package"),
+            "-InstanceId",
+            "north",
+            "-Port",
+            "18224",
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode == 1, f"{completed.stdout}\n{completed.stderr}"
+    assert not lock_path.exists()
+    assert "UPDATE_HELPER_INVALID" in (
+        data_directory / "application-updates" / "apply-update.log"
+    ).read_text(encoding="utf-8")
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helpers target Windows")

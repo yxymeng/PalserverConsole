@@ -108,6 +108,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 "PORTABLE_REQUIRED",
                 "RELEASE_CHANGED",
                 "RELEASE_ASSET_MISSING",
+                "APPLICATION_UPDATE_IN_PROGRESS",
             } else 502
             return error_response(status, error.code, str(error))
         deps.audit.record(

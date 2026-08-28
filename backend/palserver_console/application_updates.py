@@ -10,6 +10,7 @@ import time
 import uuid
 import zipfile
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -61,84 +62,92 @@ class ApplicationUpdateService:
         return self._release_status(release)
 
     def prepare(self, expected_version: str) -> dict[str, object]:
-        status = self.check()
-        latest = str(status["latestVersion"])
-        if expected_version != latest or not status["updateAvailable"]:
-            raise ApplicationUpdateError(
-                "RELEASE_CHANGED",
-                "GitHub Release changed or no newer version is currently available.",
-            )
-        if self.install_root is None:
+        install_root = self.install_root
+        if install_root is None:
             raise ApplicationUpdateError(
                 "PORTABLE_REQUIRED",
                 "Automatic installation is only available in the Windows portable package.",
             )
-        asset_url = status.get("assetUrl")
-        if not isinstance(asset_url, str) or not asset_url:
-            raise ApplicationUpdateError(
-                "RELEASE_ASSET_MISSING",
-                f"Release asset PalServerConsole-{latest}-windows-x64.zip is missing.",
-            )
-
-        update_root = self.data_dir / "application-updates"
-        update_root.mkdir(parents=True, exist_ok=True)
-        download_path = update_root / f"PalServerConsole-{latest}-windows-x64.zip"
-        staging_root = update_root / f".staging-{uuid.uuid4().hex}"
-        package_root = update_root / f"PalServerConsole-{latest}-windows-x64"
-        if package_root.exists():
-            shutil.rmtree(package_root)
+        lock_path = self._acquire_update_lock()
+        helper_started = False
         try:
-            self._download(asset_url, download_path)
-            staging_root.mkdir()
-            _extract_release(download_path, staging_root)
-            _validate_release_root(staging_root, latest)
-            staging_root.replace(package_root)
-        except Exception:
-            shutil.rmtree(staging_root, ignore_errors=True)
-            raise
+            status = self.check()
+            latest = str(status["latestVersion"])
+            if expected_version != latest or not status["updateAvailable"]:
+                raise ApplicationUpdateError(
+                    "RELEASE_CHANGED",
+                    "GitHub Release changed or no newer version is currently available.",
+                )
+            asset_url = status.get("assetUrl")
+            if not isinstance(asset_url, str) or not asset_url:
+                raise ApplicationUpdateError(
+                    "RELEASE_ASSET_MISSING",
+                    f"Release asset PalServerConsole-{latest}-windows-x64.zip is missing.",
+                )
 
-        helper = self.install_root / "apply-downloaded-update.ps1"
-        powershell = (
-            Path(os.environ.get("SYSTEMROOT", r"C:\Windows"))
-            / "System32"
-            / "WindowsPowerShell"
-            / "v1.0"
-            / "powershell.exe"
-        )
-        if not helper.is_file() or not powershell.is_file():
-            raise ApplicationUpdateError(
-                "UPDATE_HELPER_MISSING",
-                "Portable update helper or Windows PowerShell 5.1 is missing.",
+            update_root = self.data_dir / "application-updates"
+            update_root.mkdir(parents=True, exist_ok=True)
+            download_path = update_root / f"PalServerConsole-{latest}-windows-x64.zip"
+            staging_root = update_root / f".staging-{uuid.uuid4().hex}"
+            package_root = update_root / f"PalServerConsole-{latest}-windows-x64"
+            if package_root.exists():
+                shutil.rmtree(package_root)
+            try:
+                self._download(asset_url, download_path)
+                staging_root.mkdir()
+                _extract_release(download_path, staging_root)
+                _validate_release_root(staging_root, latest)
+                staging_root.replace(package_root)
+            except Exception:
+                shutil.rmtree(staging_root, ignore_errors=True)
+                raise
+            helper = install_root / "apply-downloaded-update.ps1"
+            powershell = (
+                Path(os.environ.get("SYSTEMROOT", r"C:\Windows"))
+                / "System32"
+                / "WindowsPowerShell"
+                / "v1.0"
+                / "powershell.exe"
             )
-        self.process_runner(
-            [
-                str(powershell),
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(helper),
-                "-WaitPid",
-                str(os.getpid()),
-                "-InstallRoot",
-                str(self.install_root),
-                "-DataDirectory",
-                str(self.data_dir),
-                "-NewPackage",
-                str(package_root),
-                "-InstanceId",
-                self.instance_id,
-                "-Port",
-                str(self.port),
-            ],
-            cwd=str(self.install_root),
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-        return {
-            "message": "更新包已校验，控制台将退出并完成升级。",
-            "version": latest,
-            "restartScheduled": True,
-        }
+            if not helper.is_file() or not powershell.is_file():
+                raise ApplicationUpdateError(
+                    "UPDATE_HELPER_MISSING",
+                    "Portable update helper or Windows PowerShell 5.1 is missing.",
+                )
+            self.process_runner(
+                [
+                    str(powershell),
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(helper),
+                    "-WaitPid",
+                    str(os.getpid()),
+                    "-InstallRoot",
+                    str(install_root),
+                    "-DataDirectory",
+                    str(self.data_dir),
+                    "-NewPackage",
+                    str(package_root),
+                    "-InstanceId",
+                    self.instance_id,
+                    "-Port",
+                    str(self.port),
+                ],
+                cwd=str(install_root),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            helper_started = True
+            return {
+                "message": "更新包已校验，控制台将退出并完成升级。",
+                "version": latest,
+                "restartScheduled": True,
+            }
+        except Exception:
+            if not helper_started:
+                self._release_update_lock(lock_path)
+            raise
 
     def schedule_shutdown(self) -> None:
         def shutdown() -> None:
@@ -146,6 +155,36 @@ class ApplicationUpdateService:
             self.exit_process(0)
 
         threading.Thread(target=shutdown, name="application-update-shutdown", daemon=True).start()
+
+    def _acquire_update_lock(self) -> Path:
+        if self.install_root is None:
+            raise ApplicationUpdateError(
+                "PORTABLE_REQUIRED",
+                "Automatic installation is only available in the Windows portable package.",
+            )
+        lock_path = self.install_root / ".palserver-console-update.lock"
+        try:
+            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError as error:
+            raise ApplicationUpdateError(
+                "APPLICATION_UPDATE_IN_PROGRESS",
+                "Another application update is already in progress.",
+            ) from error
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(
+                {
+                    "pid": os.getpid(),
+                    "instanceId": self.instance_id,
+                    "createdAt": int(time.time()),
+                },
+                stream,
+            )
+        return lock_path
+
+    @staticmethod
+    def _release_update_lock(lock_path: Path) -> None:
+        with suppress(FileNotFoundError):
+            lock_path.unlink()
 
     def _release_status(self, release: object) -> dict[str, object]:
         if not isinstance(release, dict):

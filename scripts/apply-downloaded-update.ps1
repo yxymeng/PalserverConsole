@@ -82,11 +82,13 @@ $dataDirectoryPath = [System.IO.Path]::GetFullPath($DataDirectory)
 $packageRootPath = [System.IO.Path]::GetFullPath($NewPackage)
 $upgradeScript = Join-Path $packageRootPath "upgrade-portable.ps1"
 $launcher = Join-Path $installRootPath "PalServerConsole.exe"
+$updateLockPath = Join-Path $installRootPath ".palserver-console-update.lock"
 $logDirectory = Join-Path $dataDirectoryPath "application-updates"
 $logPath = Join-Path $logDirectory "apply-update.log"
-New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+$exitCode = 0
 
 try {
+    New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ([DateTime]::UtcNow -ge $deadline) {
@@ -133,5 +135,10 @@ catch {
     catch {
         $_ | Out-File -LiteralPath $logPath -Append -Encoding utf8
     }
-    exit 1
+    $exitCode = 1
 }
+finally {
+    Remove-Item -LiteralPath $updateLockPath -Force -ErrorAction SilentlyContinue
+}
+
+exit $exitCode
