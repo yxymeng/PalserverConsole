@@ -34,6 +34,24 @@ function Assert-NpmPolicy {
     return $versionText
 }
 
+function Assert-NodeRuntime {
+    param([Parameter(Mandatory = $true)][string]$NodePath)
+
+    $versionOutput = @(& $NodePath --version 2>&1)
+    $versionExitCode = $LASTEXITCODE
+    $versionText = ($versionOutput | Out-String).Trim()
+    if ($versionExitCode -ne 0 -or $versionText -notmatch '^\s*v(\d+)\.(\d+)\.(\d+)\s*$') {
+        throw "UNSUPPORTED_NODE_VERSION: Node.js 24 LTS is required; detected $versionText."
+    }
+    $nodeMajor = [int]$matches[1]
+    if ($nodeMajor -ne 24) {
+        throw "UNSUPPORTED_NODE_VERSION: Node.js 24 LTS is required; detected $versionText."
+    }
+    Write-Host "[PalServerConsole] Node.js runtime accepted: $versionText (requires 24.x)."
+
+    return $versionText
+}
+
 function Assert-NpmInstallScriptsApproved {
     param([Parameter(Mandatory = $true)][string]$NpmPath)
 
@@ -179,6 +197,12 @@ try {
     if ($pyInstallerVersion -ne "6.22.0") {
         throw "Unexpected PyInstaller version $pyInstallerVersion; requirements-build.lock requires 6.22.0."
     }
+
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($null -eq $node) {
+        throw "UNSUPPORTED_NODE_VERSION: Node.js 24 LTS is required; node.exe was not found."
+    }
+    Assert-NodeRuntime $node.Source | Out-Null
 
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if ($null -eq $npm) {

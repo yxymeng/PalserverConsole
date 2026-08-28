@@ -4,6 +4,8 @@ import io
 import json
 import math
 import os
+import subprocess
+import sys
 import threading
 import time
 import zipfile
@@ -18,6 +20,7 @@ from palserver_console.application_updates import (
     RELEASE_API_URL,
     ApplicationUpdateError,
     ApplicationUpdateService,
+    _InstallUpdateGuard,
     portable_application_update_in_progress,
 )
 
@@ -56,23 +59,47 @@ def _enable_graceful_shutdown(service: ApplicationUpdateService) -> None:
 
 
 class _FakeHelperProcess:
-    def __init__(self, *, returncode: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        returncode: int | None = None,
+        terminate_error: bool = False,
+        terminate_exits: bool = True,
+        wait_timeout: bool = False,
+        kill_error: bool = False,
+        kill_exits: bool = True,
+    ) -> None:
         self.pid = os.getpid()
         self.returncode = returncode
         self.terminated = False
+        self.killed = False
+        self.terminate_error = terminate_error
+        self.terminate_exits = terminate_exits
+        self.wait_timeout = wait_timeout
+        self.kill_error = kill_error
+        self.kill_exits = kill_exits
 
     def poll(self) -> int | None:
         return self.returncode
 
     def terminate(self) -> None:
         self.terminated = True
-        self.returncode = -15
+        if self.terminate_error:
+            raise OSError("terminate failed")
+        if self.terminate_exits:
+            self.returncode = -15
 
     def kill(self) -> None:
+        self.killed = True
+        if self.kill_error:
+            raise OSError("kill failed")
         self.terminated = True
-        self.returncode = -9
+        if self.kill_exits:
+            self.returncode = -9
 
     def wait(self, timeout: float | None = None) -> int:
+        if self.wait_timeout:
+            raise subprocess.TimeoutExpired("fake-helper", timeout or 0.0)
         return self.returncode if self.returncode is not None else 0
 
 
@@ -105,6 +132,223 @@ def _write_update_lock(
 ) -> None:
     encoded = json.dumps(metadata).encode("utf-8")
     lock_path.write_bytes((b"\xef\xbb\xbf" if bom else b"") + encoded)
+
+
+def _subprocess_environment(project_root: Path) -> dict[str, str]:
+    environment = os.environ.copy()
+    python_path = [str(project_root / "backend")]
+    if environment.get("PYTHONPATH"):
+        python_path.append(environment["PYTHONPATH"])
+    environment["PYTHONPATH"] = os.pathsep.join(python_path)
+    return environment
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows update guard contract")
+def test_install_update_guard_uses_install_root_exclusive_file_handle(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    source = (project_root / "backend" / "palserver_console" / "application_updates.py").read_text(
+        encoding="utf-8"
+    )
+    assert "CreateFileW" in source
+    assert "CreateMutexW" not in source
+    assert "Local\\\\PalServerConsole.UpdateGuard." not in source
+
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    with _InstallUpdateGuard(install_root):
+        pass
+    assert (install_root / ".palserver-console-update.guard").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows update guard contract")
+def test_install_update_guard_serializes_real_processes(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    child_script = """
+import json
+import sys
+import time
+from pathlib import Path
+
+from palserver_console.application_updates import _InstallUpdateGuard
+
+with _InstallUpdateGuard(Path(sys.argv[1])):
+    entered = time.monotonic()
+    print(json.dumps({"entered": entered}), flush=True)
+    time.sleep(float(sys.argv[2]))
+    print(json.dumps({"exited": time.monotonic()}), flush=True)
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", child_script, str(install_root), "0.25"],
+            cwd=str(project_root),
+            env=_subprocess_environment(project_root),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(2)
+    ]
+    try:
+        payloads: list[dict[str, float]] = []
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=15)
+            assert process.returncode == 0, f"{stdout}\n{stderr}"
+            lines = [line for line in stdout.splitlines() if line]
+            assert len(lines) == 2, f"{stdout}\n{stderr}"
+            payloads.append({**json.loads(lines[0]), **json.loads(lines[1])})
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+    first, second = payloads
+    assert first["exited"] <= second["entered"] or second["exited"] <= first["entered"]
+    assert (install_root / ".palserver-console-update.guard").is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows update guard contract")
+def test_abandoned_reclaim_with_real_processes_leaves_one_update_owner(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    owner_script = """
+import json
+import os
+import sys
+from pathlib import Path
+
+import psutil
+
+from palserver_console.application_updates import _InstallUpdateGuard
+
+root = Path(sys.argv[1])
+with _InstallUpdateGuard(root):
+    (root / ".palserver-console-update.lock").write_text(
+        json.dumps({
+            "lockId": "abandoned",
+            "pid": os.getpid(),
+            "processStartedAt": psutil.Process(os.getpid()).create_time(),
+            "phase": "prepare",
+        }),
+        encoding="utf-8",
+    )
+print(json.dumps({"pid": os.getpid()}), flush=True)
+"""
+    owner = subprocess.run(
+        [sys.executable, "-c", owner_script, str(install_root)],
+        cwd=str(project_root),
+        env=_subprocess_environment(project_root),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert owner.returncode == 0, f"{owner.stdout}\n{owner.stderr}"
+    owner_metadata = json.loads(owner.stdout.splitlines()[-1])
+    assert owner_metadata["pid"] != os.getpid()
+
+    start_path = tmp_path / "start"
+    release_path = tmp_path / "release"
+    contenders = []
+    contender_scripts = """
+import json
+import sys
+import time
+from pathlib import Path
+
+from palserver_console.application_updates import ApplicationUpdateError, ApplicationUpdateService
+
+root = Path(sys.argv[1])
+ready_path = Path(sys.argv[2])
+result_path = Path(sys.argv[3])
+start_path = Path(sys.argv[4])
+release_path = Path(sys.argv[5])
+ready_path.write_text("ready", encoding="ascii")
+while not start_path.exists():
+    time.sleep(0.01)
+service = ApplicationUpdateService("0.1.1", root / "data", install_root=root)
+try:
+    lock_path, lock_id = service._acquire_update_lock()
+except ApplicationUpdateError as error:
+    result_path.write_text(
+        json.dumps({"outcome": "error", "code": error.code}), encoding="utf-8"
+    )
+else:
+    result_path.write_text(
+        json.dumps({"outcome": "success", "lockId": lock_id}), encoding="utf-8"
+    )
+    while not release_path.exists():
+        time.sleep(0.01)
+    service._release_update_lock(lock_path)
+"""
+    try:
+        for name in ("north", "south"):
+            ready_path = tmp_path / f"{name}.ready"
+            result_path = tmp_path / f"{name}.result"
+            contenders.append(
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-c",
+                        contender_scripts,
+                        str(install_root),
+                        str(ready_path),
+                        str(result_path),
+                        str(start_path),
+                        str(release_path),
+                    ],
+                    cwd=str(project_root),
+                    env=_subprocess_environment(project_root),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+            )
+
+        deadline = time.monotonic() + 15
+        while not all((tmp_path / f"{name}.ready").is_file() for name in ("north", "south")):
+            if time.monotonic() >= deadline:
+                pytest.fail("contenders did not become ready")
+            time.sleep(0.01)
+        start_path.write_text("start", encoding="ascii")
+
+        outcomes: list[dict[str, str]] | None = None
+        while time.monotonic() < deadline:
+            result_paths = [tmp_path / f"{name}.result" for name in ("north", "south")]
+            if all(path.is_file() for path in result_paths):
+                try:
+                    outcomes = [
+                        json.loads(path.read_text(encoding="utf-8")) for path in result_paths
+                    ]
+                except json.JSONDecodeError:
+                    outcomes = None
+                if outcomes is not None:
+                    break
+            time.sleep(0.01)
+        if outcomes is None:
+            pytest.fail("contenders did not publish outcomes")
+
+        assert sorted(outcome["outcome"] for outcome in outcomes) == ["error", "success"]
+        error = next(outcome for outcome in outcomes if outcome["outcome"] == "error")
+        assert error["code"] == "APPLICATION_UPDATE_IN_PROGRESS"
+        success = next(outcome for outcome in outcomes if outcome["outcome"] == "success")
+        metadata = json.loads(
+            (install_root / ".palserver-console-update.lock").read_text(encoding="utf-8")
+        )
+        assert metadata["lockId"] == success["lockId"]
+    finally:
+        release_path.write_text("release", encoding="ascii")
+        for process in contenders:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def test_application_update_check_uses_fixed_release_asset() -> None:
@@ -962,6 +1206,70 @@ def test_application_update_handoff_timeout_terminates_helper_and_releases_lock(
     assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_TIMEOUT"
     assert helper.terminated is True
     assert not lock_path.exists()
+    assert not requested.is_set()
+
+
+def test_application_update_handoff_termination_exception_keeps_lock(
+    tmp_path: Path,
+) -> None:
+    helper = _FakeHelperProcess(terminate_error=True)
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+    service, _, _, requested = _handoff_service_fixture(
+        tmp_path,
+        lambda *args, **kwargs: helper,
+        timeout=0.01,
+    )
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_TIMEOUT"
+    assert helper.terminated is True
+    assert lock_path.exists()
+    assert not requested.is_set()
+
+
+def test_application_update_handoff_kills_helper_after_terminate_timeout(
+    tmp_path: Path,
+) -> None:
+    helper = _FakeHelperProcess(terminate_exits=False, wait_timeout=True)
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+    service, _, _, requested = _handoff_service_fixture(
+        tmp_path,
+        lambda *args, **kwargs: helper,
+        timeout=0.01,
+    )
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_TIMEOUT"
+    assert helper.killed is True
+    assert not lock_path.exists()
+    assert not requested.is_set()
+
+
+def test_application_update_handoff_keeps_lock_when_kill_fails(
+    tmp_path: Path,
+) -> None:
+    helper = _FakeHelperProcess(
+        terminate_exits=False,
+        wait_timeout=True,
+        kill_error=True,
+    )
+    lock_path = tmp_path / "install" / ".palserver-console-update.lock"
+    service, _, _, requested = _handoff_service_fixture(
+        tmp_path,
+        lambda *args, **kwargs: helper,
+        timeout=0.01,
+    )
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "APPLICATION_UPDATE_HANDOFF_TIMEOUT"
+    assert helper.killed is True
+    assert lock_path.exists()
     assert not requested.is_set()
 
 

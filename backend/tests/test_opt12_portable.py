@@ -676,11 +676,22 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "QuoteArgument" in native_launcher
     assert "requirements-build.lock" in build_script
     assert "PyInstaller" in build_script
+    assert "function Assert-NodeRuntime" in build_script
+    assert "UNSUPPORTED_NODE_VERSION" in build_script
     assert "function Assert-NpmPolicy" in build_script
     assert "UNSUPPORTED_NPM_VERSION" in build_script
     assert "function Assert-NpmInstallScriptsApproved" in build_script
     assert "No packages with unreviewed install scripts" in build_script
     assert "UNREVIEWED_INSTALL_SCRIPT" in build_script
+    assert build_script.index("Get-Command node.exe") < build_script.index(
+        "Assert-NodeRuntime $node.Source"
+    )
+    assert build_script.index("Assert-NodeRuntime $node.Source") < build_script.index(
+        "Get-Command npm.cmd"
+    )
+    assert build_script.index("Assert-NodeRuntime $node.Source") < build_script.index(
+        "& $npm.Source ci"
+    )
     assert build_script.index("Assert-NpmPolicy $npm.Source") < build_script.index(
         "& $npm.Source ci"
     )
@@ -770,6 +781,75 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Python" in portable_readme and "Node.js" in portable_readme
     assert "npm >= 11.17" in root_readme
     assert "npm 11.17.0" in root_readme
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")
+@pytest.mark.parametrize("version", ["v24.0.0", "v24.15.0"])
+def test_portable_builder_accepts_supported_node_versions(tmp_path: Path, version: str) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    node_path = tmp_path / "node.cmd"
+    node_path.write_text(
+        f'@echo off\r\nif "%~1"=="--version" echo {version}\r\n', encoding="ascii"
+    )
+    script = f"""
+$buildPath = {_powershell_literal(project_root / "scripts" / "build-portable.ps1")}
+$nodePath = {_powershell_literal(node_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $buildPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Assert-NodeRuntime"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+Assert-NodeRuntime -NodePath $nodePath
+"""
+
+    completed = _run_encoded_powershell(script)
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "Node.js runtime accepted" in completed.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")
+@pytest.mark.parametrize(
+    ("version_output", "exit_code"),
+    [
+        ("v23.11.0", 0),
+        ("v25.0.0", 0),
+        ("not-a-node-version", 0),
+        ("v24.0.0", 1),
+    ],
+)
+def test_portable_builder_rejects_unsupported_node_before_install(
+    tmp_path: Path, version_output: str, exit_code: int
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    node_path = tmp_path / "node.cmd"
+    node_path.write_text(
+        "@echo off\r\n"
+        'if "%~1"=="--version" (\r\n'
+        f"  echo {version_output}\r\n"
+        f"  exit /b {exit_code}\r\n"
+        ")\r\n",
+        encoding="ascii",
+    )
+    script = f"""
+$buildPath = {_powershell_literal(project_root / "scripts" / "build-portable.ps1")}
+$nodePath = {_powershell_literal(node_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $buildPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Assert-NodeRuntime"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+Assert-NodeRuntime -NodePath $nodePath
+"""
+
+    completed = _run_encoded_powershell(script)
+
+    assert completed.returncode != 0
+    assert "UNSUPPORTED_NODE_VERSION" in f"{completed.stdout}\n{completed.stderr}"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")

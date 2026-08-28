@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -24,6 +23,7 @@ RELEASE_API_URL = "https://api.github.com/repos/yxymeng/PalserverConsole/release
 MAX_RELEASE_BYTES = 500 * 1024 * 1024
 DEFAULT_HELPER_HANDOFF_TIMEOUT_SECONDS = 10.0
 HELPER_HANDOFF_POLL_SECONDS = 0.05
+UPDATE_GUARD_POLL_SECONDS = 0.05
 
 
 class ApplicationUpdateError(RuntimeError):
@@ -39,15 +39,18 @@ class _UpdateGuardError(OSError):
 class _InstallUpdateGuard:
     """Serialize update-lock state transitions with an OS-managed guard.
 
-    Windows uses a named kernel mutex, whose ownership is released by the OS if
-    the owning process terminates.  The non-Windows fallback uses an advisory
-    file lock; the guard file itself is harmless if a process crashes.
+    Windows uses an exclusive handle on a file in the installation root, whose
+    ownership is released by the OS if the owning process terminates.  The
+    non-Windows fallback uses an advisory file lock; the guard file itself is
+    harmless if a process crashes.
     """
 
-    _WAIT_OBJECT_0 = 0x00000000
-    _WAIT_ABANDONED = 0x00000080
-    _WAIT_FAILED = 0xFFFFFFFF
-    _INFINITE = 0xFFFFFFFF
+    _GENERIC_READ = 0x80000000
+    _GENERIC_WRITE = 0x40000000
+    _OPEN_ALWAYS = 4
+    _FILE_ATTRIBUTE_NORMAL = 0x00000080
+    _ERROR_SHARING_VIOLATION = 32
+    _ERROR_LOCK_VIOLATION = 33
 
     def __init__(self, install_root: Path) -> None:
         self.install_root = install_root
@@ -65,7 +68,6 @@ class _InstallUpdateGuard:
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
         if self._handle is not None and self._kernel32 is not None:
             try:
-                self._kernel32.ReleaseMutex(self._handle)
                 self._kernel32.CloseHandle(self._handle)
             finally:
                 self._handle = None
@@ -83,30 +85,43 @@ class _InstallUpdateGuard:
             import ctypes
 
             kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-            kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_bool, ctypes.c_wchar_p]
-            kernel32.CreateMutexW.restype = ctypes.c_void_p
-            kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-            kernel32.WaitForSingleObject.restype = ctypes.c_uint32
-            kernel32.ReleaseMutex.argtypes = [ctypes.c_void_p]
-            kernel32.ReleaseMutex.restype = ctypes.c_bool
+            kernel32.CreateFileW.argtypes = [
+                ctypes.c_wchar_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+                ctypes.c_uint32,
+                ctypes.c_uint32,
+                ctypes.c_void_p,
+            ]
+            kernel32.CreateFileW.restype = ctypes.c_void_p
             kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
             kernel32.CloseHandle.restype = ctypes.c_bool
-            normalized_root = os.path.normcase(os.path.abspath(self.install_root))
-            name = (
-                "Local\\PalServerConsole.UpdateGuard."
-                + hashlib.sha256(normalized_root.encode("utf-8")).hexdigest()
+            guard_path = Path(
+                os.path.abspath(self.install_root / ".palserver-console-update.guard")
             )
-            handle = kernel32.CreateMutexW(None, False, name)
-            if not handle:
-                raise ctypes.WinError(ctypes.get_last_error())
-            result = kernel32.WaitForSingleObject(handle, self._INFINITE)
-            if result not in (self._WAIT_OBJECT_0, self._WAIT_ABANDONED):
-                kernel32.CloseHandle(handle)
-                if result == self._WAIT_FAILED:
-                    raise ctypes.WinError(ctypes.get_last_error())
-                raise OSError(f"WaitForSingleObject failed with result {result}.")
-            self._kernel32 = kernel32
-            self._handle = handle
+            guard_path.parent.mkdir(parents=True, exist_ok=True)
+            invalid_handle = ctypes.c_void_p(-1).value
+            while True:
+                handle = kernel32.CreateFileW(
+                    str(guard_path),
+                    self._GENERIC_READ | self._GENERIC_WRITE,
+                    0,
+                    None,
+                    self._OPEN_ALWAYS,
+                    self._FILE_ATTRIBUTE_NORMAL,
+                    None,
+                )
+                handle_value = getattr(handle, "value", handle)
+                if handle_value not in (None, 0, -1, invalid_handle):
+                    self._kernel32 = kernel32
+                    self._handle = handle
+                    return
+                error_code = ctypes.get_last_error()
+                if error_code in (self._ERROR_SHARING_VIOLATION, self._ERROR_LOCK_VIOLATION):
+                    time.sleep(UPDATE_GUARD_POLL_SECONDS)
+                    continue
+                raise ctypes.WinError(error_code)
         except _UpdateGuardError:
             raise
         except Exception as error:
@@ -264,9 +279,14 @@ class ApplicationUpdateService:
             }
         except Exception:
             if not helper_handed_off:
+                helper_exited = helper_process is None
                 if helper_process is not None:
-                    self._terminate_helper_process(helper_process)
-                self._release_update_lock_if_owned(lock_path, update_lock_id)
+                    try:
+                        helper_exited = self._terminate_helper_process(helper_process)
+                    except Exception:
+                        helper_exited = False
+                if helper_exited:
+                    self._release_update_lock_if_owned(lock_path, update_lock_id)
             raise
 
     def _wait_for_helper_handoff(
@@ -360,41 +380,67 @@ class ApplicationUpdateService:
         try:
             return poll() is not None
         except Exception:
-            return True
+            return False
 
     @staticmethod
-    def _terminate_helper_process(helper_process: object) -> None:
-        poll = getattr(helper_process, "poll", None)
-        if callable(poll):
+    def _terminate_helper_process(helper_process: object) -> bool:
+        try:
+            poll = getattr(helper_process, "poll", None)
+        except Exception:
+            return False
+        if not callable(poll):
+            return False
+
+        def confirmed_exited() -> bool:
             try:
-                if poll() is not None:
-                    return
+                return poll() is not None
             except Exception:
-                return
-        terminate = getattr(helper_process, "terminate", None)
-        if callable(terminate):
-            try:
-                terminate()
-            except Exception:
-                return
-        wait = getattr(helper_process, "wait", None)
-        if callable(wait):
-            try:
-                wait(timeout=1.0)
-                return
-            except subprocess.TimeoutExpired:
-                pass
-            except Exception:
-                return
-        kill = getattr(helper_process, "kill", None)
-        if callable(kill):
-            try:
-                kill()
-            except Exception:
-                return
-            if callable(wait):
-                with suppress(subprocess.TimeoutExpired, OSError, ProcessLookupError):
-                    wait(timeout=1.0)
+                return False
+
+        if confirmed_exited():
+            return True
+        try:
+            terminate = getattr(helper_process, "terminate", None)
+        except Exception:
+            return False
+        if not callable(terminate):
+            return False
+        try:
+            terminate()
+        except Exception:
+            return False
+        try:
+            wait = getattr(helper_process, "wait", None)
+        except Exception:
+            return False
+        if not callable(wait):
+            return False
+        try:
+            wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception:
+            return confirmed_exited()
+        else:
+            return confirmed_exited()
+
+        try:
+            kill = getattr(helper_process, "kill", None)
+        except Exception:
+            return False
+        if not callable(kill):
+            return False
+        try:
+            kill()
+        except Exception:
+            return False
+        try:
+            wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            pass
+        except Exception:
+            return confirmed_exited()
+        return confirmed_exited()
 
     @staticmethod
     def _release_update_lock_if_owned(lock_path: Path, expected_lock_id: str) -> None:
