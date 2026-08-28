@@ -39,7 +39,6 @@ class ApplicationUpdateService:
         instance_id: str = "default",
         port: int = 8223,
         process_runner: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
-        exit_process: Callable[[int], None] = os._exit,
     ) -> None:
         self.current_version = current_version
         self.data_dir = data_dir
@@ -48,7 +47,7 @@ class ApplicationUpdateService:
         self.instance_id = instance_id
         self.port = port
         self.process_runner = process_runner
-        self.exit_process = exit_process
+        self._shutdown_requester: Callable[[], None] | None = None
 
     def check(self) -> dict[str, object]:
         try:
@@ -122,6 +121,11 @@ class ApplicationUpdateService:
                     "UPDATE_HELPER_MISSING",
                     "Portable update helper or Windows PowerShell 5.1 is missing.",
                 )
+            if self._shutdown_requester is None:
+                raise ApplicationUpdateError(
+                    "APPLICATION_SHUTDOWN_UNAVAILABLE",
+                    "Graceful application shutdown is unavailable.",
+                )
             self.process_runner(
                 [
                     str(powershell),
@@ -159,10 +163,17 @@ class ApplicationUpdateService:
                 self._release_update_lock(lock_path)
             raise
 
+    def bind_shutdown_requester(self, requester: Callable[[], None]) -> None:
+        self._shutdown_requester = requester
+
     def schedule_shutdown(self) -> None:
+        requester = self._shutdown_requester
+        if requester is None:
+            raise RuntimeError("Graceful application shutdown is unavailable.")
+
         def shutdown() -> None:
             time.sleep(1.0)
-            self.exit_process(0)
+            requester()
 
         threading.Thread(target=shutdown, name="application-update-shutdown", daemon=True).start()
 

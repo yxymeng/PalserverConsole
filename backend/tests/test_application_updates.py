@@ -3,6 +3,8 @@ from __future__ import annotations
 import io
 import json
 import os
+import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,10 @@ def _client_factory(release: dict[str, object], package: bytes) -> Any:
     return lambda: httpx.Client(transport=httpx.MockTransport(handler))
 
 
+def _enable_graceful_shutdown(service: ApplicationUpdateService) -> None:
+    service.bind_shutdown_requester(lambda: None)
+
+
 def test_application_update_check_uses_fixed_release_asset() -> None:
     release: dict[str, object] = {
         "tag_name": "v0.2.0",
@@ -73,6 +79,19 @@ def test_application_update_check_uses_fixed_release_asset() -> None:
     assert status["updateAvailable"] is True
     assert status["portable"] is False
     assert status["assetUrl"] == "https://github.com/yxymeng/PalserverConsole/releases/download/v0.2.0/PalServerConsole-0.2.0-windows-x64.zip"
+
+
+def test_application_update_requests_graceful_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested = threading.Event()
+    service = ApplicationUpdateService("0.1.1", Path("unused"))
+    service.bind_shutdown_requester(requested.set)
+    monkeypatch.setattr(time, "sleep", lambda _: None)
+
+    service.schedule_shutdown()
+
+    assert requested.wait(timeout=1.0)
 
 
 def test_application_update_prepares_package_and_starts_external_helper(
@@ -111,6 +130,7 @@ def test_application_update_prepares_package_and_starts_external_helper(
         port=18224,
         process_runner=runner,
     )
+    _enable_graceful_shutdown(service)
 
     result = service.prepare(version)
 
@@ -135,6 +155,47 @@ def test_application_update_prepares_package_and_starts_external_helper(
     assert lock_metadata["phase"] == "prepare"
     assert lock_metadata["lockId"] == command[command.index("-UpdateLockId") + 1]
     assert lock_metadata["processStartedAt"] > 0
+
+
+def test_application_update_requires_graceful_shutdown_before_starting_helper(
+    tmp_path: Path,
+) -> None:
+    version = "0.2.0"
+    package = _release_zip(version)
+    release: dict[str, object] = {
+        "tag_name": f"v{version}",
+        "assets": [
+            {
+                "name": f"PalServerConsole-{version}-windows-x64.zip",
+                "browser_download_url": "https://github.com/yxymeng/PalserverConsole/releases/download/v0.2.0/PalServerConsole-0.2.0-windows-x64.zip",
+                "size": len(package),
+            }
+        ],
+    }
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    (install_root / "apply-downloaded-update.ps1").write_text("fixture", encoding="utf-8")
+    calls: list[list[str]] = []
+
+    def runner(command: list[str], **kwargs: object) -> Any:
+        calls.append(command)
+        return object()
+
+    service = ApplicationUpdateService(
+        "0.1.1",
+        tmp_path / "data",
+        client_factory=_client_factory(release, package),
+        install_root=install_root,
+        process_runner=runner,
+    )
+    lock_path = install_root / ".palserver-console-update.lock"
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare(version)
+
+    assert raised.value.code == "APPLICATION_SHUTDOWN_UNAVAILABLE"
+    assert calls == []
+    assert not lock_path.exists()
 
 
 def test_application_update_rejects_overlapping_install_root(tmp_path: Path) -> None:
@@ -165,6 +226,7 @@ def test_application_update_rejects_overlapping_install_root(tmp_path: Path) -> 
         instance_id="north",
         process_runner=runner,
     )
+    _enable_graceful_shutdown(first)
     second = ApplicationUpdateService(
         "0.1.1",
         tmp_path / "data" / "instances" / "south",
@@ -229,6 +291,7 @@ def test_application_update_prepare_failure_releases_install_root_lock(
         install_root=install_root,
         process_runner=runner,
     )
+    _enable_graceful_shutdown(service)
     lock_path = install_root / ".palserver-console-update.lock"
 
     with pytest.raises((ApplicationUpdateError, OSError)):
@@ -334,6 +397,7 @@ def test_application_update_allows_other_install_root(
         install_root=install_root,
         process_runner=runner,
     )
+    _enable_graceful_shutdown(service)
 
     assert service.prepare(version)["restartScheduled"] is True
 
@@ -383,6 +447,7 @@ def test_application_update_allows_own_program_and_root_launcher(
         install_root=install_root,
         process_runner=runner,
     )
+    _enable_graceful_shutdown(service)
 
     assert service.prepare(version)["restartScheduled"] is True
 

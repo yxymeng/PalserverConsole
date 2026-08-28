@@ -92,14 +92,18 @@ def main(argv: list[str] | None = None) -> None:
         settings = replace(settings, port=active_port)
     if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
+    application = create_app(settings)
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(settings),
+            application,
             host=preferred_host,
             port=settings.port,
             workers=1,
             log_level="info",
         )
+    )
+    application.state.application_updates.bind_shutdown_requester(
+        lambda: setattr(server, "should_exit", True)
     )
     try:
         server.run(sockets=sockets)
