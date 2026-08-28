@@ -95,3 +95,24 @@ test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }
   await openWorldData(page, testInfo.project.name === "mobile");
   await expect(playerMetric()).toContainText("— / 1");
 });
+
+test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }, testInfo) => {
+  await routeShell(page);
+  let playerCount = 1;
+  await page.route("**/api/live/players", (route) => route.fulfill({
+    json: {
+      data: Array.from({ length: playerCount }, () => ({})),
+      source: "rest",
+      observedAt: 1,
+      stale: false,
+      errorCode: null,
+    },
+  }));
+  await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
+
+  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("1 / 1");
+  playerCount = 2;
+  await expect(playerMetric()).toContainText("2 / 1", { timeout: 7_000 });
+});

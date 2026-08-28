@@ -61,22 +61,29 @@ def _write_checksum_manifest(root: Path, paths: list[Path]) -> None:
 
 
 def _run_upgrade(
-    script: Path, install_root: Path, package_root: Path
+    script: Path,
+    install_root: Path,
+    package_root: Path,
+    *,
+    data_directory: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    command = [
+        "powershell.exe",
+        "-NoLogo",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script),
+        "-InstallRoot",
+        str(install_root),
+        "-NewPackage",
+        str(package_root),
+    ]
+    if data_directory is not None:
+        command.extend(["-DataDirectory", str(data_directory)])
     return subprocess.run(
-        [
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(script),
-            "-InstallRoot",
-            str(install_root),
-            "-NewPackage",
-            str(package_root),
-        ],
+        command,
         check=False,
         capture_output=True,
         encoding="utf-8",
@@ -204,6 +211,47 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     assert "INCOMPATIBLE_DOWNGRADE" in f"{blocked.stdout}\n{blocked.stderr}"
     assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_upgrade_uses_named_instance_data_directory(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root = tmp_path / "installed"
+    (install_root / "Program").mkdir(parents=True)
+    (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
+    (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
+    default_database = install_root / "data" / "app.db"
+    _write_database(default_database, schema_version=9)
+    named_data_directory = install_root / "data" / "instances" / "north"
+    named_database = named_data_directory / "app.db"
+    _write_database(named_database, schema_version=8)
+
+    package_root = tmp_path / "candidate"
+    candidate_program = package_root / "Program"
+    candidate_program.mkdir(parents=True)
+    (candidate_program / "release.txt").write_text("new", encoding="utf-8")
+    candidate_launcher = package_root / "PalServerConsole.exe"
+    candidate_launcher.write_bytes(b"new-launcher")
+    metadata_path = package_root / "metadata" / "build-info.json"
+    _write_build_metadata(metadata_path, maximum_schema_version=8)
+    _write_checksum_manifest(
+        package_root,
+        [candidate_launcher, candidate_program / "release.txt", metadata_path],
+    )
+
+    upgraded = _run_upgrade(
+        script,
+        install_root,
+        package_root,
+        data_directory=named_data_directory,
+    )
+
+    assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert _schema_version(named_database) == 8
+    assert len(list((named_data_directory / "upgrade-backups").glob("*/app.db"))) == 1
+    assert _schema_version(default_database) == 9
+    assert not (install_root / "data" / "upgrade-backups").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -360,8 +408,15 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "apply-downloaded-update.ps1" in build_script
     assert "CONSOLE_EXIT_TIMEOUT" in application_update_helper
     assert "Start-Process" in application_update_helper
+    assert "Restore-ConsoleLauncher" in application_update_helper
+    assert "$updateError = $_" in application_update_helper
+    assert "UPDATE_FAILURE_RELAUNCH_FAILED" in application_update_helper
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
+    assert '[string]$DataDirectory = ""' in upgrade_script
+    assert "function Get-CurrentInstallConsoleProcesses" in upgrade_script
+    assert upgrade_script.count('Get-Process -Name "PalServerConsole"') == 1
+    assert "$currentInstallProcesses = @(Get-CurrentInstallConsoleProcesses" in upgrade_script
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
@@ -384,12 +439,16 @@ def test_portable_update_waits_for_current_installation_console_processes() -> N
     )
 
 
-@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
-def test_portable_update_process_filter_scopes_to_the_current_installation(
-    tmp_path: Path,
+@pytest.mark.skipif(os.name != "nt", reason="portable update helpers target Windows")
+@pytest.mark.parametrize(
+    "script_name",
+    ["apply-downloaded-update.ps1", "upgrade-portable.ps1"],
+)
+def test_portable_process_filter_scopes_to_the_current_installation(
+    tmp_path: Path, script_name: str
 ) -> None:
     project_root = Path(__file__).resolve().parents[2]
-    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    update_helper = project_root / "scripts" / script_name
     install_root = tmp_path / "current"
     other_install_root = tmp_path / "other"
 
@@ -452,4 +511,84 @@ $otherInstallMatchCount = @(Get-CurrentInstallConsoleProcesses -InstallRootPath 
     assert json.loads(completed.stdout) == {
         "matchingIds": [101, 102],
         "otherInstallMatchCount": 0,
+    }
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_failure_relaunches_only_when_current_installation_is_stopped(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+
+    def powershell_literal(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    script = f"""
+$helperPath = {powershell_literal(str(update_helper))}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $helperPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Restore-ConsoleLauncher"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+
+$script:running = @()
+$script:starts = @()
+function Get-CurrentInstallConsoleProcesses {{
+    param([string]$InstallRootPath)
+    $script:running
+}}
+function Start-ConsoleLauncher {{
+    param([string]$Launcher, [string]$InstallRootPath, [string]$InstanceId, [int]$Port)
+    $script:starts += [pscustomobject]@{{ InstanceId = $InstanceId; Port = $Port }}
+}}
+
+$restoreParameters = @{{
+    Launcher = "launcher.exe"
+    InstallRootPath = "current"
+    InstanceId = "north"
+    Port = 18224
+}}
+Restore-ConsoleLauncher @restoreParameters
+$caseA = @($script:starts)
+$script:running = @([pscustomobject]@{{ Id = 1 }})
+$script:starts = @()
+Restore-ConsoleLauncher @restoreParameters
+$caseBStartCount = @($script:starts).Count
+$script:running = @()
+function Start-ConsoleLauncher {{ throw "forced relaunch failure" }}
+$caseC = try {{
+    Restore-ConsoleLauncher @restoreParameters
+    "no failure"
+}}
+catch {{
+    $_.Exception.Message
+}}
+[pscustomobject]@{{
+    caseAStartCount = $caseA.Count
+    caseAInstanceId = $caseA[0].InstanceId
+    caseAPort = $caseA[0].Port
+    caseBStartCount = $caseBStartCount
+    caseC = $caseC
+}} | ConvertTo-Json -Compress
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    completed = subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert json.loads(completed.stdout) == {
+        "caseAStartCount": 1,
+        "caseAInstanceId": "north",
+        "caseAPort": 18224,
+        "caseBStartCount": 0,
+        "caseC": "UPDATE_FAILURE_RELAUNCH_FAILED: forced relaunch failure",
     }

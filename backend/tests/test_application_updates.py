@@ -90,6 +90,7 @@ def test_application_update_prepares_package_and_starts_external_helper(
     install_root = tmp_path / "install"
     install_root.mkdir()
     (install_root / "apply-downloaded-update.ps1").write_text("fixture", encoding="utf-8")
+    data_directory = tmp_path / "data" / "instances" / "north"
     calls: list[tuple[list[str], dict[str, object]]] = []
 
     def runner(command: list[str], **kwargs: object) -> Any:
@@ -98,7 +99,7 @@ def test_application_update_prepares_package_and_starts_external_helper(
 
     service = ApplicationUpdateService(
         "0.1.1",
-        tmp_path / "data",
+        data_directory,
         client_factory=_client_factory(release, package),
         install_root=install_root,
         instance_id="north",
@@ -114,10 +115,11 @@ def test_application_update_prepares_package_and_starts_external_helper(
         "restartScheduled": True,
     }
     package_root = (
-        tmp_path / "data" / "application-updates" / f"PalServerConsole-{version}-windows-x64"
+        data_directory / "application-updates" / f"PalServerConsole-{version}-windows-x64"
     )
     assert (package_root / "Program" / "PalServerConsole.exe").is_file()
     assert len(calls) == 1
     command = calls[0][0]
+    assert command[command.index("-DataDirectory") + 1] == str(data_directory)
     assert command[command.index("-InstanceId") + 1] == "north"
     assert command[command.index("-Port") + 1] == "18224"

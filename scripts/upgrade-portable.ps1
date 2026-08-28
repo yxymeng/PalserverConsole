@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
     [string]$NewPackage,
-    [string]$InstallRoot = ""
+    [string]$InstallRoot = "",
+    [string]$DataDirectory = ""
 )
 
 Set-StrictMode -Version Latest
@@ -42,6 +43,30 @@ function Resolve-Directory {
         throw "$Label must be a directory: $PathValue"
     }
     return $item.FullName
+}
+
+function Get-CurrentInstallConsoleProcesses {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$InstallRootPath
+    )
+
+    $launcherPaths = @(
+        [System.IO.Path]::GetFullPath((Join-Path $InstallRootPath "PalServerConsole.exe")),
+        [System.IO.Path]::GetFullPath((Join-Path $InstallRootPath "Program\PalServerConsole.exe"))
+    )
+    foreach ($process in @(Get-Process -Name "PalServerConsole" -ErrorAction SilentlyContinue)) {
+        try {
+            $processPath = [System.IO.Path]::GetFullPath($process.MainModule.FileName)
+            if ($launcherPaths -contains $processPath) {
+                $process
+            }
+        }
+        catch {
+            continue
+        }
+    }
 }
 
 function Read-BuildMetadata {
@@ -318,12 +343,17 @@ if ($launcherEntries.Count -ne 1) {
 }
 $launcherEntry = $launcherEntries[0]
 
-$running = @(Get-Process -Name "PalServerConsole" -ErrorAction SilentlyContinue)
-if ($running.Count -gt 0) {
+$currentInstallProcesses = @(Get-CurrentInstallConsoleProcesses -InstallRootPath $installRootPath)
+if ($currentInstallProcesses.Count -gt 0) {
     throw "CONSOLE_RUNNING: close PalServerConsole before upgrading."
 }
 
-$dataDirectory = Join-Path $installRootPath "data"
+if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
+    $dataDirectory = Join-Path $installRootPath "data"
+}
+else {
+    $dataDirectory = [System.IO.Path]::GetFullPath($DataDirectory)
+}
 New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
 $databasePath = Join-Path $dataDirectory "app.db"
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"

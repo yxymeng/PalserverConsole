@@ -137,18 +137,32 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
     if (workspace !== "overview") return;
+    let active = true;
     const controller = new AbortController();
-    void requestJson<LiveValue<unknown>>("/api/live/players", { signal: controller.signal })
-      .then((response) => {
+    const refreshOnlinePlayers = async () => {
+      try {
+        const response = await requestJson<LiveValue<unknown>>(
+          "/api/live/players",
+          { signal: controller.signal },
+        );
+        if (!active) return;
         setOnlinePlayerCount(
           response.stale || response.errorCode
             ? null
             : livePlayersFrom(response.data).length,
         );
-      })
-      .catch((caught) => { if (!isAbortError(caught)) setOnlinePlayerCount(null); });
-    return () => controller.abort();
-  }, [workspace, snapshotId]);
+      } catch (caught) {
+        if (active && !isAbortError(caught)) setOnlinePlayerCount(null);
+      }
+    };
+    void refreshOnlinePlayers();
+    const timer = window.setInterval(() => void refreshOnlinePlayers(), 5_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      controller.abort();
+    };
+  }, [workspace]);
   useEffect(() => {
     if (previousSnapshotId.current !== undefined && previousSnapshotId.current !== snapshotId) {
       entityStateCache.current = {};

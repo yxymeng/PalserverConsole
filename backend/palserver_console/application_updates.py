@@ -122,6 +122,8 @@ class ApplicationUpdateService:
                 str(os.getpid()),
                 "-InstallRoot",
                 str(self.install_root),
+                "-DataDirectory",
+                str(self.data_dir),
                 "-NewPackage",
                 str(package_root),
                 "-InstanceId",
