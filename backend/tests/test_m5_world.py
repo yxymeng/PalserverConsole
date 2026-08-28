@@ -2589,8 +2589,6 @@ def test_disk_space_retry_reset_allows_new_parse(
         minimum_free_bytes=0,
     )
     monkeypatch.setattr(service, "_world_directory", lambda: world)
-    service.snapshots_root.mkdir(parents=True)
-    service.cache_root.mkdir(parents=True)
     expected = service._fingerprint(world)
     with service._lock:
         service._last_seen = expected
@@ -2600,52 +2598,42 @@ def test_disk_space_retry_reset_allows_new_parse(
     assert retry_delay > 0
     if reset_mode == "fingerprint":
         (world / "Level.sav").write_bytes(b"level-changed")
+        changed = service._fingerprint(world)
+        assert changed != expected
     else:
-        service.request_reparse()
+        generation = service.request_reparse()
+        assert generation == 1
+        assert service.background_status()["retryDelaySeconds"] == 0
+        changed = service._fingerprint(world)
 
-    level, players = _synthetic_properties()
-    parsed = threading.Event()
+    captured: list[tuple[Path, tuple[tuple[str, int, int], ...]]] = []
+    parse_entered = threading.Event()
 
-    def fake_worker(
-        snapshot: Path,
-        cache_path: Path,
-        snapshot_id: str,
-        observed_at: int,
-        *,
-        collected_at: int,
-        parse_started_at: int,
-    ) -> dict[str, object]:
-        build_world_cache(
-            cache_path,
-            level,
-            players,
-            snapshot_id=snapshot_id,
-            source_observed_at=observed_at,
-            collected_at=collected_at,
-            parse_started_at=parse_started_at,
-        )
-        parsed.set()
+    def fake_capture_and_parse(
+        observed_world: Path,
+        fingerprint: tuple[tuple[str, int, int], ...],
+    ) -> None:
+        captured.append((observed_world, fingerprint))
+        parse_entered.set()
         service._stop.set()
         service._wake.set()
-        return {
-            "parsedAt": 2,
-            "durationMs": 1,
-            "peakMemoryBytes": 2,
-            "cacheSizeBytes": cache_path.stat().st_size,
-        }
 
-    monkeypatch.setattr(service, "_run_worker", fake_worker)
+    monkeypatch.setattr(service, "_capture_and_parse", fake_capture_and_parse)
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
-        assert parsed.wait(timeout=5)
+        assert parse_entered.wait(timeout=5)
     finally:
         service._stop.set()
         service._wake.set()
         thread.join(timeout=5)
 
     assert not thread.is_alive()
+    assert captured
+    assert captured[0][0] == world
+    assert captured[0][1] == changed
     assert service._disk_space_retry_delay_seconds == 0.0
+    assert service._disk_space_retry_until == 0.0
 
 
 def test_ooz_discovery_result_is_cached_until_reparse(

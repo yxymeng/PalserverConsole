@@ -7,8 +7,10 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import suppress
 from pathlib import Path
 
+import psutil
 import pytest
 
 import palserver_console.__main__ as console_main
@@ -158,6 +160,36 @@ def _portable_upgrade_fixture(
     )
     assert (project_root / "scripts" / "upgrade-portable.ps1").is_file()
     return install_root, package_root, databases
+
+
+def _test_launcher_processes(install_root: Path) -> list[psutil.Process]:
+    expected = str((install_root / "PalServerConsole.exe").resolve()).casefold()
+    processes: dict[int, psutil.Process] = {}
+    for process in psutil.process_iter(["pid", "exe"]):
+        try:
+            executable = process.info.get("exe")
+            if not executable or str(Path(executable).resolve()).casefold() != expected:
+                continue
+            processes[process.pid] = process
+            for child in process.children(recursive=True):
+                processes[child.pid] = child
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            continue
+    return list(processes.values())
+
+
+def _cleanup_test_launcher(install_root: Path) -> None:
+    processes = _test_launcher_processes(install_root)
+    for process in processes:
+        with suppress(psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            process.terminate()
+    _, alive = psutil.wait_procs(processes, timeout=2)
+    for process in alive:
+        with suppress(psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+            process.kill()
+    _, alive = psutil.wait_procs(alive, timeout=2)
+    if alive or _test_launcher_processes(install_root):
+        raise AssertionError("temporary portable launcher process was not cleaned up")
 
 
 def test_frozen_default_settings_keep_data_outside_the_program_directory(
@@ -316,6 +348,51 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     assert "INCOMPATIBLE_DOWNGRADE" in f"{blocked.stdout}\n{blocked.stderr}"
     assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_v011_bootstrap_with_candidate_upgrader_installs_new_maintenance_scripts(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    candidate_upgrader = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, databases = _portable_upgrade_fixture(tmp_path)
+    (install_root / "apply-downloaded-update.ps1").unlink()
+    assert not (install_root / "apply-downloaded-update.ps1").exists()
+
+    upgraded = _run_upgrade(candidate_upgrader, install_root, package_root)
+
+    assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
+    assert (install_root / "apply-downloaded-update.ps1").read_text(
+        encoding="utf-8"
+    ) == "update helper new"
+    assert (install_root / "upgrade-portable.ps1").read_text(
+        encoding="utf-8"
+    ) == "upgrade script new"
+    assert _schema_version(databases["default"]) == 8
+    with sqlite3.connect(databases["default"]) as connection:
+        assert connection.execute(
+            "SELECT value FROM settings WHERE key = 'portable.fixture'"
+        ).fetchone() == ("keep-me",)
+
+    database_backups = sorted((install_root / "data" / "upgrade-backups").glob("*/app.db"))
+    assert len(database_backups) == 1
+    assert _schema_version(database_backups[0]) == 8
+    program_backups = sorted((install_root / "program-backups").glob("Program-*"))
+    assert len(program_backups) == 1
+    assert (program_backups[0] / "release.txt").read_text(encoding="utf-8") == "old"
+    launcher_backups = sorted((install_root / "program-backups").glob("PalServerConsole-*.exe"))
+    assert len(launcher_backups) == 1
+    assert launcher_backups[0].read_bytes() == b"old-launcher"
+    upgrade_script_backups = sorted(
+        (install_root / "program-backups").glob("upgrade-portable-*.ps1")
+    )
+    assert [path.read_text(encoding="utf-8") for path in upgrade_script_backups] == [
+        "upgrade script old"
+    ]
+    assert not list((install_root / "program-backups").glob("apply-downloaded-update-*.ps1"))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -783,6 +860,25 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "npm 11.17.0" in root_readme
 
 
+def test_portable_v011_bootstrap_document_uses_candidate_upgrader() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    portable_readme = (project_root / "docs" / "windows-portable.md").read_text(encoding="utf-8")
+    start_marker = "### v0.1.1 → v0.2.0 首次迁移"
+    end_marker = "### 升级内容与回退"
+    start = portable_readme.index(start_marker)
+    end = portable_readme.index(end_marker, start)
+    migration = portable_readme[start:end]
+
+    assert "candidate script" in migration
+    assert "upgrade-portable.ps1" in migration
+    assert "-NewPackage" in migration
+    assert "-InstallRoot" in migration
+    assert r"D:\Downloads\PalServerConsole-0.2.0\upgrade-portable.ps1" in migration
+    assert r"D:\Downloads\PalServerConsole-0.2.0" in migration
+    assert r"D:\Apps\PalServerConsole" in migration
+    assert ".\\upgrade-portable.ps1 -NewPackage" not in migration
+
+
 @pytest.mark.skipif(os.name != "nt", reason="portable builder targets Windows")
 @pytest.mark.parametrize("version", ["v24.0.0", "v24.15.0"])
 def test_portable_builder_accepts_supported_node_versions(tmp_path: Path, version: str) -> None:
@@ -1048,39 +1144,42 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
         encoding="utf-8",
     )
 
-    completed = subprocess.run(
-        [
-            "powershell.exe",
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(update_helper),
-            "-WaitPid",
-            "999999",
-            "-InstallRoot",
-            str(install_root),
-            "-UpdateLockId",
-            lock_id,
-            "-DataDirectory",
-            str(data_directory),
-            "-NewPackage",
-            str(package_root),
-            "-InstanceId",
-            "north",
-            "-Port",
-            "18224",
-        ],
-        check=False,
-        capture_output=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=30,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(update_helper),
+                "-WaitPid",
+                "999999",
+                "-InstallRoot",
+                str(install_root),
+                "-UpdateLockId",
+                lock_id,
+                "-DataDirectory",
+                str(data_directory),
+                "-NewPackage",
+                str(package_root),
+                "-InstanceId",
+                "north",
+                "-Port",
+                "18224",
+            ],
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
 
-    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
-    assert not lock_path.exists()
+        assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+        assert not lock_path.exists()
+    finally:
+        _cleanup_test_launcher(install_root)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")

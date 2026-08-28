@@ -30,16 +30,35 @@ v0.2.0 起可在“维护 → 服务器更新 → PalServerConsole 更新”中�
 源码运行模式和 LAN 会话不能自动安装；它们仍可查看 Release 链接。v0.1.1 本身没有这一入口，
 所以首次升级到 v0.2.0 需要按下面的手工方式完成。
 
+### v0.1.1 → v0.2.0 首次迁移
+
+从 v0.1.1 首次升级到 v0.2.0 时，必须运行新版本解压目录中的 `upgrade-portable.ps1`（candidate script），并通过 `-InstallRoot` 指向旧安装目录。
+不要运行 v0.1.1 安装目录中原有的 `upgrade-portable.ps1`；旧脚本不会安装 v0.2.0 所需的 application-update helper 和新版维护脚本。
+
 1. 关闭 PalServerConsole，确认 `PalServerConsole.exe` 没有继续运行。
 2. 将新版本压缩包解压到另一个目录，保留旧安装目录不动。
-3. 在旧安装目录运行：
+3. 在新版本解压目录中运行 candidate script。假设旧安装目录为 `D:\Apps\PalServerConsole`，新包目录为 `D:\Downloads\PalServerConsole-0.2.0`：
 
    ```powershell
-   .\upgrade-portable.ps1 -NewPackage "D:\Downloads\PalServerConsole-新版本"
+   & "D:\Downloads\PalServerConsole-0.2.0\upgrade-portable.ps1" `
+       -NewPackage "D:\Downloads\PalServerConsole-0.2.0" `
+       -InstallRoot "D:\Apps\PalServerConsole"
    ```
 
-4. 脚本会先校验新包 `checksums.sha256`，读取新包支持的数据库 schema 上限，并扫描安装目录下所有受管理的数据库：根目录 `data\app.db`、`data\instances\<direct-child>\app.db`，以及本次显式传入的 `-DataDirectory\app.db`（重复路径只检查一次）。每个存在的数据库都会检查 WAL/SHM/journal sidecar、schema 版本，并在所属数据目录创建 `upgrade-backups\<时间戳>\app.db` 备份。之后替换根目录启动器和 `Program/`，绝不替换或删除任何 `data/`。
+4. 脚本会先校验新包 `checksums.sha256`，读取新包支持的数据库 schema 上限，并扫描安装目录下所有受管理的数据库：根目录 `data\app.db`、`data\instances\<direct-child>\app.db`，以及本次显式传入的 `-DataDirectory\app.db`（重复路径只检查一次）。每个存在的数据库都会检查 WAL/SHM/journal sidecar、schema 版本，并在所属数据目录创建 `upgrade-backups\<时间戳>\app.db` 备份。
 
-如果任一受管理 `app.db` 的 schema 比候选版本更新，脚本会以 `INCOMPATIBLE_DOWNGRADE` 拒绝降级，旧程序保持不变；不存在的数据库会被忽略，实例目录中的 reparse point/symlink 不会跟随。升级的文件校验或替换失败时，脚本会自动恢复旧启动器和旧 `Program/`，并保留数据库备份。成功升级后，旧程序保留在根目录 `program-backups/Program-<时间戳>`，旧启动器保存为 `program-backups/PalServerConsole-<时间戳>.exe`；人工回退时需要同时恢复两者，不要回退或覆盖 `data/`。
+### 升级内容与回退
+
+升级会替换：
+
+- 根目录启动器 `PalServerConsole.exe`
+- `Program/`
+- release-managed maintenance scripts：`apply-downloaded-update.ps1` 和 `upgrade-portable.ps1`
+
+升级会保留：
+
+- `data/`
+
+如果任一受管理 `app.db` 的 schema 比候选版本更新，脚本会以 `INCOMPATIBLE_DOWNGRADE` 拒绝降级，旧程序保持不变；不存在的数据库会被忽略，实例目录中的 reparse point/symlink 不会跟随。升级的文件校验或替换失败时，脚本会自动恢复旧启动器、旧 `Program/` 和旧维护脚本，并保留数据库备份。成功升级后，旧程序保留在根目录 `program-backups/Program-<时间戳>`，旧启动器保存为 `program-backups/PalServerConsole-<时间戳>.exe`；已有的旧维护脚本也会保存在同一目录。人工回退时需要同时恢复旧程序、旧启动器和旧维护脚本，不要回退或覆盖 `data/`。
 
 若出现 `DATABASE_SIDECAR_PRESENT`，请先按正常方式启动一次旧控制台、再停止它，确保 SQLite WAL/journal 已安全收尾后再升级。不要在升级过程中复制、删除或替换真实 PalServer 存档。
