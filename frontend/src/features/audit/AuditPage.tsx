@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState, type FormEvent } from "react";
 import type { AuthStatus, AuditItem, AuditResponse } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
+import { BlurFade } from "../../components/ui/blur-fade";
 import { formatObservedAt } from "../../utils/format";
 
 export function AuditPage({ auth }: { auth: AuthStatus }) {
@@ -73,7 +74,7 @@ export function AuditPage({ auth }: { auth: AuthStatus }) {
     {error && <p className="form-error" role="alert">{error}</p>}
     <section className="audit-table" aria-live="polite">
       <div className="audit-table-head"><span>时间</span><span>事件</span><span>结果</span><span>来源</span><span>详情</span></div>
-      {events?.items.length ? events.items.map((item) => <div className="audit-table-row" key={item.id}><span data-label="时间">{formatObservedAt(item.createdAt)}</span><strong data-label="事件">{auditEventLabel(item.eventType)}</strong><span data-label="结果" className={`audit-result ${item.result}`}>{auditResultLabel(item.result)}</span><span data-label="来源">{auditSourceLabel(item.source)}</span><span data-label="详情" title={JSON.stringify(item.detail)}>{auditDetail(item)}</span></div>) : <p className="empty-state">暂无符合条件的审计事件。</p>}
+      {events?.items.length ? events.items.map((item, index) => <BlurFade className="audit-table-entry" key={item.id} delay={Math.min(index, 5) * 0.025} duration={0.22} offset={4}><article className="audit-table-row"><span data-label="时间">{formatObservedAt(item.createdAt)}</span><strong data-label="事件">{auditEventLabel(item.eventType)}</strong><span data-label="结果" className={`audit-result ${item.result}`}>{auditResultLabel(item.result)}</span><span data-label="来源">{auditSourceLabel(item.source)}</span><span data-label="详情" title={JSON.stringify(item.detail)}>{auditDetail(item)}</span></article></BlurFade>) : <p className="empty-state">暂无符合条件的审计事件。</p>}
     </section>
     <section className="audit-footer"><span>共 {events?.total || 0} 条，第 {events?.page || 1}/{totalPages} 页</span><div><button className="icon-button bordered" title="上一页" disabled={page <= 1} onClick={() => setPage((value) => value - 1)}><ChevronLeft size={18} /></button><button className="icon-button bordered" title="下一页" disabled={page >= totalPages} onClick={() => setPage((value) => value + 1)}><ChevronRight size={18} /></button></div></section>
     <section className="audit-retention"><form onSubmit={saveRetention}><label htmlFor="audit-retention">保留天数（0 表示不限）</label><input id="audit-retention" type="number" min={0} max={3650} value={retention} onChange={(event) => setRetention(event.target.value)} /><button className="primary-button" type="submit">保存策略</button></form></section>

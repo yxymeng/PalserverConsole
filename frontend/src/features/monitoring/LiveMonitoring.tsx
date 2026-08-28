@@ -122,8 +122,8 @@ export function LiveMonitoring({
   }
 
   const players = playersFrom(snapshot?.players.data);
-  const playerState = playerDataState(snapshot, dataError, players.length);
-  const onlinePlayers = onlinePlayersSummary(players, playerState, snapshot?.players.stale === true);
+  const playerState = playerDataState(snapshot, dataError, players?.length ?? null);
+  const onlinePlayers = onlinePlayersSummary(players ?? [], playerState, snapshot?.players.stale === true);
   const process = snapshot?.metrics.data.process;
   const liveTitle = liveTitleText(snapshot, dataError, connectionStatus);
   const liveDotClass = connectionStatus === "open" && snapshot && !snapshot.info.stale ? "status-dot" : "status-dot stale-dot";
@@ -141,7 +141,7 @@ export function LiveMonitoring({
       <div className="live-metric-group-heading"><h3 id="server-runtime-title">服务器运行</h3><span>进程与在线状态</span></div>
       <div className="metric-grid live-status-grid" aria-label="实时服务器状态">
         <article><span>服务器状态</span><strong>{shell ? serverStateLabel(shell.serverState) : "读取中"}</strong><small>{shell ? `检测于 ${new Date(shell.observedAt * 1_000).toLocaleTimeString("zh-CN")}` : "正在读取服务器状态"}</small></article>
-        <article><span>在线玩家</span><strong>{snapshot ? players.length : "读取中"}</strong><small>{sourceLabel(snapshot?.players)}</small></article>
+        <article><span>在线玩家</span><strong>{snapshot ? players === null ? "—" : players.length : "读取中"}</strong><small>{sourceLabel(snapshot?.players)}</small></article>
         <UptimeMetric state={shell?.serverState} startedAt={process?.startedAt} />
         <article><span>服务器帧率</span><strong>{displayValue(snapshot?.metrics.data.server, ["serverfps", "serverFps", "ServerFPS", "fps"])}</strong><small>{sourceLabel(snapshot?.metrics)}</small></article>
       </div>
@@ -170,10 +170,10 @@ export function LiveMonitoring({
     </section>
     <section className="live-section">
       <div className="section-heading"><div><h2>在线玩家</h2><p>{sourceLabel(snapshot?.players)}。完整 IP 按管理需求显示。</p></div><Users size={22} /></div>
-      {playerState === "loading" || playerState === "error" ? <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><RefreshCw aria-hidden="true" /></EmptyMedia><EmptyTitle>{playerState === "error" ? "在线玩家数据不可用" : "正在读取在线玩家"}</EmptyTitle><EmptyDescription>{playerState === "error" ? "请先检查上方错误信息，然后重新刷新。" : "连接完成后会显示当前在线玩家。"}</EmptyDescription></EmptyHeader></Empty> : playerState === "ready" ? <><div className="psc-player-table-wrap"><Table className="psc-player-table"><TableHeader><TableRow><TableHead>玩家</TableHead><TableHead>Player ID</TableHead><TableHead>IP</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{players.map((player, index) => {
+      {playerState === "loading" || playerState === "error" ? <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><RefreshCw aria-hidden="true" /></EmptyMedia><EmptyTitle>{playerState === "error" ? "在线玩家数据不可用" : "正在读取在线玩家"}</EmptyTitle><EmptyDescription>{playerState === "error" ? "请先检查上方错误信息，然后重新刷新。" : "连接完成后会显示当前在线玩家。"}</EmptyDescription></EmptyHeader></Empty> : playerState === "ready" ? <><div className="psc-player-table-wrap"><Table className="psc-player-table"><TableHeader><TableRow><TableHead>玩家</TableHead><TableHead>Player ID</TableHead><TableHead>IP</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{(players ?? []).map((player, index) => {
         const id = playerId(player) || `unknown-${index}`;
         return <TableRow key={`${id}-${index}`}><TableCell>{playerText(player, ["name", "playerName", "accountName"], "未知玩家")}</TableCell><TableCell>{id}</TableCell><TableCell>{playerText(player, ["ip", "ipAddress"], "不可用")}</TableCell><TableCell><span className="psc-player-actions"><Button variant="outline" size="icon" type="button" title="踢出玩家" aria-label={`踢出玩家 ${id}`} disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX aria-hidden="true" /></Button><Button variant="destructive" size="icon" type="button" title="封禁玩家" aria-label={`封禁玩家 ${id}`} disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop aria-hidden="true" /></Button></span></TableCell></TableRow>;
-      })}</TableBody></Table></div><div className="psc-player-list">{players.map((player, index) => {
+      })}</TableBody></Table></div><div className="psc-player-list">{(players ?? []).map((player, index) => {
         const id = playerId(player) || `unknown-${index}`;
         return <article className="psc-player-card" key={`mobile-${id}-${index}`}><div><strong>{playerText(player, ["name", "playerName", "accountName"], "未知玩家")}</strong><small>在线玩家</small></div><dl><div><dt>Player ID</dt><dd>{id}</dd></div><div><dt>IP</dt><dd>{playerText(player, ["ip", "ipAddress"], "不可用")}</dd></div></dl><div className="psc-player-card-actions"><Button variant="outline" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX data-icon="inline-start" aria-hidden="true" />踢出</Button><Button variant="destructive" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop data-icon="inline-start" aria-hidden="true" />封禁</Button></div></article>;
       })}</div></> : <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><Users aria-hidden="true" /></EmptyMedia><EmptyTitle>当前没有在线玩家</EmptyTitle><EmptyDescription>连接正常后，新加入的玩家会显示在这里。</EmptyDescription></EmptyHeader></Empty>}
@@ -269,8 +269,12 @@ function uptimeText(state: ShellStatus["serverState"] | undefined, startedAt: nu
   return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分`;
 }
 
-function playersFrom(data: unknown): Record<string, unknown>[] {
-  if (Array.isArray(data)) return data.filter((item): item is Record<string, unknown> => !!item && typeof item === "object");
+function playersFrom(data: unknown): Record<string, unknown>[] | null {
+  if (Array.isArray(data)) {
+    return data.every((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      ? data
+      : null;
+  }
   if (data && typeof data === "object" && Array.isArray((data as Record<string, unknown>).players)) return playersFrom((data as Record<string, unknown>).players);
-  return [];
+  return null;
 }

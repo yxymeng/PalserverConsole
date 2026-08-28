@@ -2,7 +2,9 @@ name: Windows CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       run_private_fixture:
@@ -13,6 +15,10 @@ on:
 
 permissions:
   contents: read
+
+concurrency:
+  group: windows-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PYTHONUTF8: "1"
@@ -86,9 +92,27 @@ jobs:
           node-version: "24"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
+      - name: Provision supported npm
+        shell: pwsh
+        run: |
+          npm.cmd install --global npm@11.17.0
+          $npmVersion = (& npm.cmd --version).Trim()
+          Write-Host "npm $npmVersion"
+          if ([version]$npmVersion -lt [version]"11.17.0") {
+            throw "UNSUPPORTED_NPM_VERSION: npm >=11.17 is required."
+          }
       - name: Install locked frontend dependencies
         working-directory: frontend
         run: npm.cmd ci
+      - name: Verify install-script policy
+        working-directory: frontend
+        shell: pwsh
+        run: |
+          $policy = (& npm.cmd approve-scripts --allow-scripts-pending | Out-String)
+          $policy
+          if ($policy -notmatch "No packages with unreviewed install scripts") {
+            throw "UNREVIEWED_INSTALL_SCRIPT: update frontend/package.json allowScripts explicitly."
+          }
       - name: ESLint
         id: lint
         working-directory: frontend
@@ -166,7 +190,7 @@ jobs:
           "- access mode: parser reads the configured save and DLL; the workflow performs no write, restore, lifecycle, or configuration operation" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
   required-checks:
-    name: OPT-11 required checks
+    name: Required checks
     if: always()
     needs: [backend, frontend]
     runs-on: windows-latest

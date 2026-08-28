@@ -17,7 +17,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 14
+CACHE_SCHEMA_VERSION = 15
 WORLD_QUERY_CONTRACT_VERSION = 1
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
@@ -400,8 +400,10 @@ def query_world_overview(path: Path) -> dict[str, object]:
             "(SELECT COUNT(*) FROM players), "
             "(SELECT COUNT(*) FROM pals), "
             "(SELECT COUNT(DISTINCT character_id) FROM pals WHERE character_id <> ''), "
-            "(SELECT COUNT(DISTINCT item_id) FROM inventory_items), "
-            "(SELECT COALESCE(SUM(quantity), 0) FROM inventory_items), "
+            "(SELECT COUNT(DISTINCT item_id) FROM inventory_items WHERE "
+            " owner_kind IN ('player_inventory', 'base_inventory', 'guild_inventory')), "
+            "(SELECT COALESCE(SUM(quantity), 0) FROM inventory_items WHERE "
+            " owner_kind IN ('player_inventory', 'base_inventory', 'guild_inventory')), "
             "(SELECT COUNT(*) FROM bases), "
             "(SELECT COUNT(*) FROM guilds), "
             "(SELECT COUNT(*) FROM pals WHERE is_lucky = 1), "
@@ -1377,7 +1379,9 @@ def _player_profiles(properties: Sequence[Mapping[str, Any]]) -> dict[str, dict[
 _PLAYER_PROGRESS_FIELDS = (
     "discoveredPalSpecies",
     "capturedPals",
-    "fastTravelPoints",
+    "fastTravel",
+    "relics",
+    "memos",
     "exploredAreas",
     "fieldBosses",
     "towerBosses",
@@ -1395,11 +1399,16 @@ def _player_progress(save_data: Mapping[str, Any]) -> dict[str, object]:
     candidates: dict[str, int | None] = {
         "discoveredPalSpecies": _truthy_map_count(record_data.get("PaldeckUnlockFlag")),
         "capturedPals": _count_map_sum(record_data.get("PalCaptureCount")),
-        "fastTravelPoints": _truthy_map_count(record_data.get("FastTravelPointUnlockFlag")),
+        "fastTravel": _truthy_map_count(record_data.get("FastTravelPointUnlockFlag")),
+        "relics": _truthy_map_count(record_data.get("RelicObtainForInstanceFlag")),
+        "memos": _truthy_map_count(record_data.get("NoteObtainForInstanceFlag")),
         "exploredAreas": _truthy_map_count(record_data.get("FindAreaFlagMap")),
         "fieldBosses": _truthy_map_count(record_data.get("NormalBossDefeatFlag")),
         "towerBosses": _truthy_map_count(record_data.get("TowerBossDefeatFlag")),
-        "dungeonClears": _nonnegative_integer(record_data.get("FixedDungeonClearCount")),
+        "dungeonClears": _sum_nonnegative_integers(
+            record_data.get("NormalDungeonClearCount"),
+            record_data.get("FixedDungeonClearCount"),
+        ),
         "oilRigClears": _nonnegative_integer(record_data.get("OilrigClearCount")),
         "technologyPoints": _nonnegative_integer(save_data.get("TechnologyPoint")),
         "ancientTechnologyPoints": _nonnegative_integer(save_data.get("bossTechnologyPoint")),
@@ -1461,6 +1470,13 @@ def _nonnegative_integer(value: object) -> int | None:
         return None
     integer = int(current)
     return integer if integer >= 0 and integer == current else None
+
+
+def _sum_nonnegative_integers(*values: object) -> int | None:
+    normalized = [_nonnegative_integer(value) for value in values]
+    if any(value is None for value in normalized):
+        return None
+    return sum(value for value in normalized if value is not None)
 
 
 def _property_list_count(value: object) -> int | None:

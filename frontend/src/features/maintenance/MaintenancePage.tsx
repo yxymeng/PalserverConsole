@@ -1,5 +1,5 @@
 import { Activity, ArchiveRestore, BellRing, Download, FileClock, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import type { AuthStatus, Operation, OperationalHealth, ShellStatus } from "../../api/contracts";
@@ -13,6 +13,7 @@ import { AuditPage } from "../audit/AuditPage";
 import { BackupsPage } from "../backups/BackupsPage";
 import { OperationalHealthPanel } from "../overview/OperationalHealthPanel";
 import { MaintenanceNotificationsPanel, MaintenancePanel } from "./MaintenancePanel";
+import { ApplicationUpdatePanel } from "./ApplicationUpdatePanel";
 
 type MaintenanceSection = "health" | "update" | "backups" | "audit" | "notifications";
 
@@ -34,6 +35,7 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
   const [healthUnavailable, setHealthUnavailable] = useState(false);
   const [healthRefreshToken, setHealthRefreshToken] = useState(0);
   const [confirmForceStop, setConfirmForceStop] = useState(false);
+  const tabPanelRef = useRef<HTMLDivElement | null>(null);
   const nextRequestSignal = useAbortableRequest();
   const nextHealthRequestSignal = useAbortableRequest();
 
@@ -109,13 +111,14 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
   function selectSection(section: MaintenanceSection) {
     setActiveSection(section);
     window.history.replaceState(null, "", `#maintenance-${section}`);
+    window.requestAnimationFrame(() => tabPanelRef.current?.scrollIntoView({ block: "start" }));
   }
 
   const healthSummary = maintenanceHealthSummary(health, healthUnavailable);
 
   return <div className="page-stack maintenance-page">
     <section className="maintenance-intro">
-      <div><h2>维护中心</h2><p>健康巡检、服务器更新、官方备份、审计和维护通知按任务分区显示。</p></div>
+      <div><p className="maintenance-kicker">低频运维工作区</p><h2>维护中心</h2><p>按任务进入健康、更新、备份、审计和通知；危险操作只在对应模块内确认。</p></div>
       <div className="maintenance-intro-actions">
         <Badge variant={healthSummary.variant}>{healthSummary.label}</Badge>
         <Button variant="outline" size="icon" type="button" title="刷新维护状态" aria-label="刷新维护状态" onClick={() => { void refresh(); void refreshHealth(); setHealthRefreshToken((value) => value + 1); }}><RefreshCw aria-hidden="true" /></Button>
@@ -130,9 +133,12 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
     {operation && createPortal(<OperationStatusIsland operation={operation} onCancel={() => void cancel()} onForceStop={() => setConfirmForceStop(true)} />, document.body)}
     {error && <p className="form-error" role="alert">{error}</p>}
     {message && <p className="form-success" role="status">{message}</p>}
-    <div className="maintenance-tab-panel" role="tabpanel" id={`maintenance-${activeSection}`}>
+    <div ref={tabPanelRef} className="maintenance-tab-panel" role="tabpanel" id={`maintenance-${activeSection}`}>
       {activeSection === "health" && <OperationalHealthPanel auth={auth} refreshToken={healthRefreshToken} onHealthChange={handleHealthChange} />}
-      {activeSection === "update" && <MaintenancePanel auth={auth} status={status} onOperation={setOperation} />}
+      {activeSection === "update" && <div className="maintenance-update-stack">
+        <ApplicationUpdatePanel auth={auth} />
+        <MaintenancePanel auth={auth} status={status} onOperation={setOperation} />
+      </div>}
       {activeSection === "backups" && <BackupsPage auth={auth} />}
       {activeSection === "audit" && <AuditPage auth={auth} />}
       {activeSection === "notifications" && <MaintenanceNotificationsPanel auth={auth} />}

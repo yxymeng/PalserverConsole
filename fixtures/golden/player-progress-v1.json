@@ -1,0 +1,22 @@
+{
+  "fixtureVersion": 1,
+  "privacy": "sanitized-real-save-derived-no-player-identifiers",
+  "description": "A fixed, identifier-free regression baseline derived from one read-only Palworld player save.",
+  "sourceFields": {
+    "NormalDungeonClearCount": 2,
+    "FixedDungeonClearCount": 22,
+    "OilrigClearCount": null,
+    "RelicObtainForInstanceFlagTrueCount": 26,
+    "FastTravelPointUnlockFlagTrueCount": 174,
+    "NoteObtainForInstanceFlagTrueCount": 11,
+    "TechnologyPoint": 35
+  },
+  "expected": {
+    "dungeonClears": 24,
+    "relics": 26,
+    "fastTravel": 174,
+    "memos": 11,
+    "technologyPoints": 35,
+    "oilRigClears": null
+  }
+}

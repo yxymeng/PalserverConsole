@@ -141,13 +141,27 @@ export type WorldOverview = {
   };
 };
 export type WorldReparseResponse = { message: string; reparseGeneration: number };
+export type ApplicationUpdateStatus = {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  portable: boolean;
+  releaseUrl: string | null;
+  publishedAt: string | null;
+  assetSizeBytes: number | null;
+};
+export type ApplicationUpdateResult = {
+  message: string;
+  version: string;
+  restartScheduled: boolean;
+};
 
 export type WorldPlayerListItem = {
   id: string; instanceId: string; name: string; level: number | null; guildId: string | null;
   guildName?: string; inventoryIds: string[]; partyContainerId: string | null; storageContainerId: string | null;
   lastRecordedAt: string | null; progress: WorldPlayerProgress;
 };
-export type WorldPlayerProgressField = "discoveredPalSpecies" | "capturedPals" | "fastTravelPoints" | "exploredAreas" | "fieldBosses" | "towerBosses" | "dungeonClears" | "oilRigClears" | "technologyPoints" | "ancientTechnologyPoints" | "recipes";
+export type WorldPlayerProgressField = "discoveredPalSpecies" | "capturedPals" | "fastTravel" | "relics" | "memos" | "exploredAreas" | "fieldBosses" | "towerBosses" | "dungeonClears" | "oilRigClears" | "technologyPoints" | "ancientTechnologyPoints" | "recipes";
 export type WorldPlayerProgress = {
   state: "complete" | "partial" | "unavailable";
   values: Partial<Record<WorldPlayerProgressField, number>>;

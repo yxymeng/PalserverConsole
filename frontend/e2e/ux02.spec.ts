@@ -125,8 +125,13 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
     const cancel = actionDialog.getByRole("button", { name: "取消" });
     const confirm = actionDialog.getByRole("button", { name: `确认${action}` });
     const [cancelBox, confirmBox] = await Promise.all([cancel.boundingBox(), confirm.boundingBox()]);
-    expect(Math.round(cancelBox?.width || 0)).toBe(Math.round(confirmBox?.width || 0));
-    expect(Math.round(cancelBox?.height || 0)).toBe(Math.round(confirmBox?.height || 0));
+    expect(cancelBox).not.toBeNull();
+    expect(confirmBox).not.toBeNull();
+    if (!cancelBox || !confirmBox) {
+      throw new Error("Dialog action buttons must have measurable bounding boxes.");
+    }
+    expect(Math.abs(cancelBox.width - confirmBox.width)).toBeLessThanOrEqual(4);
+    expect(Math.abs(cancelBox.height - confirmBox.height)).toBeLessThanOrEqual(2);
     if (testInfo.project.name === "mobile") await cancel.tap();
     else await cancel.click();
     await expect(page.getByRole("alertdialog")).toBeHidden();

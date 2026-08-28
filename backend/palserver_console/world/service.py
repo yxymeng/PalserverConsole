@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +57,12 @@ class WorldDataError(RuntimeError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
+
+
+def _worker_output_text(value: object) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
 
 
 @dataclass(frozen=True)
@@ -110,6 +117,7 @@ class WorldSnapshotService:
         self._wake = threading.Event()
         self._thread: threading.Thread | None = None
         self._lock = threading.RLock()
+        self._active_worker: subprocess.Popen[Any] | None = None
         self._last_seen: tuple[tuple[str, int, int], ...] | None = None
         self._pending: tuple[tuple[str, int, int], ...] | None = None
         self._pending_since = 0.0
@@ -157,8 +165,35 @@ class WorldSnapshotService:
     def stop(self) -> None:
         self._stop.set()
         self._wake.set()
-        if self._thread:
-            self._thread.join(timeout=5)
+        self._terminate_active_worker()
+        thread = self._thread
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=5)
+            if thread.is_alive():
+                self._terminate_active_worker()
+                thread.join(timeout=5)
+
+    def _terminate_active_worker(self) -> None:
+        with self._lock:
+            worker = self._active_worker
+        if worker is not None:
+            self._terminate_worker(worker)
+
+    @staticmethod
+    def _terminate_worker(worker: subprocess.Popen[Any]) -> None:
+        try:
+            worker.terminate()
+        except (OSError, ProcessLookupError):
+            return
+        with suppress(subprocess.TimeoutExpired):
+            worker.wait(timeout=1.0)
+            return
+        try:
+            worker.kill()
+        except (OSError, ProcessLookupError):
+            return
+        with suppress(subprocess.TimeoutExpired):
+            worker.wait(timeout=1.0)
 
     def background_status(self) -> dict[str, object]:
         with self._lock:
@@ -1021,36 +1056,58 @@ class WorldSnapshotService:
         ooz_dll = self._find_ooz_dll()
         if ooz_dll:
             command.extend(["--ooz-dll", str(ooz_dll)])
+        if self._stop.is_set():
+            raise WorldDataError("PARSER_STOPPED", "解析子进程已停止。")
+        worker: subprocess.Popen[Any] | None = None
         try:
-            completed = subprocess.run(
+            worker = subprocess.Popen(
                 command,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 encoding="utf-8",
-                timeout=self.worker_timeout_seconds,
-                check=False,
             )
-        except subprocess.TimeoutExpired as error:
-            raise WorldDataError("PARSER_TIMEOUT", "解析子进程超时并已结束。") from error
-        if completed.returncode != 0:
-            detail = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else ""
+            with self._lock:
+                self._active_worker = worker
+                should_stop = self._stop.is_set()
+            if should_stop:
+                self._terminate_worker(worker)
             try:
-                failure = json.loads(detail)
-            except json.JSONDecodeError:
-                failure = None
-            if isinstance(failure, dict) and failure.get("errorCode") == "DISK_SPACE_LOW":
-                raise WorldDataError("DISK_SPACE_LOW", "磁盘剩余空间不足，已保留最后成功缓存。")
-            raise WorldDataError(
-                "PARSER_CRASHED",
-                f"Parser exited with code {completed.returncode}: {detail}",
-            )
-        try:
-            result = json.loads(completed.stdout.strip().splitlines()[-1])
-        except (IndexError, json.JSONDecodeError) as error:
-            raise WorldDataError("PARSER_OUTPUT_INVALID", "解析子进程返回了无效结果。") from error
-        if not isinstance(result, dict) or result.get("ok") is not True:
-            raise WorldDataError("PARSER_OUTPUT_INVALID", "解析子进程未确认成功。")
-        return result
+                stdout, stderr = worker.communicate(timeout=self.worker_timeout_seconds)
+            except subprocess.TimeoutExpired as error:
+                self._terminate_worker(worker)
+                raise WorldDataError("PARSER_TIMEOUT", "解析子进程超时并已结束。") from error
+            if self._stop.is_set():
+                raise WorldDataError("PARSER_STOPPED", "解析子进程已停止。")
+            stdout_text = _worker_output_text(stdout)
+            stderr_text = _worker_output_text(stderr)
+            if worker.returncode != 0:
+                detail = stderr_text.strip().splitlines()[-1] if stderr_text.strip() else ""
+                try:
+                    failure = json.loads(detail)
+                except json.JSONDecodeError:
+                    failure = None
+                if isinstance(failure, dict) and failure.get("errorCode") == "DISK_SPACE_LOW":
+                    raise WorldDataError(
+                        "DISK_SPACE_LOW", "磁盘剩余空间不足，已保留最后成功缓存。"
+                    )
+                raise WorldDataError(
+                    "PARSER_CRASHED",
+                    f"Parser exited with code {worker.returncode}: {detail}",
+                )
+            try:
+                result = json.loads(stdout_text.strip().splitlines()[-1])
+            except (IndexError, json.JSONDecodeError) as error:
+                raise WorldDataError(
+                    "PARSER_OUTPUT_INVALID", "解析子进程返回了无效结果。"
+                ) from error
+            if not isinstance(result, dict) or result.get("ok") is not True:
+                raise WorldDataError("PARSER_OUTPUT_INVALID", "解析子进程未确认成功。")
+            return result
+        finally:
+            with self._lock:
+                if self._active_worker is worker:
+                    self._active_worker = None
 
     def _find_ooz_dll(self) -> Path | None:
         configured = os.environ.get("PALSERVER_OOZ_DLL")

@@ -16,6 +16,7 @@ from palserver_console.config import AppSettings
 from palserver_console.main import create_app
 from palserver_console.monitoring import (
     MonitorCoordinator,
+    PalServerRconClient,
     PalServerRestClient,
     ProcessMetricsCollector,
     SensitiveValue,
@@ -214,7 +215,9 @@ def test_process_lookup_includes_palserver_descendants(
     assert [process.pid for process in processes] == [123, 456]
 
 
-def _monitor() -> tuple[MonitorCoordinator, FakeRest, FakeRcon]:
+def _monitor(
+    players_observer: Any | None = None,
+) -> tuple[MonitorCoordinator, FakeRest, FakeRcon]:
     rest = FakeRest()
     rcon = FakeRcon()
     config = ServerConnectionConfig(
@@ -231,8 +234,62 @@ def _monitor() -> tuple[MonitorCoordinator, FakeRest, FakeRcon]:
         rcon_factory=lambda _: rcon,
         process_metrics=FakeProcessMetrics(),  # type: ignore[arg-type]
         interval_seconds=60,
+        players_observer=players_observer,
     )
     return monitor, rest, rcon
+
+
+def test_rcon_showplayers_parses_supported_text_fixture(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ServerConnectionConfig(
+        rest_url="http://127.0.0.1:8212",
+        rest_enabled=False,
+        rcon_host="127.0.0.1",
+        rcon_port=25575,
+        rcon_enabled=True,
+        admin_password=SensitiveValue("must-not-leak"),
+    )
+    client = PalServerRconClient(config)
+    fixture = (
+        "name,playeruid,steamid\r\n"
+        "Alice,player-uid-1,76561198000000001\r\n"
+        "Bob,player-uid-2,76561198000000002\r\n"
+    )
+    monkeypatch.setattr(client, "_command", lambda command: {"raw": fixture})
+
+    assert client.players() == [
+        {
+            "name": "Alice",
+            "playerUid": "player-uid-1",
+            "steamId": "76561198000000001",
+        },
+        {
+            "name": "Bob",
+            "playerUid": "player-uid-2",
+            "steamId": "76561198000000002",
+        },
+    ]
+
+
+def test_rcon_showplayers_unknown_raw_is_unsupported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = ServerConnectionConfig(
+        rest_url="http://127.0.0.1:8212",
+        rest_enabled=False,
+        rcon_host="127.0.0.1",
+        rcon_port=25575,
+        rcon_enabled=True,
+        admin_password=SensitiveValue("must-not-leak"),
+    )
+    client = PalServerRconClient(config)
+    monkeypatch.setattr(client, "_command", lambda command: {"raw": "online: 2"})
+
+    with pytest.raises(SourceError) as raised:
+        client.players()
+
+    assert raised.value.code == "RCON_PLAYERS_UNSUPPORTED_FORMAT"
 
 
 def test_connection_config_parses_ports_and_redacts_password() -> None:
@@ -384,6 +441,34 @@ def test_monitor_uses_read_only_rcon_fallback_and_preserves_stale_values() -> No
     assert second["metrics"]["stale"] is True
     assert "REST_SERVER_ERROR" in str(second["metrics"]["errorCode"])
     assert rest.close_count == 2
+
+
+def test_monitor_unsupported_rcon_players_stays_stale_without_player_audit_diff(
+    tmp_path: Path,
+) -> None:
+    from palserver_console.audit import AuditService
+    from palserver_console.persistence import Database
+
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    audit = AuditService(database, lambda: None)
+    monitor, rest, rcon = _monitor(audit.observe_players)
+
+    first = monitor.collect_once()
+    assert first["players"]["stale"] is False
+    rest.failures["players"] = SourceError("REST_CONNECTION_REFUSED", "refused")
+    rcon.failures["players"] = SourceError(
+        "RCON_PLAYERS_UNSUPPORTED_FORMAT", "raw ShowPlayers response"
+    )
+
+    second = monitor.collect_once()
+
+    assert second["players"]["stale"] is True
+    assert second["players"]["data"] == first["players"]["data"]
+    assert "RCON_PLAYERS_UNSUPPORTED_FORMAT" in str(second["players"]["errorCode"])
+    rows, total = database.list_audit_events(page_size=50)
+    assert rows == []
+    assert total == 0
 
 
 def test_monitor_background_reports_error_and_recovers_with_backoff() -> None:

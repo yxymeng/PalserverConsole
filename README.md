@@ -16,6 +16,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 - 在本机明确确认后执行 SteamCMD 校验更新：检查在线玩家、通知、保存、停服、更新、校验、启动和健康检查；失败时只尝试重新启动，不会自动强制结束进程。
 - 可选配置通用 HTTPS Webhook，只发送维护计划、开始、完成、取消和失败事件；Webhook 密钥不会回显到页面、日志或审计导出。
 - 通过命名实例管理多个 PalServer/世界：每个实例有独立控制台、游戏和查询端口，以及数据目录、操作锁与配置/缓存/备份命名空间；重复绑定同一个 `PalServer.exe`、世界或游戏/查询端口会被拒绝。
+- 检查维护者发布的最新 GitHub Release；Windows portable 可从维护页保留 `data/` 并完成控制台自更新，源码运行只提供下载入口。
 
 ## 界面预览
 
@@ -29,7 +30,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 以下步骤用于当前源码版本。构建出的 Windows 便携版解压后直接双击根目录的 `PalServerConsole.exe`；它自带运行时，普通使用者无需安装 Python 或 Node.js。详细说明见 [`docs/windows-portable.md`](docs/windows-portable.md)。
 
 1. 安装 **64 位 CPython 3.13**，并勾选 **Add Python to PATH**。其他 Python 版本不属于本项目的构建和验证范围。
-2. 安装 Node.js LTS。首次构建前端时需要，之后只有前端源码或锁文件发生变化时才需要重新构建。
+2. 安装 Node.js 24 LTS，并确认 npm >= 11.17（推荐/固定验证 npm 11.17.0）。首次构建前端时需要，之后只有前端源码或锁文件发生变化时才需要重新构建。
 3. 双击项目目录中的 `start-console.bat`。
 4. 浏览器访问 [http://127.0.0.1:8223/](http://127.0.0.1:8223/)。
 
@@ -117,7 +118,7 @@ npm.cmd run build
 npm.cmd run test:e2e
 ```
 
-构建 Windows 便携版（仅构建机需要 64 位 CPython 3.13 和 Node.js 24 LTS）：
+构建 Windows 便携版（仅构建机需要 64 位 CPython 3.13、Node.js 24 LTS 和 npm >= 11.17；推荐/固定验证 npm 11.17.0）：
 
 ```powershell
 .\scripts\build-portable.ps1
@@ -125,7 +126,7 @@ npm.cmd run test:e2e
 
 正式构建默认要求 Git 工作区干净，否则以 `SOURCE_TREE_DIRTY` 停止，避免交付物声称来自无法重现的提交。仅进行本地验收、确实需要打包未提交代码时可显式使用 `-AllowDirtySource`；这类包会在 `build-info.json` 标记 `sourceTreeState: dirty`，不得作为正式发布包。
 
-脚本会生成 `artifacts\PalServerConsole-<版本>-windows-x64.zip`、`checksums.sha256`、构建元数据，以及 Python 与前端 npm 运行时依赖的第三方许可证；不会对真实 PalServer、存档或现有 `data/` 进行写入。当前产物默认未签名。
+脚本会生成 `artifacts\PalServerConsole-<版本>-windows-x64.zip`、`checksums.sha256`、构建元数据，以及 Python 与前端 npm 运行时依赖的第三方许可证；不会对真实 PalServer、存档或现有 `data/` 进行写入。当前产物默认未签名。Palworld 游戏数据与 Release 的维护者流程见 [`docs/release-maintenance.md`](docs/release-maintenance.md)。
 
 ## 致谢
 
@@ -140,7 +141,7 @@ npm.cmd run test:e2e
 
 ## 数据与公开发布
 
-`data/`、数据库、日志、真实 `.sav`、前端构建产物、Playwright 截图、开发计划、交接记录和生成报告都由 `.gitignore` 排除。`fixtures/` 只保留安全说明和目录忽略规则；本地脱敏样本不会提交或公开分发。
+`data/`、数据库、日志、真实 `.sav`、前端构建产物、Playwright 截图、开发计划、交接记录和生成报告都由 `.gitignore` 排除。`fixtures/golden/` 只保留无标识的合成或真实存档派生计数基线；本地脱敏存档仍不会提交或公开分发。
 
 提交更新前请检查：
 

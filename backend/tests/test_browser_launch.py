@@ -3,14 +3,143 @@ import socket
 import subprocess
 import urllib.request
 import webbrowser
+from collections.abc import Callable
 from contextlib import nullcontext
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import uvicorn
 from pytest import MonkeyPatch
 
 import palserver_console.__main__ as console_main
+
+
+def test_main_binds_application_shutdown_to_uvicorn_server(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    static_dir = tmp_path / "static"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text("<!doctype html>", encoding="utf-8")
+    settings = SimpleNamespace(
+        static_dir=static_dir,
+        database_path=tmp_path / "data" / "app.db",
+        port=8223,
+    )
+
+    class FakeDatabase:
+        def __init__(self, path: Path) -> None:
+            assert path == settings.database_path
+
+        def migrate(self) -> None:
+            pass
+
+        def get_setting(self, key: str) -> None:
+            assert key == "network.port"
+            return None
+
+    class FakeAuth:
+        def admin_password_configured(self) -> bool:
+            return False
+
+    class FakeApplicationUpdates:
+        def __init__(self) -> None:
+            self.requester: Callable[[], None] | None = None
+
+        def bind_shutdown_requester(self, requester: Callable[[], None]) -> None:
+            self.requester = requester
+
+    application = SimpleNamespace(
+        state=SimpleNamespace(application_updates=FakeApplicationUpdates())
+    )
+
+    class FakeConfig:
+        def __init__(self, app: object, **kwargs: object) -> None:
+            self.app = app
+            self.kwargs = kwargs
+
+    class FakeServer:
+        def __init__(self, config: FakeConfig) -> None:
+            self.config = config
+            self.should_exit = False
+            servers.append(self)
+
+        def run(self, *, sockets: list[object]) -> None:
+            assert sockets == [listener]
+            requester = application.state.application_updates.requester
+            assert requester is not None
+            requester()
+
+    servers: list[FakeServer] = []
+    listener = object()
+    monkeypatch.setattr(console_main, "default_settings", lambda: settings)
+    monkeypatch.setattr(console_main, "Database", FakeDatabase)
+    monkeypatch.setattr(console_main, "AuthStore", lambda *_args: FakeAuth())
+    monkeypatch.setattr(console_main, "create_app", lambda _settings: application)
+    monkeypatch.setattr(
+        console_main,
+        "_select_listeners",
+        lambda _host, _port: ([listener], "http://127.0.0.1:8223", 8223),
+    )
+    monkeypatch.setattr(console_main, "_close_sockets", lambda _sockets: None)
+    monkeypatch.setattr(uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(uvicorn, "Server", FakeServer)
+
+    console_main.main(["--no-browser"])
+
+    assert len(servers) == 1
+    assert servers[0].should_exit is True
+
+
+def test_main_returns_before_database_when_portable_update_is_in_progress(
+    monkeypatch: MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(console_main, "_portable_update_blocks_launch", lambda: True)
+
+    def unexpected_database(*args: object, **kwargs: object) -> None:
+        pytest.fail("Database must not be initialized while an update is in progress")
+
+    monkeypatch.setattr(console_main, "Database", unexpected_database)
+
+    console_main.main([])
+
+    assert capsys.readouterr().out == (
+        "PalServerConsole application update is in progress. "
+        "Try again after the update completes.\n"
+    )
+
+
+def test_portable_update_gate_is_disabled_outside_frozen_package(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "palserver_console.__main__._portable_install_root", lambda: None
+    )
+
+    assert console_main._portable_update_blocks_launch() is False
+
+
+def test_portable_update_gate_uses_shared_installation_state(
+    monkeypatch: MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    checked: list[Path] = []
+
+    def check(root: Path) -> bool:
+        checked.append(root)
+        return True
+
+    monkeypatch.setattr(
+        "palserver_console.__main__._portable_install_root", lambda: install_root
+    )
+    monkeypatch.setattr(
+        "palserver_console.__main__.portable_application_update_in_progress",
+        check,
+    )
+
+    assert console_main._portable_update_blocks_launch() is True
+    assert checked == [install_root]
 
 
 def test_browser_url_has_a_palserver_console_cache_key() -> None:

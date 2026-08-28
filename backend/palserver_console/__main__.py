@@ -18,6 +18,7 @@ from pathlib import Path
 import uvicorn
 from fastapi.testclient import TestClient
 
+from .application_updates import _portable_install_root, portable_application_update_in_progress
 from .auth import AuthStore
 from .config import AppSettings, default_settings
 from .main import create_app
@@ -26,8 +27,19 @@ from .persistence import Database
 CONFLICT_FALLBACK_PORT = 18223
 
 
+def _portable_update_blocks_launch() -> bool:
+    install_root = _portable_install_root()
+    return install_root is not None and portable_application_update_in_progress(install_root)
+
+
 def main(argv: list[str] | None = None) -> None:
     arguments = sys.argv[1:] if argv is None else argv
+    if _portable_update_blocks_launch():
+        print(
+            "PalServerConsole application update is in progress. "
+            "Try again after the update completes."
+        )
+        return
     if arguments[:1] == ["--world-worker"]:
         from .world.worker import main as worker_main
 
@@ -92,14 +104,18 @@ def main(argv: list[str] | None = None) -> None:
         settings = replace(settings, port=active_port)
     if should_open_browser:
         threading.Thread(target=_open_when_ready, args=(local_url,), daemon=True).start()
+    application = create_app(settings)
     server = uvicorn.Server(
         uvicorn.Config(
-            create_app(settings),
+            application,
             host=preferred_host,
             port=settings.port,
             workers=1,
             log_level="info",
         )
+    )
+    application.state.application_updates.bind_shutdown_requester(
+        lambda: setattr(server, "should_exit", True)
     )
     try:
         server.run(sockets=sockets)

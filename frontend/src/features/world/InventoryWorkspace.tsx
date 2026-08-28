@@ -200,19 +200,19 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   const totalPages = result?.total ? Math.ceil(result.total / pageSize) : 1;
   const hasFilters = Boolean(appliedSearch || category || sort !== "name" || context.scope !== "inventory" || context.ownerId || context.baseId || context.guildId || context.metadata);
   const allUnknown = Boolean(result?.items.length) && result!.items.every((item) => !item.metadataKnown);
-  const quantityLabel = ({ inventory: "库存总量", player: "玩家总量", base: "据点总量", world: "世界容器总量", all: "全世界总量" } as const)[context.scope];
+  const quantityLabel = ({ inventory: "持有总量", player: "玩家背包", base: "据点箱子", world: "世界容器总量", all: "全世界总量" } as const)[context.scope];
 
   return <section className="inventory-workspace" aria-label="仓库">
-    <header className="inventory-heading">
-      <div><h2>仓库</h2><p>按物品汇总当前存档快照中的玩家背包、据点和公会仓库；世界容器可单独查看。</p></div>
-      <span className="inventory-total">{result?.total ?? "-"} 种物品</span>
+    <header className="world-module-heading inventory-heading">
+      <div><p className="world-module-kicker">玩家持有资产</p><h2>仓库</h2><p>默认仅汇总玩家背包、据点箱子与公会箱子；世界宝箱和其他地图容器不计入仓库。</p></div>
+      <span className="world-module-total inventory-total">{result ? `共 ${result.total.toLocaleString()} 种物品` : "等待快照"}</span>
     </header>
     {context.label && <div className="inventory-context" role="status"><MapPin size={17} aria-hidden="true" /><span>当前仅显示：{context.label}</span><button className="world-clear-button" type="button" onClick={onClearContext}><X size={15} />返回全部仓库</button></div>}
     {allUnknown && <p className="inventory-metadata-warning" role="status">当前结果中的物品资料尚未收录；仍保留 Item ID、真实数量和全部位置。</p>}
     <form className="inventory-toolbar" onSubmit={submitSearch}>
       <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索物品" placeholder="搜索中文名称或 Item ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
       <button className="primary-button world-search-button" type="submit">搜索</button>
-      <fieldset className="inventory-scope" aria-label="库存范围"><legend>范围</legend>{([ ["inventory", "库存"], ["player", "玩家"], ["base", "据点"], ["world", "世界"], ["all", "全部"] ] as const).map(([value, label]) => <button type="button" key={value} className={context.scope === value ? "active" : ""} aria-pressed={context.scope === value} onClick={() => { onContextChange({ scope: value }); setPage(1); }}>{label}</button>)}</fieldset>
+      <fieldset className="inventory-scope" aria-label="仓库范围"><legend>仓库范围</legend>{([ ["inventory", "全部持有"], ["player", "玩家背包"], ["base", "据点箱子"] ] as const).map(([value, label]) => <button type="button" key={value} className={context.scope === value ? "active" : ""} aria-pressed={context.scope === value} onClick={() => { onContextChange({ scope: value }); setPage(1); }}>{label}</button>)}</fieldset>
       <label className="world-control"><SlidersHorizontal size={16} aria-hidden="true" /><span>分类</span><select aria-label="物品分类筛选" value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="">全部分类</option>{(result?.categories || []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       <label className="world-control"><span>排序</span><select aria-label="仓库排序方式" value={sort} onChange={(event) => { setSort(event.target.value as InventorySort); setPage(1); }}><option value="name">名称</option><option value="quantity">总量（高到低）</option></select></label>
       {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除筛选</button>}

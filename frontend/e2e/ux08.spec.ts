@@ -48,6 +48,7 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   await expect(page.getByRole("combobox", { name: "保留数量" })).toBeVisible();
   await expect(page.getByLabel("备份概览")).toContainText("1");
   await expect(page.locator(".backup-ledger-item")).toContainText("backup-1");
+  expect(await page.locator(".maintenance-backups").evaluate((section) => section.scrollWidth <= section.clientWidth)).toBe(true);
   await expect(page.getByText("infinite", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "恢复" })).toBeVisible();
   await page.waitForTimeout(350);
@@ -59,11 +60,20 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   await sections.getByRole("tab", { name: "运营审计" }).click();
   await expect(page.getByRole("heading", { name: "运营审计" })).toBeVisible();
   await expect(page.locator(".audit-table-row")).toBeVisible();
+  await expect(page.locator(".audit-table-row")).toContainText("服务器操作");
   expect(await page.locator(".audit-table-row").evaluate((row) => row.scrollWidth <= row.clientWidth)).toBe(true);
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: testInfo.outputPath(`ux08-audit-${testInfo.project.name}.png`), fullPage: true });
   await sections.getByRole("tab", { name: "维护通知" }).click();
   await expect(page.getByRole("heading", { name: "维护通知" })).toBeVisible();
   await expect(page.getByLabel("通知覆盖事件")).toContainText("计划");
   await expect(page.getByLabel("通知状态")).toContainText("已启用");
+  const notificationStages = page.getByRole("tablist", { name: "维护通知阶段" });
+  await expect(notificationStages.getByRole("tab")).toHaveCount(5);
+  await notificationStages.getByRole("tab", { name: "失败" }).click();
+  await expect(page.locator("#notification-event-detail")).toContainText("附带可诊断的错误信息");
+  expect(await page.locator(".maintenance-notifications").evaluate((section) => section.scrollWidth <= section.clientWidth)).toBe(true);
+  await notificationStages.getByRole("tab", { name: "计划" }).click();
   await page.waitForTimeout(250);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: testInfo.outputPath(`ux08-${testInfo.project.name}.png`), fullPage: true });

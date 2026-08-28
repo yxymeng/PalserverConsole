@@ -227,7 +227,7 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
   const hasFilters = Boolean(appliedSearch) || marker !== "all" || care !== "all" || location !== "all" || sort !== "balanced" || hasAptitudeFilters;
   const canLoadMore = items.length < total;
   return <section className="pal-roster" aria-label="帕鲁名册">
-    <header className="pal-roster-heading"><div><h2>帕鲁名册</h2><p>按稳定快照分批读取；照护信息来自存档快照，不是实时监控。</p></div><span>{total ? `已载入 ${items.length} / ${total}` : "等待快照"}</span></header>
+    <header className="world-module-heading pal-roster-heading"><div><p className="world-module-kicker">个体与照护</p><h2>帕鲁名册</h2><p>按稳定快照分批读取；照护信息来自存档快照，不是实时监控。</p></div><span className="world-module-total">{total ? `已载入 ${items.length} / ${total} 只` : "等待快照"}</span></header>
     {context?.label && <p className="world-navigation-context" role="status">当前来自总览：{context.label}</p>}
     {careSummary && <PalCareSummary summary={careSummary} />}
     {metadata?.status === "unavailable" && <p className="pal-metadata-warning" role="status"><AlertCircle size={17} aria-hidden="true" /><span>固定版本元数据当前不可用；名册仍保持只读可浏览，稀有度和工作适应性显示为“资料未收录”。</span><code>{metadata.errorCode || "WORLD_METADATA_UNAVAILABLE"}</code></p>}

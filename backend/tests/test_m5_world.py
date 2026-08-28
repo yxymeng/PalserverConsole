@@ -357,9 +357,14 @@ def _complete_progress_save() -> dict[str, Any]:
                 "PaldeckUnlockFlag": _progress_map({"SheepBall": True, "CatMage": False}),
                 "PalCaptureCount": _progress_map({"SheepBall": 4, "CatMage": 3}),
                 "FastTravelPointUnlockFlag": _progress_map({"Start": True, "Hill": True}),
+                "RelicObtainForInstanceFlag": _progress_map(
+                    {"Relic_A": True, "Relic_B": False}
+                ),
+                "NoteObtainForInstanceFlag": _progress_map({"Memo_A": True}),
                 "FindAreaFlagMap": _progress_map({"Grassland": True}),
                 "NormalBossDefeatFlag": _progress_map({"BOSS_1": True, "BOSS_2": False}),
                 "TowerBossDefeatFlag": _progress_map({"TOWER_1": True, "TOWER_2": True}),
+                "NormalDungeonClearCount": _property(3, "IntProperty"),
                 "FixedDungeonClearCount": _property(5, "IntProperty"),
                 "OilrigClearCount": _property(2, "IntProperty"),
             }
@@ -381,11 +386,13 @@ def test_synthetic_player_progress_distinguishes_complete_partial_missing_and_ab
         "values": {
             "discoveredPalSpecies": 1,
             "capturedPals": 7,
-            "fastTravelPoints": 2,
+            "fastTravel": 2,
+            "relics": 1,
+            "memos": 1,
             "exploredAreas": 1,
             "fieldBosses": 1,
             "towerBosses": 2,
-            "dungeonClears": 5,
+            "dungeonClears": 8,
             "oilRigClears": 2,
             "technologyPoints": 12,
             "ancientTechnologyPoints": 3,
@@ -436,6 +443,50 @@ def test_synthetic_player_progress_distinguishes_complete_partial_missing_and_ab
     assert rows[0]["lastRecordedAt"]
     assert detail is not None
     assert detail["progress"] == complete
+
+
+def test_real_derived_player_progress_golden_baseline() -> None:
+    fixture_path = (
+        Path(__file__).parents[2] / "fixtures" / "golden" / "player-progress-v1.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    source = fixture["sourceFields"]
+
+    def flags(prefix: str, count: int) -> dict[str, Any]:
+        return _progress_map({f"{prefix}_{index:03d}": True for index in range(count)})
+
+    progress = world_cache._player_progress(
+        {
+            "RecordData": _property(
+                {
+                    "NormalDungeonClearCount": _property(
+                        source["NormalDungeonClearCount"], "IntProperty"
+                    ),
+                    "FixedDungeonClearCount": _property(
+                        source["FixedDungeonClearCount"], "IntProperty"
+                    ),
+                    "RelicObtainForInstanceFlag": flags(
+                        "relic", source["RelicObtainForInstanceFlagTrueCount"]
+                    ),
+                    "FastTravelPointUnlockFlag": flags(
+                        "travel", source["FastTravelPointUnlockFlagTrueCount"]
+                    ),
+                    "NoteObtainForInstanceFlag": flags(
+                        "memo", source["NoteObtainForInstanceFlagTrueCount"]
+                    ),
+                }
+            ),
+            "TechnologyPoint": _property(source["TechnologyPoint"], "IntProperty"),
+        }
+    )
+
+    progress_values = cast(dict[str, int], progress["values"])
+    unavailable = cast(list[str], progress["unavailable"])
+    for field, expected in fixture["expected"].items():
+        if expected is None:
+            assert field in unavailable
+        else:
+            assert progress_values[field] == expected
 
 
 def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None:
@@ -638,6 +689,94 @@ def test_world_overview_aggregates_assets_and_actionable_counts(tmp_path: Path) 
             "owner_player_id = NULL, base_id = NULL WHERE id = (SELECT id FROM pals LIMIT 1)"
         )
         connection.execute("UPDATE inventory_items SET metadata_known = 0")
+        inventory_columns = (
+            "container_id, slot_index, item_id, item_name, item_category, item_rarity, "
+            "metadata_known, quantity, owner_kind, owner_id, guild_id, base_id, "
+            "map_object_type, map_object_instance_id, world_x, world_y, world_z"
+        )
+        inventory_insert = (
+            f"INSERT INTO inventory_items({inventory_columns}) "
+            f"VALUES({', '.join('?' for _ in range(17))})"
+        )
+        for values in (
+            (
+                "base-box",
+                0,
+                "BaseStone",
+                "石头",
+                "Material",
+                "Common",
+                1,
+                7,
+                "base_inventory",
+                None,
+                None,
+                "base-1",
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                "guild-box",
+                0,
+                "GuildWood",
+                "木材",
+                "Material",
+                "Common",
+                1,
+                5,
+                "guild_inventory",
+                None,
+                "guild-1",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            (
+                "world-box",
+                0,
+                "WorldLoot",
+                "世界物品",
+                "Material",
+                "Common",
+                1,
+                11,
+                "world",
+                None,
+                None,
+                None,
+                "TreasureBox",
+                "world-object",
+                1.0,
+                2.0,
+                3.0,
+            ),
+            (
+                "unknown-box",
+                0,
+                "UnassignedLoot",
+                "未知位置物品",
+                "Material",
+                "Common",
+                1,
+                13,
+                "unassigned",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+        ):
+            connection.execute(inventory_insert, values)
 
     overview = query_world_overview(cache)
     assets = cast(dict[str, int], overview["assets"])
@@ -647,8 +786,8 @@ def test_world_overview_aggregates_assets_and_actionable_counts(tmp_path: Path) 
         "players": 1,
         "pals": 2,
         "palSpecies": 2,
-        "itemTypes": 1,
-        "itemQuantity": 3,
+        "itemTypes": 3,
+        "itemQuantity": 15,
         "bases": 2,
         "guilds": 0,
     }
@@ -1676,6 +1815,9 @@ def test_pal_care_reads_real_save_field_shapes_without_treating_raw_food_as_perc
                 "BaseCampWorkerEventType": _property(
                     "EPalBaseCampWorkerEventType::DodgeWork", "EnumProperty"
                 ),
+                "CurrentWorkSuitability": _property(
+                    "EPalWorkSuitability::Mining", "EnumProperty"
+                ),
             },
         )
     )
@@ -2083,11 +2225,13 @@ def test_parser_crash_is_reported_without_exiting_process(
     database = Database(tmp_path / "data" / "app.db")
     database.migrate()
     service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
-    monkeypatch.setattr(
-        subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(args[0], 7, "", "decoder failed"),
-    )
+    class FailedWorker:
+        returncode = 7
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            return "", "decoder failed"
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: FailedWorker())
 
     with pytest.raises(WorldDataError, match="Parser exited with code 7") as raised:
         service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1)
@@ -2104,12 +2248,18 @@ def test_frozen_worker_uses_portable_dispatcher(
     service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
     command: list[str] = []
 
-    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    class SuccessfulWorker:
+        returncode = 0
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            return '{"ok":true}', ""
+
+    def fake_popen(arguments: list[str], **_: object) -> SuccessfulWorker:
         command.extend(arguments)
-        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+        return SuccessfulWorker()
 
     monkeypatch.setattr(sys, "frozen", True, raising=False)
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
     assert command[:2] == [sys.executable, "--world-worker"]
@@ -2124,15 +2274,75 @@ def test_unfrozen_worker_uses_python_module_dispatch(
     service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
     command: list[str] = []
 
-    def fake_run(arguments: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+    class SuccessfulWorker:
+        returncode = 0
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            return '{"ok":true}', ""
+
+    def fake_popen(arguments: list[str], **_: object) -> SuccessfulWorker:
         command.extend(arguments)
-        return subprocess.CompletedProcess(arguments, 0, '{"ok":true}', "")
+        return SuccessfulWorker()
 
     monkeypatch.setattr(sys, "frozen", False, raising=False)
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
 
     assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
     assert command[:3] == [sys.executable, "-m", "palserver_console.world.worker"]
+
+
+def test_world_stop_terminates_active_parser_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    database = Database(tmp_path / "data" / "app.db")
+    database.migrate()
+    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    started = threading.Event()
+    terminated = threading.Event()
+
+    class BlockingWorker:
+        returncode = None
+
+        def communicate(self, **_: object) -> tuple[str, str]:
+            started.set()
+            assert terminated.wait(timeout=2)
+            self.returncode = -15
+            return "", ""
+
+        def terminate(self) -> None:
+            terminated.set()
+
+        def wait(self, **_: object) -> int:
+            return 0
+
+        def kill(self) -> None:
+            terminated.set()
+
+    monkeypatch.setattr(subprocess, "Popen", lambda *args, **kwargs: BlockingWorker())
+    errors: list[BaseException] = []
+
+    def run_worker() -> None:
+        try:
+            service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1)
+        except BaseException as error:
+            errors.append(error)
+
+    worker_thread = threading.Thread(
+        target=run_worker,
+        daemon=True,
+    )
+    service._thread = worker_thread
+    worker_thread.start()
+
+    assert started.wait(timeout=1)
+    service.stop()
+
+    assert terminated.is_set()
+    assert not worker_thread.is_alive()
+    assert service._active_worker is None
+    assert errors
+    assert isinstance(errors[0], WorldDataError)
+    assert errors[0].code == "PARSER_STOPPED"
 
 
 def _retention_pair(
@@ -2379,8 +2589,6 @@ def test_disk_space_retry_reset_allows_new_parse(
         minimum_free_bytes=0,
     )
     monkeypatch.setattr(service, "_world_directory", lambda: world)
-    service.snapshots_root.mkdir(parents=True)
-    service.cache_root.mkdir(parents=True)
     expected = service._fingerprint(world)
     with service._lock:
         service._last_seen = expected
@@ -2390,52 +2598,42 @@ def test_disk_space_retry_reset_allows_new_parse(
     assert retry_delay > 0
     if reset_mode == "fingerprint":
         (world / "Level.sav").write_bytes(b"level-changed")
+        changed = service._fingerprint(world)
+        assert changed != expected
     else:
-        service.request_reparse()
+        generation = service.request_reparse()
+        assert generation == 1
+        assert service.background_status()["retryDelaySeconds"] == 0
+        changed = service._fingerprint(world)
 
-    level, players = _synthetic_properties()
-    parsed = threading.Event()
+    captured: list[tuple[Path, tuple[tuple[str, int, int], ...]]] = []
+    parse_entered = threading.Event()
 
-    def fake_worker(
-        snapshot: Path,
-        cache_path: Path,
-        snapshot_id: str,
-        observed_at: int,
-        *,
-        collected_at: int,
-        parse_started_at: int,
-    ) -> dict[str, object]:
-        build_world_cache(
-            cache_path,
-            level,
-            players,
-            snapshot_id=snapshot_id,
-            source_observed_at=observed_at,
-            collected_at=collected_at,
-            parse_started_at=parse_started_at,
-        )
-        parsed.set()
+    def fake_capture_and_parse(
+        observed_world: Path,
+        fingerprint: tuple[tuple[str, int, int], ...],
+    ) -> None:
+        captured.append((observed_world, fingerprint))
+        parse_entered.set()
         service._stop.set()
         service._wake.set()
-        return {
-            "parsedAt": 2,
-            "durationMs": 1,
-            "peakMemoryBytes": 2,
-            "cacheSizeBytes": cache_path.stat().st_size,
-        }
 
-    monkeypatch.setattr(service, "_run_worker", fake_worker)
+    monkeypatch.setattr(service, "_capture_and_parse", fake_capture_and_parse)
     thread = threading.Thread(target=service._watch_loop, daemon=True)
     thread.start()
     try:
-        assert parsed.wait(timeout=5)
+        assert parse_entered.wait(timeout=5)
     finally:
         service._stop.set()
         service._wake.set()
         thread.join(timeout=5)
 
     assert not thread.is_alive()
+    assert captured
+    assert captured[0][0] == world
+    assert captured[0][1] == changed
     assert service._disk_space_retry_delay_seconds == 0.0
+    assert service._disk_space_retry_until == 0.0
 
 
 def test_ooz_discovery_result_is_cached_until_reparse(
@@ -2894,7 +3092,17 @@ def test_current_sanitized_save_uses_detailed_m5_decoder(tmp_path: Path) -> None
         disease_value = world_cache._enum_text(save_parameter.get("WorkerSick"))
         if disease_value and world_cache._enum_key(disease_value) not in {"none", "healthy"}:
             expected["disease"] = disease_value
-        activity_value = world_cache._enum_text(save_parameter.get("CurrentWorkSuitability"))
+        activity_value = world_cache._enum_text(
+            world_cache._first_present(
+                save_parameter,
+                "Activity",
+                "PalActivity",
+                "WorkState",
+                "WorkStatus",
+                "BaseCampWorkerEventType",
+                "CurrentWorkSuitability",
+            )
+        )
         if activity_value and world_cache._enum_key(activity_value) != "none":
             expected["activity"] = activity_value
         full_stomach = world_cache._save_number(save_parameter, "FullStomach")

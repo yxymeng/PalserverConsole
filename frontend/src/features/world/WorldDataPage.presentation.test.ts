@@ -16,7 +16,8 @@ test("世界数据筛选与排序交给完整数据查询处理", () => {
   expect(source).toContain('label: "仓库"');
   expect(source).toContain("InventoryWorkspace");
   expect(source).toContain("WorldOverviewLobby");
-  expect(source).toContain('metadata: "unknown"');
+  expect(source).not.toContain('label: "未知物品"');
+  expect(source).not.toContain('label: "未归属帕鲁"');
   expect(source).not.toContain('workspace="inventories"');
 });
 
@@ -27,10 +28,12 @@ test("仓库默认使用持有库存并按存放分布两级展开", () => {
   const source = readFileSync(inventoryPath, "utf8");
 
   expect(pageSource).toContain('useState<InventoryContext>({ scope: "inventory" })');
-  expect(source).toContain('["inventory", "库存"]');
-  expect(source).toContain('["world", "世界"]');
-  expect(source).toContain("库存总量");
-  expect(source).toContain("世界容器总量");
+  expect(source).toContain('["inventory", "全部持有"]');
+  expect(source).toContain('["player", "玩家背包"]');
+  expect(source).toContain('["base", "据点箱子"]');
+  expect(source).not.toContain('["world", "世界"]');
+  expect(source).toContain("持有总量");
+  expect(source).toContain("世界宝箱和其他地图容器不计入仓库");
   expect(source).toContain("公会仓库");
   expect(source).not.toContain('["guild", "公会"]');
   expect(source).toContain("存放记录");
@@ -55,4 +58,13 @@ test("据点与公会详情复用照护和仓库关联语义", () => {
   expect(pageSource).toContain("Guild ID");
   expect(pageSource).toContain("Base ID");
   expect(inventorySource).toContain('query.set("guildId", context.guildId)');
+});
+
+test("在线玩家未知结构不会被当成零人", () => {
+  const pagePath = fileURLToPath(new URL("./WorldDataPage.tsx", import.meta.url));
+  const source = readFileSync(pagePath, "utf8");
+
+  expect(source).toContain("function livePlayersFrom(data: unknown): Record<string, unknown>[] | null");
+  expect(source).toContain("response.stale || response.errorCode || players === null");
+  expect(source).toContain("return null;");
 });

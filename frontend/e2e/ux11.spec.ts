@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 15, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
 
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux11-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-ux11" };
@@ -73,4 +73,56 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }, test
   await failure.getByRole("button", { name: "重新尝试" }).click();
   await expect(page.getByRole("button", { name: "状态测试玩家" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+});
+
+test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }, testInfo) => {
+  await routeShell(page);
+  let livePlayers: { data: unknown; source: string; observedAt: number; stale: boolean; errorCode: string | null } = { data: [{}, {}, {}], source: "rest", observedAt: 1, stale: false, errorCode: null };
+  await page.route("**/api/live/players", (route) => route.fulfill({ json: livePlayers }));
+  await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
+
+  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("3 / 1");
+
+  livePlayers = { ...livePlayers, stale: true };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("— / 1");
+
+  livePlayers = { ...livePlayers, stale: false, errorCode: "LIVE_PLAYERS_UNAVAILABLE" };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("— / 1");
+
+  livePlayers = { ...livePlayers, data: [], errorCode: null };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("0 / 1");
+
+  livePlayers = { ...livePlayers, data: { raw: "name,playeruid,steamid" } };
+  await page.reload();
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("— / 1");
+});
+
+test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }, testInfo) => {
+  await routeShell(page);
+  let playerCount = 1;
+  await page.route("**/api/live/players", (route) => route.fulfill({
+    json: {
+      data: Array.from({ length: playerCount }, () => ({})),
+      source: "rest",
+      observedAt: 1,
+      stale: false,
+      errorCode: null,
+    },
+  }));
+  await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
+
+  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
+  await openWorldData(page, testInfo.project.name === "mobile");
+  await expect(playerMetric()).toContainText("1 / 1");
+  playerCount = 2;
+  await expect(playerMetric()).toContainText("2 / 1", { timeout: 7_000 });
 });

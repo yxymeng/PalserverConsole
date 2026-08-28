@@ -5,7 +5,7 @@ import { waitForWorldReparse } from "./worldReparse";
 
 function status(snapshotId: string, parseStatus: WorldStatus["parseStatus"], reparseGeneration = 1): WorldStatus {
   return {
-    contract: { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 14, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" },
+    contract: { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 15, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" },
     source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1,
     parsedAt: parseStatus === "ready" ? 2 : null, snapshotId, stale: false,
     errorCode: null, error: null, parsing: parseStatus === "parsing", parseStatus, reparseGeneration,

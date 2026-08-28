@@ -16,9 +16,10 @@ export function liveTitleText(snapshot: LiveSnapshot | null, error: string, conn
   }[connectionStatus];
 }
 
-export function playerDataState(snapshot: LiveSnapshot | null, error: string, playerCount: number): PlayerDataState {
+export function playerDataState(snapshot: LiveSnapshot | null, error: string, playerCount: number | null): PlayerDataState {
   if (!snapshot) return error ? "error" : "loading";
   if (error || snapshot.players?.errorCode) return "error";
+  if (playerCount === null) return "error";
   return playerCount ? "ready" : "empty";
 }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -9,6 +10,7 @@ from starlette.routing import Route
 from palserver_console.api.contract import LEGACY_OPERATION_ALIASES, operation_public
 from palserver_console.config import AppSettings
 from palserver_console.main import create_app
+from palserver_console.world.cache import CACHE_SCHEMA_NAME, CACHE_SCHEMA_VERSION
 
 EXPECTED_API_CONTRACT = {
     "DELETE /api/backups/{backup_id}",
@@ -28,6 +30,7 @@ EXPECTED_API_CONTRACT = {
     "GET /api/health",
     "GET /api/live/{kind}",
     "GET /api/maintenance/notifications",
+    "GET /api/maintenance/application-update",
     "GET /api/monitoring/status",
     "GET /api/operations/health",
     "GET /api/server/discovery",
@@ -56,6 +59,7 @@ EXPECTED_API_CONTRACT = {
     "POST /api/live/players/{player_id}/kick",
     "POST /api/live/players/{player_id}/unban",
     "POST /api/maintenance/steamcmd-update",
+    "POST /api/maintenance/application-update",
     "POST /api/server/operations/{kind}",
     "POST /api/server/operations/{operation_id}/cancel",
     "POST /api/server/operations/{operation_id}/force-stop",
@@ -97,6 +101,25 @@ def test_main_only_assembles_the_application() -> None:
     assert "@app.put(" not in source
     assert "@app.delete(" not in source
     assert "class HealthResponse" not in source
+
+
+def test_frontend_world_contract_matches_backend_cache_schema() -> None:
+    contract_source = (
+        Path(__file__).resolve().parents[2]
+        / "frontend"
+        / "src"
+        / "features"
+        / "world"
+        / "worldContract.ts"
+    ).read_text(encoding="utf-8")
+    match = re.search(
+        r'WORLD_CACHE_SCHEMA\s*=\s*\{\s*name:\s*"([^"]+)",\s*version:\s*(\d+)',
+        contract_source,
+    )
+
+    assert match is not None
+    assert match.group(1) == CACHE_SCHEMA_NAME
+    assert int(match.group(2)) == CACHE_SCHEMA_VERSION
 
 
 def test_operation_contract_documents_legacy_aliases_without_frontend_dependency() -> None:

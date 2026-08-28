@@ -3,7 +3,9 @@ import type { WorldPlayerProgress, WorldPlayerProgressField } from "../../api/co
 export const PLAYER_PROGRESS_LABELS: Record<WorldPlayerProgressField, string> = {
   discoveredPalSpecies: "已发现帕鲁种类",
   capturedPals: "累计捕获帕鲁数量",
-  fastTravelPoints: "已解锁传送点",
+  fastTravel: "已解锁传送点",
+  relics: "已收集翠叶鼠雕像",
+  memos: "已收集手记",
   exploredAreas: "已探索区域",
   fieldBosses: "已完成野外头目项目",
   towerBosses: "已完成高塔",
@@ -18,7 +20,7 @@ export const PLAYER_PROGRESS_GROUPS: Array<{
   title: string;
   fields: WorldPlayerProgressField[];
 }> = [
-  { title: "探索与收集", fields: ["discoveredPalSpecies", "fastTravelPoints", "exploredAreas", "recipes"] },
+  { title: "探索与收集", fields: ["discoveredPalSpecies", "fastTravel", "relics", "memos", "exploredAreas", "recipes"] },
   { title: "战斗与通关", fields: ["fieldBosses", "towerBosses", "dungeonClears", "oilRigClears"] },
   { title: "捕获与科技", fields: ["capturedPals", "technologyPoints", "ancientTechnologyPoints"] },
 ];

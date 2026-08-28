@@ -10,6 +10,9 @@ describe("玩家主要进度呈现", () => {
       values: {
         discoveredPalSpecies: 12,
         capturedPals: 3456,
+        fastTravel: 38,
+        relics: 12,
+        memos: 6,
         fieldBosses: 7,
         towerBosses: 3,
         dungeonClears: 21,

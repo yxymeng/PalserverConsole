@@ -133,6 +133,7 @@ def create_app(
     app.state.operational_health = deps.operational_health
     app.state.notifications = deps.notifications
     app.state.updates = deps.updates
+    app.state.application_updates = deps.application_updates
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request: Request, _: RequestValidationError) -> JSONResponse:

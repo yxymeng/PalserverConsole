@@ -15,6 +15,58 @@ function Assert-ExitCode {
     }
 }
 
+function Assert-NpmPolicy {
+    param([Parameter(Mandatory = $true)][string]$NpmPath)
+
+    $versionOutput = @(& $NpmPath --version 2>&1)
+    $versionExitCode = $LASTEXITCODE
+    $versionText = ($versionOutput | Out-String).Trim()
+    if ($versionExitCode -ne 0 -or $versionText -notmatch '^\s*(\d+)\.(\d+)(?:\.(\d+))?\s*$') {
+        throw "UNSUPPORTED_NPM_VERSION: npm >= 11.17 is required; detected '$versionText'."
+    }
+    $npmMajor = [int]$matches[1]
+    $npmMinor = [int]$matches[2]
+    if ($npmMajor -lt 11 -or ($npmMajor -eq 11 -and $npmMinor -lt 17)) {
+        throw "UNSUPPORTED_NPM_VERSION: npm >= 11.17 is required; detected $versionText."
+    }
+    Write-Host "[PalServerConsole] npm policy accepted: $versionText (requires >= 11.17)."
+
+    return $versionText
+}
+
+function Assert-NodeRuntime {
+    param([Parameter(Mandatory = $true)][string]$NodePath)
+
+    $versionOutput = @(& $NodePath --version 2>&1)
+    $versionExitCode = $LASTEXITCODE
+    $versionText = ($versionOutput | Out-String).Trim()
+    if ($versionExitCode -ne 0 -or $versionText -notmatch '^\s*v(\d+)\.(\d+)\.(\d+)\s*$') {
+        throw "UNSUPPORTED_NODE_VERSION: Node.js 24 LTS is required; detected $versionText."
+    }
+    $nodeMajor = [int]$matches[1]
+    if ($nodeMajor -ne 24) {
+        throw "UNSUPPORTED_NODE_VERSION: Node.js 24 LTS is required; detected $versionText."
+    }
+    Write-Host "[PalServerConsole] Node.js runtime accepted: $versionText (requires 24.x)."
+
+    return $versionText
+}
+
+function Assert-NpmInstallScriptsApproved {
+    param([Parameter(Mandatory = $true)][string]$NpmPath)
+
+    $approvalOutput = @(& $NpmPath approve-scripts --allow-scripts-pending 2>&1)
+    $approvalExitCode = $LASTEXITCODE
+    $approvalOutput | ForEach-Object { Write-Host $_ }
+    $approvalText = ($approvalOutput | Out-String)
+    if (
+        $approvalExitCode -ne 0 -or
+        $approvalText -notmatch "No packages with unreviewed install scripts"
+    ) {
+        throw "UNREVIEWED_INSTALL_SCRIPT: npm.cmd approve-scripts did not confirm a clean install-script policy."
+    }
+}
+
 function Assert-BuildRuntime {
     param([Parameter(Mandatory = $true)][string]$PythonExecutable)
 
@@ -79,12 +131,13 @@ $frontendRoot = Join-Path $projectRoot "frontend"
 $frontendDist = Join-Path $frontendRoot "dist"
 $portableEntry = Join-Path $PSScriptRoot "portable-entry.py"
 $portableLauncherSource = Join-Path $PSScriptRoot "portable-launcher.cs"
+$applicationUpdateHelper = Join-Path $PSScriptRoot "apply-downloaded-update.ps1"
 $licenseCollector = Join-Path $PSScriptRoot "collect-third-party-licenses.py"
 $projectLicense = Join-Path $projectRoot "LICENSE"
 $thirdPartyNotices = Join-Path $projectRoot "THIRD_PARTY_NOTICES.md"
 $appIcon = Join-Path $projectRoot "branding\PalServerConsole.ico"
 
-foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $licenseCollector, $projectLicense, $thirdPartyNotices, $appIcon)) {
+foreach ($required in @($runtimeLock, $buildLock, $portableEntry, $portableLauncherSource, $applicationUpdateHelper, $licenseCollector, $projectLicense, $thirdPartyNotices, $appIcon)) {
     if (-not (Test-Path -LiteralPath $required -PathType Leaf)) {
         throw "Required build input is missing: $required"
     }
@@ -145,14 +198,22 @@ try {
         throw "Unexpected PyInstaller version $pyInstallerVersion; requirements-build.lock requires 6.22.0."
     }
 
+    $node = Get-Command node.exe -ErrorAction SilentlyContinue
+    if ($null -eq $node) {
+        throw "UNSUPPORTED_NODE_VERSION: Node.js 24 LTS is required; node.exe was not found."
+    }
+    Assert-NodeRuntime $node.Source | Out-Null
+
     $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
     if ($null -eq $npm) {
         throw "npm.cmd was not found. Install Node.js 24 LTS on the build machine."
     }
+    Assert-NpmPolicy $npm.Source | Out-Null
     Set-Location -LiteralPath $frontendRoot
     Write-Host "[PalServerConsole] 正在按 package-lock.json 构建前端..."
     & $npm.Source ci
     Assert-ExitCode "npm.cmd ci"
+    Assert-NpmInstallScriptsApproved $npm.Source
     & $npm.Source run build
     Assert-ExitCode "npm.cmd run build"
     if (-not (Test-Path -LiteralPath (Join-Path $frontendDist "index.html") -PathType Leaf)) {
@@ -283,6 +344,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot "docs\windows-portable.md") -Destination (Join-Path $packageStage "README-portable.md")
     Copy-Item -LiteralPath (Join-Path $projectRoot "start-console.bat") -Destination $packageStage
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot "upgrade-portable.ps1") -Destination $packageStage
+    Copy-Item -LiteralPath $applicationUpdateHelper -Destination $packageStage
     Set-Content -LiteralPath (Join-Path $portableData ".keep") -Value "User data is created here and is never replaced by upgrade-portable.ps1." -Encoding ASCII
 
     $selfCheckData = Join-Path $temporaryRoot "self-check-data"

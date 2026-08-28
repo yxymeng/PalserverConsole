@@ -1,11 +1,12 @@
 import { Activity, Database, FileCog, LogOut, Wrench, X } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { lazy, Suspense, useState, type CSSProperties } from "react";
 
 import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { requestJson } from "../api/client";
 import { Badge } from "../components/ui/badge";
 import { BlurFade } from "../components/ui/blur-fade";
 import { Button } from "../components/ui/button";
+import { Spinner } from "../components/ui/spinner";
 import {
   Sidebar,
   SidebarContent,
@@ -20,10 +21,8 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "../components/ui/sidebar";
-import { ConfigPage } from "../features/config/ConfigPage";
 import { MaintenancePage } from "../features/maintenance/MaintenancePage";
 import { Overview } from "../features/overview/Overview";
-import { WorldDataPage } from "../features/world/WorldDataPage";
 import { text } from "./text";
 import { BrandMark } from "./BrandMark";
 import { InstanceQuickPanel } from "./InstanceQuickPanel";
@@ -31,6 +30,17 @@ import { ThemeToggle } from "./ThemeToggle";
 import { FRONTEND_VERSION } from "./version";
 
 type PageKey = "overview" | "world" | "config" | "maintenance";
+
+const WorldDataPage = lazy(() =>
+  import("../features/world/WorldDataPage").then((module) => ({
+    default: module.WorldDataPage,
+  })),
+);
+const ConfigPage = lazy(() =>
+  import("../features/config/ConfigPage").then((module) => ({
+    default: module.ConfigPage,
+  })),
+);
 
 const NAVIGATION = [
   { key: "overview", label: "首页", icon: Activity },
@@ -173,20 +183,35 @@ function ConsoleLayout({
         <main className="psc-main" aria-label={`${pageTitle}页面`}>
           <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={4} blur="3px">
             {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} />}
-            {active === "world" && <WorldDataPage auth={auth} />}
+            {active === "world" && (
+              <Suspense fallback={<PageLoading label="正在加载世界数据模块" />}>
+                <WorldDataPage auth={auth} />
+              </Suspense>
+            )}
             {active === "config" && (
-              <ConfigPage
-                auth={auth}
-                onAuthChanged={onAuthChanged}
-                workspace={configWorkspace}
-                onWorkspaceChange={onConfigWorkspaceChange}
-              />
+              <Suspense fallback={<PageLoading label="正在加载配置模块" />}>
+                <ConfigPage
+                  auth={auth}
+                  onAuthChanged={onAuthChanged}
+                  workspace={configWorkspace}
+                  onWorkspaceChange={onConfigWorkspaceChange}
+                />
+              </Suspense>
             )}
             {active === "maintenance" && <MaintenancePage auth={auth} />}
           </BlurFade>
         </main>
       </SidebarInset>
     </>
+  );
+}
+
+function PageLoading({ label }: { label: string }) {
+  return (
+    <section className="empty-state" role="status" aria-live="polite">
+      <Spinner aria-hidden="true" />
+      {label}…
+    </section>
   );
 }
 

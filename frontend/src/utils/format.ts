@@ -1,7 +1,7 @@
 import type { LiveValue } from "../api/contracts";
 
 export function playerText(player: Record<string, unknown>, keys: string[], fallback: string) { return displayValue(player, keys, fallback); }
-export function playerId(player: Record<string, unknown>) { return displayValue(player, ["userId", "userid", "playerId", "id"], ""); }
+export function playerId(player: Record<string, unknown>) { return displayValue(player, ["userId", "userid", "playerId", "playerUid", "id"], ""); }
 export function displayValue(value: Record<string, unknown> | undefined, keys: string[], fallback = "不可用") {
   if (!value) return fallback;
   const entries = Object.entries(value);
