@@ -60,6 +60,14 @@ def _write_checksum_manifest(root: Path, paths: list[Path]) -> None:
     (root / "checksums.sha256").write_text("\n".join(lines) + "\n", encoding="ascii")
 
 
+def _write_maintenance_scripts(root: Path, version: str) -> tuple[Path, Path]:
+    update_helper = root / "apply-downloaded-update.ps1"
+    upgrade_script = root / "upgrade-portable.ps1"
+    update_helper.write_text(f"update helper {version}", encoding="utf-8")
+    upgrade_script.write_text(f"upgrade script {version}", encoding="utf-8")
+    return update_helper, upgrade_script
+
+
 def _run_upgrade(
     script: Path,
     install_root: Path,
@@ -159,6 +167,7 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     (install_root / "Program").mkdir(parents=True)
     (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
     (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
+    _write_maintenance_scripts(install_root, "old")
     database_path = install_root / "data" / "app.db"
     _write_database(database_path, schema_version=8)
 
@@ -168,11 +177,20 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     (candidate_program / "release.txt").write_text("new", encoding="utf-8")
     candidate_launcher = package_root / "PalServerConsole.exe"
     candidate_launcher.write_bytes(b"new-launcher")
+    candidate_update_helper, candidate_upgrade_script = _write_maintenance_scripts(
+        package_root, "new"
+    )
     metadata_path = package_root / "metadata" / "build-info.json"
     _write_build_metadata(metadata_path, maximum_schema_version=8)
     _write_checksum_manifest(
         package_root,
-        [candidate_launcher, candidate_program / "release.txt", metadata_path],
+        [
+            candidate_launcher,
+            candidate_program / "release.txt",
+            candidate_update_helper,
+            candidate_upgrade_script,
+            metadata_path,
+        ],
     )
 
     upgraded = _run_upgrade(script, install_root, package_root)
@@ -180,6 +198,12 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
     assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
+    assert (install_root / "apply-downloaded-update.ps1").read_text(
+        encoding="utf-8"
+    ) == "update helper new"
+    assert (install_root / "upgrade-portable.ps1").read_text(
+        encoding="utf-8"
+    ) == "upgrade script new"
     assert _schema_version(database_path) == 8
     with sqlite3.connect(database_path) as connection:
         assert connection.execute(
@@ -191,6 +215,18 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     launcher_backups = sorted((install_root / "program-backups").glob("PalServerConsole-*.exe"))
     assert len(launcher_backups) == 1
     assert launcher_backups[0].read_bytes() == b"old-launcher"
+    update_helper_backups = sorted(
+        (install_root / "program-backups").glob("apply-downloaded-update-*.ps1")
+    )
+    upgrade_script_backups = sorted(
+        (install_root / "program-backups").glob("upgrade-portable-*.ps1")
+    )
+    assert [path.read_text(encoding="utf-8") for path in update_helper_backups] == [
+        "update helper old"
+    ]
+    assert [path.read_text(encoding="utf-8") for path in upgrade_script_backups] == [
+        "upgrade script old"
+    ]
 
     downgrade_root = tmp_path / "incompatible-downgrade"
     downgrade_program = downgrade_root / "Program"
@@ -198,11 +234,20 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     (downgrade_program / "release.txt").write_text("older", encoding="utf-8")
     downgrade_launcher = downgrade_root / "PalServerConsole.exe"
     downgrade_launcher.write_bytes(b"older-launcher")
+    downgrade_update_helper, downgrade_upgrade_script = _write_maintenance_scripts(
+        downgrade_root, "older"
+    )
     downgrade_metadata = downgrade_root / "metadata" / "build-info.json"
     _write_build_metadata(downgrade_metadata, maximum_schema_version=7)
     _write_checksum_manifest(
         downgrade_root,
-        [downgrade_launcher, downgrade_program / "release.txt", downgrade_metadata],
+        [
+            downgrade_launcher,
+            downgrade_program / "release.txt",
+            downgrade_update_helper,
+            downgrade_upgrade_script,
+            downgrade_metadata,
+        ],
     )
 
     blocked = _run_upgrade(script, install_root, downgrade_root)
@@ -221,6 +266,7 @@ def test_portable_upgrade_uses_named_instance_data_directory(tmp_path: Path) -> 
     (install_root / "Program").mkdir(parents=True)
     (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
     (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
+    _write_maintenance_scripts(install_root, "old")
     default_database = install_root / "data" / "app.db"
     _write_database(default_database, schema_version=9)
     named_data_directory = install_root / "data" / "instances" / "north"
@@ -233,11 +279,20 @@ def test_portable_upgrade_uses_named_instance_data_directory(tmp_path: Path) -> 
     (candidate_program / "release.txt").write_text("new", encoding="utf-8")
     candidate_launcher = package_root / "PalServerConsole.exe"
     candidate_launcher.write_bytes(b"new-launcher")
+    candidate_update_helper, candidate_upgrade_script = _write_maintenance_scripts(
+        package_root, "new"
+    )
     metadata_path = package_root / "metadata" / "build-info.json"
     _write_build_metadata(metadata_path, maximum_schema_version=8)
     _write_checksum_manifest(
         package_root,
-        [candidate_launcher, candidate_program / "release.txt", metadata_path],
+        [
+            candidate_launcher,
+            candidate_program / "release.txt",
+            candidate_update_helper,
+            candidate_upgrade_script,
+            metadata_path,
+        ],
     )
 
     upgraded = _run_upgrade(
@@ -248,10 +303,97 @@ def test_portable_upgrade_uses_named_instance_data_directory(tmp_path: Path) -> 
     )
 
     assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert (install_root / "apply-downloaded-update.ps1").read_text(
+        encoding="utf-8"
+    ) == "update helper new"
+    assert (install_root / "upgrade-portable.ps1").read_text(
+        encoding="utf-8"
+    ) == "upgrade script new"
     assert _schema_version(named_database) == 8
     assert len(list((named_data_directory / "upgrade-backups").glob("*/app.db"))) == 1
     assert _schema_version(default_database) == 9
     assert not (install_root / "data" / "upgrade-backups").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
+def test_portable_upgrade_rolls_back_maintenance_scripts_after_late_failure(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    upgrade_script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root = tmp_path / "installed"
+    (install_root / "Program").mkdir(parents=True)
+    (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
+    (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
+    _write_maintenance_scripts(install_root, "old")
+
+    package_root = tmp_path / "candidate"
+    candidate_program = package_root / "Program"
+    candidate_program.mkdir(parents=True)
+    (candidate_program / "release.txt").write_text("new", encoding="utf-8")
+    candidate_launcher = package_root / "PalServerConsole.exe"
+    candidate_launcher.write_bytes(b"new-launcher")
+    candidate_update_helper, candidate_upgrade_script = _write_maintenance_scripts(
+        package_root, "new"
+    )
+    metadata_path = package_root / "metadata" / "build-info.json"
+    _write_build_metadata(metadata_path, maximum_schema_version=8)
+    _write_checksum_manifest(
+        package_root,
+        [
+            candidate_launcher,
+            candidate_program / "release.txt",
+            candidate_update_helper,
+            candidate_upgrade_script,
+            metadata_path,
+        ],
+    )
+
+    def powershell_literal(path: Path) -> str:
+        return "'" + str(path).replace("'", "''") + "'"
+
+    command = f"""
+$upgradeScript = {powershell_literal(upgrade_script)}
+$installRoot = {powershell_literal(install_root)}
+$packageRoot = {powershell_literal(package_root)}
+function Move-Item {{
+    [CmdletBinding()]
+    param([string]$LiteralPath, [string]$Destination)
+    if ($LiteralPath -like "*.upgrade-portable-upgrade-staging-*.ps1") {{
+        throw "forced later maintenance script failure"
+    }}
+    Microsoft.PowerShell.Management\\Move-Item @PSBoundParameters
+}}
+& $upgradeScript -InstallRoot $installRoot -NewPackage $packageRoot
+"""
+    encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
+    rolled_back = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-EncodedCommand",
+            encoded,
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+    )
+
+    assert rolled_back.returncode != 0
+    assert "UPGRADE_FAILED" in f"{rolled_back.stdout}\n{rolled_back.stderr}"
+    assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "old"
+    assert (install_root / "PalServerConsole.exe").read_bytes() == b"old-launcher"
+    assert (install_root / "apply-downloaded-update.ps1").read_text(
+        encoding="utf-8"
+    ) == "update helper old"
+    assert (install_root / "upgrade-portable.ps1").read_text(
+        encoding="utf-8"
+    ) == "upgrade script old"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -404,25 +546,29 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "function Get-Sha256Hash" in upgrade_script
     assert "System.Security.Cryptography.SHA256" in upgrade_script
     assert "unlisted file" in upgrade_script
-    assert "Program rollback completed" in upgrade_script
+    assert "maintenance scripts" in upgrade_script
     assert "apply-downloaded-update.ps1" in build_script
     assert "CONSOLE_EXIT_TIMEOUT" in application_update_helper
     assert "Start-Process" in application_update_helper
     assert "Restore-ConsoleLauncher" in application_update_helper
     assert "$updateError = $_" in application_update_helper
     assert "UPDATE_FAILURE_RELAUNCH_FAILED" in application_update_helper
+    assert '[string]$UpdateLockId' in application_update_helper
+    assert "Set-UpdateLockOwner" in application_update_helper
+    assert "Remove-UpdateLockIfOwned" in application_update_helper
     assert ".palserver-console-update.lock" in application_update_helper
     assert "finally" in application_update_helper
-    assert (
-        "Remove-Item -LiteralPath $updateLockPath -Force -ErrorAction SilentlyContinue"
-        in application_update_helper
-    )
+    assert "Remove-UpdateLockIfOwned -UpdateLockPath $updateLockPath" in application_update_helper
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
     assert '[string]$DataDirectory = ""' in upgrade_script
     assert "function Get-CurrentInstallConsoleProcesses" in upgrade_script
     assert upgrade_script.count('Get-Process -Name "PalServerConsole"') == 1
     assert "$currentInstallProcesses = @(Get-CurrentInstallConsoleProcesses" in upgrade_script
+    assert "Get-ReleaseManagedEntry" in upgrade_script
+    assert "Assert-ReleaseManagedFileChecksum" in upgrade_script
+    assert 'Join-Path $packageRootPath "apply-downloaded-update.ps1"' in upgrade_script
+    assert 'Join-Path $packageRootPath "upgrade-portable.ps1"' in upgrade_script
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
@@ -453,7 +599,20 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
     install_root.mkdir()
     data_directory = tmp_path / "data"
     lock_path = install_root / ".palserver-console-update.lock"
-    lock_path.write_text("fixture", encoding="utf-8")
+    lock_id = "matching-lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": lock_id,
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "prepare",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     completed = subprocess.run(
         [
@@ -468,6 +627,8 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
             "999999",
             "-InstallRoot",
             str(install_root),
+            "-UpdateLockId",
+            lock_id,
             "-DataDirectory",
             str(data_directory),
             "-NewPackage",
@@ -489,6 +650,186 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
     assert "UPDATE_HELPER_INVALID" in (
         data_directory / "application-updates" / "apply-update.log"
     ).read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    launcher = install_root / "PalServerConsole.exe"
+    launcher.write_bytes(Path(os.environ["COMSPEC"]).read_bytes())
+    data_directory = tmp_path / "data"
+    package_root = tmp_path / "package"
+    package_root.mkdir()
+    (package_root / "upgrade-portable.ps1").write_text("exit 0", encoding="utf-8")
+    lock_id = "successful-lock"
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": lock_id,
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "prepare",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(update_helper),
+            "-WaitPid",
+            "999999",
+            "-InstallRoot",
+            str(install_root),
+            "-UpdateLockId",
+            lock_id,
+            "-DataDirectory",
+            str(data_directory),
+            "-NewPackage",
+            str(package_root),
+            "-InstanceId",
+            "north",
+            "-Port",
+            "18224",
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert not lock_path.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_transfers_lock_ownership(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    lock_path = tmp_path / ".palserver-console-update.lock"
+    lock_id = "transfer-lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": lock_id,
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "prepare",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def powershell_literal(path: Path) -> str:
+        return "'" + str(path).replace("'", "''") + "'"
+
+    script = f"""
+$helperPath = {powershell_literal(update_helper)}
+$lockPath = {powershell_literal(lock_path)}
+$parsed = [ScriptBlock]::Create((Get-Content -Raw -LiteralPath $helperPath))
+$definition = $parsed.Ast.FindAll({{
+    param($ast)
+    $ast -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $ast.Name -eq "Set-UpdateLockOwner"
+}}, $true) | Select-Object -First 1
+. ([ScriptBlock]::Create($definition.Extent.Text))
+Set-UpdateLockOwner -UpdateLockPath $lockPath -ExpectedLockId "{lock_id}"
+$lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+[pscustomobject]@{{
+    lockId = $lock.lockId
+    pid = $lock.pid
+    processStartedAt = $lock.processStartedAt
+    phase = $lock.phase
+    instanceId = $lock.instanceId
+}} | ConvertTo-Json -Compress
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    completed = subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    lock = json.loads(completed.stdout)
+    assert lock["lockId"] == lock_id
+    assert lock["pid"] > 0
+    assert lock["processStartedAt"] > 0
+    assert lock["phase"] == "helper"
+    assert lock["instanceId"] == "north"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_does_not_delete_another_lock(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    data_directory = tmp_path / "data"
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": "another-update",
+                "pid": 1,
+                "processStartedAt": 1.0,
+                "phase": "helper",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(update_helper),
+            "-WaitPid",
+            "999999",
+            "-InstallRoot",
+            str(install_root),
+            "-UpdateLockId",
+            "expected-update",
+            "-DataDirectory",
+            str(data_directory),
+            "-NewPackage",
+            str(tmp_path / "missing-package"),
+            "-InstanceId",
+            "north",
+            "-Port",
+            "18224",
+        ],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+
+    assert completed.returncode == 1, f"{completed.stdout}\n{completed.stderr}"
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["lockId"] == "another-update"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helpers target Windows")

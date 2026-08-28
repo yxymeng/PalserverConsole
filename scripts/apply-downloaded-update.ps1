@@ -5,6 +5,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
     [Parameter(Mandatory = $true)]
+    [string]$UpdateLockId,
+    [Parameter(Mandatory = $true)]
     [string]$DataDirectory,
     [Parameter(Mandatory = $true)]
     [string]$NewPackage,
@@ -77,6 +79,59 @@ function Restore-ConsoleLauncher {
     }
 }
 
+function Set-UpdateLockOwner {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$UpdateLockPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedLockId
+    )
+
+    if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
+        throw "UPDATE_LOCK_MISSING: application update lock is missing."
+    }
+    try {
+        $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
+    }
+    if ([string]$lock.lockId -ne $ExpectedLockId) {
+        throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
+    }
+    $processStartedAt = [DateTimeOffset]::new(
+        (Get-Process -Id $PID).StartTime.ToUniversalTime()
+    ).ToUnixTimeMilliseconds() / 1000.0
+    [ordered]@{
+        lockId = $ExpectedLockId
+        pid = $PID
+        processStartedAt = $processStartedAt
+        phase = "helper"
+        instanceId = [string]$lock.instanceId
+        createdAt = $lock.createdAt
+    } | ConvertTo-Json | Set-Content -LiteralPath $UpdateLockPath -Encoding UTF8
+}
+
+function Remove-UpdateLockIfOwned {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$UpdateLockPath,
+        [Parameter(Mandatory = $true)][string]$ExpectedLockId
+    )
+
+    if (-not (Test-Path -LiteralPath $UpdateLockPath -PathType Leaf)) {
+        return
+    }
+    try {
+        $lock = Get-Content -LiteralPath $UpdateLockPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    }
+    catch {
+        return
+    }
+    if ([string]$lock.lockId -eq $ExpectedLockId) {
+        Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction SilentlyContinue
+    }
+}
+
 $installRootPath = [System.IO.Path]::GetFullPath($InstallRoot)
 $dataDirectoryPath = [System.IO.Path]::GetFullPath($DataDirectory)
 $packageRootPath = [System.IO.Path]::GetFullPath($NewPackage)
@@ -89,6 +144,7 @@ $exitCode = 0
 
 try {
     New-Item -ItemType Directory -Path $logDirectory -Force | Out-Null
+    Set-UpdateLockOwner -UpdateLockPath $updateLockPath -ExpectedLockId $UpdateLockId
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ([DateTime]::UtcNow -ge $deadline) {
@@ -138,7 +194,7 @@ catch {
     $exitCode = 1
 }
 finally {
-    Remove-Item -LiteralPath $updateLockPath -Force -ErrorAction SilentlyContinue
+    Remove-UpdateLockIfOwned -UpdateLockPath $updateLockPath -ExpectedLockId $UpdateLockId
 }
 
 exit $exitCode

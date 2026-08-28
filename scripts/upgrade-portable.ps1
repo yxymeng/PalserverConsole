@@ -249,6 +249,44 @@ function Assert-LauncherChecksum {
     }
 }
 
+function Get-ReleaseManagedEntry {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Entries,
+        [Parameter(Mandatory = $true)][string]$RelativePath
+    )
+
+    $matches = @(
+        $Entries | Where-Object {
+            [string]::Equals(
+                [string]$_.RelativePath,
+                $RelativePath,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        }
+    )
+    if ($matches.Count -ne 1) {
+        throw "CHECKSUM_MANIFEST_INVALID: $RelativePath must appear exactly once."
+    }
+    return $matches[0]
+}
+
+function Assert-ReleaseManagedFileChecksum {
+    param(
+        [Parameter(Mandatory = $true)][string]$FilePath,
+        [Parameter(Mandatory = $true)][object]$Entry,
+        [Parameter(Mandatory = $true)][string]$Context
+    )
+
+    $relativePath = [string]$Entry.RelativePath
+    if (-not (Test-Path -LiteralPath $FilePath -PathType Leaf)) {
+        throw "CHECKSUM_MISMATCH: missing $relativePath $Context."
+    }
+    $actualHash = Get-Sha256Hash -PathValue $FilePath
+    if (-not [string]::Equals($actualHash, [string]$Entry.Hash, [System.StringComparison]::OrdinalIgnoreCase)) {
+        throw "CHECKSUM_MISMATCH: $relativePath $Context."
+    }
+}
+
 function Get-DatabaseSchemaVersion {
     param([Parameter(Mandatory = $true)][string]$DatabasePath)
 
@@ -313,6 +351,10 @@ $installedProgram = Join-Path $installRootPath "Program"
 $candidateProgram = Join-Path $packageRootPath "Program"
 $installedLauncher = Join-Path $installRootPath "PalServerConsole.exe"
 $candidateLauncher = Join-Path $packageRootPath "PalServerConsole.exe"
+$installedUpdateHelper = Join-Path $installRootPath "apply-downloaded-update.ps1"
+$candidateUpdateHelper = Join-Path $packageRootPath "apply-downloaded-update.ps1"
+$installedUpgradeScript = Join-Path $installRootPath "upgrade-portable.ps1"
+$candidateUpgradeScript = Join-Path $packageRootPath "upgrade-portable.ps1"
 if (-not (Test-Path -LiteralPath $installedProgram -PathType Container)) {
     throw "UPGRADE_INPUT_INVALID: installed Program directory is missing: $installedProgram"
 }
@@ -342,6 +384,10 @@ if ($launcherEntries.Count -ne 1) {
     throw "CHECKSUM_MANIFEST_INVALID: root PalServerConsole.exe must appear exactly once."
 }
 $launcherEntry = $launcherEntries[0]
+$updateHelperEntry = Get-ReleaseManagedEntry $entries "apply-downloaded-update.ps1"
+$upgradeScriptEntry = Get-ReleaseManagedEntry $entries "upgrade-portable.ps1"
+Assert-ReleaseManagedFileChecksum $candidateUpdateHelper $updateHelperEntry "in candidate"
+Assert-ReleaseManagedFileChecksum $candidateUpgradeScript $upgradeScriptEntry "in candidate"
 
 $currentInstallProcesses = @(Get-CurrentInstallConsoleProcesses -InstallRootPath $installRootPath)
 if ($currentInstallProcesses.Count -gt 0) {
@@ -376,6 +422,8 @@ if (Test-Path -LiteralPath $databasePath -PathType Leaf) {
 
 $stagingProgram = Join-Path $installRootPath ".Program-upgrade-staging-$timestamp"
 $stagingLauncher = Join-Path $installRootPath ".PalServerConsole-upgrade-staging-$timestamp.exe"
+$stagingUpdateHelper = Join-Path $installRootPath ".apply-downloaded-update-upgrade-staging-$timestamp.ps1"
+$stagingUpgradeScript = Join-Path $installRootPath ".upgrade-portable-upgrade-staging-$timestamp.ps1"
 New-Item -ItemType Directory -Path $stagingProgram | Out-Null
 try {
     foreach ($item in Get-ChildItem -LiteralPath $candidateProgram -Force) {
@@ -384,6 +432,10 @@ try {
     Assert-ProgramChecksums $stagingProgram $programEntries
     Copy-Item -LiteralPath $candidateLauncher -Destination $stagingLauncher
     Assert-LauncherChecksum $stagingLauncher $launcherEntry "after staging"
+    Copy-Item -LiteralPath $candidateUpdateHelper -Destination $stagingUpdateHelper
+    Assert-ReleaseManagedFileChecksum $stagingUpdateHelper $updateHelperEntry "after staging"
+    Copy-Item -LiteralPath $candidateUpgradeScript -Destination $stagingUpgradeScript
+    Assert-ReleaseManagedFileChecksum $stagingUpgradeScript $upgradeScriptEntry "after staging"
 }
 catch {
     throw "UPGRADE_STAGING_FAILED: $($_.Exception.Message)"
@@ -393,10 +445,16 @@ $programBackups = Join-Path $installRootPath "program-backups"
 New-Item -ItemType Directory -Path $programBackups -Force | Out-Null
 $previousProgram = Join-Path $programBackups "Program-$timestamp"
 $previousLauncher = Join-Path $programBackups "PalServerConsole-$timestamp.exe"
+$previousUpdateHelper = Join-Path $programBackups "apply-downloaded-update-$timestamp.ps1"
+$previousUpgradeScript = Join-Path $programBackups "upgrade-portable-$timestamp.ps1"
 $oldProgramMoved = $false
 $newProgramMoved = $false
 $oldLauncherMoved = $false
 $newLauncherMoved = $false
+$oldUpdateHelperMoved = $false
+$newUpdateHelperMoved = $false
+$oldUpgradeScriptMoved = $false
+$newUpgradeScriptMoved = $false
 try {
     Move-Item -LiteralPath $installedProgram -Destination $previousProgram
     $oldProgramMoved = $true
@@ -408,12 +466,40 @@ try {
     }
     Move-Item -LiteralPath $stagingLauncher -Destination $installedLauncher
     $newLauncherMoved = $true
+    if (Test-Path -LiteralPath $installedUpdateHelper -PathType Leaf) {
+        Move-Item -LiteralPath $installedUpdateHelper -Destination $previousUpdateHelper
+        $oldUpdateHelperMoved = $true
+    }
+    Move-Item -LiteralPath $stagingUpdateHelper -Destination $installedUpdateHelper
+    $newUpdateHelperMoved = $true
+    if (Test-Path -LiteralPath $installedUpgradeScript -PathType Leaf) {
+        Move-Item -LiteralPath $installedUpgradeScript -Destination $previousUpgradeScript
+        $oldUpgradeScriptMoved = $true
+    }
+    Move-Item -LiteralPath $stagingUpgradeScript -Destination $installedUpgradeScript
+    $newUpgradeScriptMoved = $true
     Assert-ProgramChecksums $installedProgram $programEntries
     Assert-LauncherChecksum $installedLauncher $launcherEntry "after installation"
+    Assert-ReleaseManagedFileChecksum $installedUpdateHelper $updateHelperEntry "after installation"
+    Assert-ReleaseManagedFileChecksum $installedUpgradeScript $upgradeScriptEntry "after installation"
 }
 catch {
     $upgradeError = $_.Exception.Message
     try {
+        if ($newUpgradeScriptMoved -and (Test-Path -LiteralPath $installedUpgradeScript -PathType Leaf)) {
+            $failedUpgradeScript = Join-Path $programBackups "upgrade-portable-failed-$timestamp.ps1"
+            Move-Item -LiteralPath $installedUpgradeScript -Destination $failedUpgradeScript
+        }
+        if ($oldUpgradeScriptMoved -and (Test-Path -LiteralPath $previousUpgradeScript -PathType Leaf)) {
+            Move-Item -LiteralPath $previousUpgradeScript -Destination $installedUpgradeScript
+        }
+        if ($newUpdateHelperMoved -and (Test-Path -LiteralPath $installedUpdateHelper -PathType Leaf)) {
+            $failedUpdateHelper = Join-Path $programBackups "apply-downloaded-update-failed-$timestamp.ps1"
+            Move-Item -LiteralPath $installedUpdateHelper -Destination $failedUpdateHelper
+        }
+        if ($oldUpdateHelperMoved -and (Test-Path -LiteralPath $previousUpdateHelper -PathType Leaf)) {
+            Move-Item -LiteralPath $previousUpdateHelper -Destination $installedUpdateHelper
+        }
         if ($newLauncherMoved -and (Test-Path -LiteralPath $installedLauncher -PathType Leaf)) {
             $failedLauncher = Join-Path $programBackups "PalServerConsole-failed-$timestamp.exe"
             Move-Item -LiteralPath $installedLauncher -Destination $failedLauncher
@@ -432,10 +518,10 @@ catch {
     catch {
         throw "PROGRAM_ROLLBACK_FAILED: $($_.Exception.Message) Original upgrade error: $upgradeError"
     }
-    throw "UPGRADE_FAILED: $upgradeError. Program rollback completed; root launcher and data were restored."
+    throw "UPGRADE_FAILED: $upgradeError. Program, launcher, maintenance scripts, and data were restored."
 }
 
-Write-Host "升级完成：已替换根目录启动器和 Program，data 未被替换。旧程序保留在 $previousProgram。"
+Write-Host "升级完成：已替换根目录启动器、Program 和维护脚本，data 未被替换。旧程序保留在 $previousProgram。"
 if (Test-Path -LiteralPath $previousLauncher -PathType Leaf) {
     Write-Host "旧启动器保留在 $previousLauncher。"
 }

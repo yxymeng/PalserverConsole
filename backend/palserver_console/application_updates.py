@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+import psutil
 
 RELEASE_API_URL = "https://api.github.com/repos/yxymeng/PalserverConsole/releases/latest"
 MAX_RELEASE_BYTES = 500 * 1024 * 1024
@@ -68,9 +70,15 @@ class ApplicationUpdateService:
                 "PORTABLE_REQUIRED",
                 "Automatic installation is only available in the Windows portable package.",
             )
-        lock_path = self._acquire_update_lock()
+        lock_path, update_lock_id = self._acquire_update_lock()
         helper_started = False
         try:
+            if self._other_install_instances_running(install_root):
+                raise ApplicationUpdateError(
+                    "APPLICATION_UPDATE_INSTANCES_RUNNING",
+                    "Another PalServerConsole instance from this portable installation "
+                    "is still running.",
+                )
             status = self.check()
             latest = str(status["latestVersion"])
             if expected_version != latest or not status["updateAvailable"]:
@@ -126,6 +134,8 @@ class ApplicationUpdateService:
                     str(os.getpid()),
                     "-InstallRoot",
                     str(install_root),
+                    "-UpdateLockId",
+                    update_lock_id,
                     "-DataDirectory",
                     str(self.data_dir),
                     "-NewPackage",
@@ -156,30 +166,98 @@ class ApplicationUpdateService:
 
         threading.Thread(target=shutdown, name="application-update-shutdown", daemon=True).start()
 
-    def _acquire_update_lock(self) -> Path:
+    def _acquire_update_lock(self) -> tuple[Path, str]:
         if self.install_root is None:
             raise ApplicationUpdateError(
                 "PORTABLE_REQUIRED",
                 "Automatic installation is only available in the Windows portable package.",
             )
         lock_path = self.install_root / ".palserver-console-update.lock"
+        for attempt in range(2):
+            lock_id = str(uuid.uuid4())
+            try:
+                descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            except FileExistsError as error:
+                if attempt == 0 and self._reclaim_abandoned_update_lock(lock_path):
+                    continue
+                raise ApplicationUpdateError(
+                    "APPLICATION_UPDATE_IN_PROGRESS",
+                    "Another application update is already in progress.",
+                ) from error
+            try:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                    json.dump(
+                        {
+                            "lockId": lock_id,
+                            "pid": os.getpid(),
+                            "processStartedAt": psutil.Process(os.getpid()).create_time(),
+                            "phase": "prepare",
+                            "instanceId": self.instance_id,
+                            "createdAt": int(time.time()),
+                        },
+                        stream,
+                    )
+            except Exception:
+                self._release_update_lock(lock_path)
+                raise
+            return lock_path, lock_id
+        raise AssertionError("update lock acquisition retry was exhausted")
+
+    @staticmethod
+    def _reclaim_abandoned_update_lock(lock_path: Path) -> bool:
         try:
-            descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError as error:
-            raise ApplicationUpdateError(
-                "APPLICATION_UPDATE_IN_PROGRESS",
-                "Another application update is already in progress.",
-            ) from error
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(
-                {
-                    "pid": os.getpid(),
-                    "instanceId": self.instance_id,
-                    "createdAt": int(time.time()),
-                },
-                stream,
+            metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return False
+        if not isinstance(metadata, dict):
+            return False
+        pid = metadata.get("pid")
+        process_started_at = metadata.get("processStartedAt")
+        if isinstance(pid, bool) or not isinstance(pid, int):
+            return False
+        try:
+            process = psutil.Process(pid)
+        except psutil.NoSuchProcess:
+            ApplicationUpdateService._release_update_lock(lock_path)
+            return True
+        except psutil.AccessDenied:
+            return False
+        if (
+            isinstance(process_started_at, bool)
+            or not isinstance(process_started_at, int | float)
+        ):
+            return False
+        try:
+            owner_is_current = math.isclose(
+                process.create_time(), float(process_started_at), abs_tol=0.01
             )
-        return lock_path
+        except psutil.NoSuchProcess:
+            ApplicationUpdateService._release_update_lock(lock_path)
+            return True
+        except psutil.AccessDenied:
+            return False
+        if owner_is_current:
+            return False
+        ApplicationUpdateService._release_update_lock(lock_path)
+        return True
+
+    @staticmethod
+    def _other_install_instances_running(install_root: Path) -> bool:
+        program_path = os.path.normcase(
+            os.path.abspath(install_root / "Program" / "PalServerConsole.exe")
+        )
+        for process in psutil.process_iter(["pid", "exe"]):
+            if process.pid == os.getpid():
+                continue
+            try:
+                executable = process.info.get("exe")
+            except (psutil.AccessDenied, psutil.NoSuchProcess):
+                continue
+            if isinstance(executable, str) and os.path.normcase(
+                os.path.abspath(executable)
+            ) == program_path:
+                return True
+        return False
 
     @staticmethod
     def _release_update_lock(lock_path: Path) -> None:
@@ -332,6 +410,7 @@ def _validate_release_root(root: Path, version: str) -> None:
         root / "Program" / "PalServerConsole.exe",
         root / "metadata" / "build-info.json",
         root / "checksums.sha256",
+        root / "apply-downloaded-update.ps1",
         root / "upgrade-portable.ps1",
     )
     if any(not path.is_file() for path in required):

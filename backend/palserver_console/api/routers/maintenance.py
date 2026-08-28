@@ -109,6 +109,7 @@ def router(deps: AppDependencies) -> APIRouter:
                 "RELEASE_CHANGED",
                 "RELEASE_ASSET_MISSING",
                 "APPLICATION_UPDATE_IN_PROGRESS",
+                "APPLICATION_UPDATE_INSTANCES_RUNNING",
             } else 502
             return error_response(status, error.code, str(error))
         deps.audit.record(
