@@ -16,7 +16,10 @@ import psutil
 import pytest
 
 import palserver_console.__main__ as console_main
-from palserver_console.application_updates import _InstallUpdateGuard
+from palserver_console.application_updates import (
+    _InstallUpdateGuard,
+    portable_application_update_in_progress,
+)
 from palserver_console.config import AppSettings, default_settings
 from palserver_console.world import worker as world_worker
 
@@ -79,6 +82,7 @@ def _run_upgrade(
     package_root: Path,
     *,
     data_directory: Path | None = None,
+    update_lock_id: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         "powershell.exe",
@@ -95,6 +99,8 @@ def _run_upgrade(
     ]
     if data_directory is not None:
         command.extend(["-DataDirectory", str(data_directory)])
+    if update_lock_id is not None:
+        command.extend(["-UpdateLockId", update_lock_id])
     return subprocess.run(
         command,
         check=False,
@@ -114,6 +120,17 @@ def _run_encoded_powershell(script: str) -> subprocess.CompletedProcess[str]:
         encoding="utf-8",
         errors="replace",
         timeout=30,
+    )
+
+
+def _popen_encoded_powershell(script: str) -> subprocess.Popen[str]:
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    return subprocess.Popen(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        encoding="utf-8",
+        errors="replace",
     )
 
 
@@ -150,6 +167,8 @@ def _powershell_lock_owner_script(
     *,
     function_names: tuple[str, ...] = (
         "Open-InstallUpdateGuard",
+        "Write-UpdateLockJsonAtomically",
+        "Assert-UpdateLockMetadataComplete",
         "Set-UpdateLockOwner",
     ),
 ) -> str:
@@ -164,6 +183,53 @@ try {{
         -ExpectedLockId {_powershell_literal(expected_lock_id)} `
         -InstallRootPath {_powershell_literal(install_root)}
     [System.IO.File]::WriteAllText({_powershell_literal(result_path)}, "success", $utf8NoBom)
+}}
+catch {{
+    [System.IO.File]::WriteAllText(
+        {_powershell_literal(result_path)},
+        $_.Exception.Message,
+        $utf8NoBom
+    )
+    exit 1
+}}
+"""
+
+
+def _powershell_manual_lock_script(
+    upgrade_path: Path,
+    lock_path: Path,
+    install_root: Path,
+    ready_path: Path,
+    release_path: Path,
+    result_path: Path,
+) -> str:
+    loader = _powershell_function_loader(
+        upgrade_path,
+        (
+            "Open-InstallUpdateGuard",
+            "Write-UpdateLockJsonAtomically",
+            "Assert-UpdateLockMetadataComplete",
+            "New-ManualUpdateLock",
+            "Read-UpdateLockJson",
+            "Remove-UpdateLockIfOwned",
+        ),
+    )
+    return f"""
+{loader}
+$utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+try {{
+    $lockId = New-ManualUpdateLock `
+        -UpdateLockPath {_powershell_literal(lock_path)} `
+        -InstallRootPath {_powershell_literal(install_root)}
+    [System.IO.File]::WriteAllText({_powershell_literal(ready_path)}, "ready", $utf8NoBom)
+    while (-not (Test-Path -LiteralPath {_powershell_literal(release_path)} -PathType Leaf)) {{
+        Start-Sleep -Milliseconds 50
+    }}
+    Remove-UpdateLockIfOwned `
+        -UpdateLockPath {_powershell_literal(lock_path)} `
+        -ExpectedLockId $lockId `
+        -InstallRootPath {_powershell_literal(install_root)}
+    [System.IO.File]::WriteAllText({_powershell_literal(result_path)}, "released", $utf8NoBom)
 }}
 catch {{
     [System.IO.File]::WriteAllText(
@@ -381,6 +447,7 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
     assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
+    assert not (install_root / ".palserver-console-update.lock").exists()
     assert (install_root / "apply-downloaded-update.ps1").read_text(
         encoding="utf-8"
     ) == "update helper new"
@@ -439,6 +506,7 @@ def test_portable_upgrade_preserves_data_and_blocks_incompatible_downgrade(tmp_p
     assert "INCOMPATIBLE_DOWNGRADE" in f"{blocked.stdout}\n{blocked.stderr}"
     assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
+    assert not (install_root / ".palserver-console-update.lock").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -456,6 +524,7 @@ def test_portable_v011_bootstrap_with_candidate_upgrader_installs_new_maintenanc
     assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
     assert (install_root / "Program" / "release.txt").read_text(encoding="utf-8") == "new"
     assert (install_root / "PalServerConsole.exe").read_bytes() == b"new-launcher"
+    assert not (install_root / ".palserver-console-update.lock").exists()
     assert (install_root / "apply-downloaded-update.ps1").read_text(
         encoding="utf-8"
     ) == "update helper new"
@@ -721,6 +790,7 @@ function Move-Item {{
     assert (install_root / "upgrade-portable.ps1").read_text(
         encoding="utf-8"
     ) == "upgrade script old"
+    assert not (install_root / ".palserver-console-update.lock").exists()
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -908,7 +978,12 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Set-Content -Encoding UTF8" not in application_update_helper
     assert "System.Text.UTF8Encoding" in application_update_helper
     assert "ArgumentList $false" in application_update_helper
-    assert "[System.IO.File]::WriteAllText" in application_update_helper
+    assert "function Write-UpdateLockJsonAtomically" in application_update_helper
+    assert "[System.IO.FileMode]::CreateNew" in application_update_helper
+    assert "$stream.Flush($true)" in application_update_helper
+    assert "[System.IO.File]::Move(" in application_update_helper
+    assert "[System.IO.File]::Replace(" in application_update_helper
+    assert "WriteAllText($UpdateLockPath" not in application_update_helper
     assert "Release-UpdateLockForLaunch" in application_update_helper
     assert "Remove-UpdateLockIfOwned" in application_update_helper
     assert ".palserver-console-update.lock" in application_update_helper
@@ -950,6 +1025,7 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "DATABASE_SIDECAR_PRESENT" in upgrade_script
     assert 'Join-Path $packageRootPath "apply-downloaded-update.ps1"' in upgrade_script
     assert 'Join-Path $packageRootPath "upgrade-portable.ps1"' in upgrade_script
+    assert "-UpdateLockId $UpdateLockId" in application_update_helper
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
@@ -1148,6 +1224,14 @@ def test_portable_update_waits_for_current_installation_console_processes() -> N
     assert "$currentInstallProcesses.Count -eq 0" in update_helper
     assert "CONSOLE_EXIT_TIMEOUT" in update_helper
     assert "function Open-InstallUpdateGuard" in update_helper
+    assert "function Write-UpdateLockJsonAtomically" in update_helper
+    assert "[System.IO.FileMode]::CreateNew" in update_helper
+    assert "[System.IO.FileAccess]::Write" in update_helper
+    assert "[System.IO.FileShare]::None" in update_helper
+    assert "$stream.Flush($true)" in update_helper
+    assert "[System.IO.File]::Move(" in update_helper
+    assert "[System.IO.File]::Replace(" in update_helper
+    assert "WriteAllText($UpdateLockPath" not in update_helper
     assert "[System.IO.FileMode]::OpenOrCreate" in update_helper
     assert "[System.IO.FileAccess]::ReadWrite" in update_helper
     assert "[System.IO.FileShare]::None" in update_helper
@@ -1169,6 +1253,49 @@ def test_portable_update_waits_for_current_installation_console_processes() -> N
     assert update_helper.index("Get-CurrentInstallConsoleProcesses") < update_helper.index(
         "& $upgradeScript"
     )
+
+
+def test_portable_upgrade_contract_covers_the_full_manual_window() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    upgrade_script = (project_root / "scripts" / "upgrade-portable.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+
+    assert '[string]$UpdateLockId = ""' in upgrade_script
+    assert "function Open-InstallUpdateGuard" in upgrade_script
+    assert "function Write-UpdateLockJsonAtomically" in upgrade_script
+    assert "[System.IO.FileMode]::CreateNew" in upgrade_script
+    assert "[System.IO.FileAccess]::Write" in upgrade_script
+    assert "[System.IO.FileShare]::None" in upgrade_script
+    assert "$stream.Flush($true)" in upgrade_script
+    assert "[System.IO.File]::Move(" in upgrade_script
+    assert "[System.IO.File]::Replace(" in upgrade_script
+    assert "WriteAllText($UpdateLockPath" not in upgrade_script
+    assert "function New-ManualUpdateLock" in upgrade_script
+    assert "function Assert-ExistingUpdateLockOwner" in upgrade_script
+    assert "function Remove-UpdateLockIfOwned" in upgrade_script
+    assert "phase = \"manual-upgrade\"" in upgrade_script
+    assert "-Mode Create" in upgrade_script
+    assert 'ValidateSet("Create", "Replace")' in upgrade_script
+
+    lock_setup = upgrade_script.index("$ownsManualUpdateLock = $false")
+    acquire_manual = upgrade_script.index("New-ManualUpdateLock", lock_setup)
+    validate_helper = upgrade_script.index("Assert-ExistingUpdateLockOwner", lock_setup)
+    read_metadata = upgrade_script.index("Read-BuildMetadata", lock_setup)
+    checksum_validation = upgrade_script.index("Assert-PackageChecksums", lock_setup)
+    database_backup = upgrade_script.index("Backup-Database", lock_setup)
+    staging = upgrade_script.index("$stagingProgram", lock_setup)
+    assert lock_setup < min(acquire_manual, validate_helper)
+    assert max(acquire_manual, validate_helper) < read_metadata
+    assert read_metadata < checksum_validation < database_backup < staging
+
+    release_call = upgrade_script.index(
+        "        Remove-UpdateLockIfOwned `\n"
+        "            -UpdateLockPath $updateLockPath"
+    )
+    installation = upgrade_script.index("Move-Item -LiteralPath $stagingUpgradeScript")
+    assert installation < release_call
+    assert "finally" in upgrade_script[lock_setup:]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
@@ -1296,6 +1423,192 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
         assert not lock_path.exists()
     finally:
         _cleanup_test_launcher(install_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_manual_upgrade_lock_blocks_python_startup_gate_and_releases(
+    tmp_path: Path,
+) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    upgrade_script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    ready_path = tmp_path / "manual.ready"
+    release_path = tmp_path / "manual.release"
+    result_path = tmp_path / "manual.result"
+    process = _popen_encoded_powershell(
+        _powershell_manual_lock_script(
+            upgrade_script,
+            lock_path,
+            install_root,
+            ready_path,
+            release_path,
+            result_path,
+        )
+    )
+    try:
+        _wait_for_powershell_marker(process, ready_path)
+        metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+        process_started_at = psutil.Process(process.pid).create_time()
+        assert metadata["phase"] == "manual-upgrade"
+        assert metadata["pid"] == process.pid
+        assert math.isclose(
+            float(metadata["processStartedAt"]), process_started_at, abs_tol=0.01
+        )
+        assert portable_application_update_in_progress(install_root) is True
+
+        release_path.write_text("release", encoding="ascii")
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 0, f"{stdout}\n{stderr}"
+        assert result_path.read_text(encoding="utf-8") == "released"
+        assert not lock_path.exists()
+        assert portable_application_update_in_progress(install_root) is False
+    finally:
+        _terminate_powershell_process(process)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_manual_upgrade_lock_is_reclaimable_after_powershell_exit(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    upgrade_script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    ready_path = tmp_path / "manual-crash.ready"
+    release_path = tmp_path / "manual-crash.release"
+    result_path = tmp_path / "manual-crash.result"
+    process = _popen_encoded_powershell(
+        _powershell_manual_lock_script(
+            upgrade_script,
+            lock_path,
+            install_root,
+            ready_path,
+            release_path,
+            result_path,
+        )
+    )
+    try:
+        _wait_for_powershell_marker(process, ready_path)
+        assert lock_path.is_file()
+        process.kill()
+        process.wait(timeout=10)
+        assert portable_application_update_in_progress(install_root) is False
+        assert not lock_path.exists()
+    finally:
+        _terminate_powershell_process(process)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_portable_upgrade_reuses_helper_lock_without_cleaning_it(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, _ = _portable_upgrade_fixture(tmp_path)
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_id = "helper-owned-lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": lock_id,
+                "pid": os.getpid(),
+                "processStartedAt": psutil.Process(os.getpid()).create_time(),
+                "phase": "helper",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_lock = lock_path.read_bytes()
+
+    upgraded = _run_upgrade(script, install_root, package_root, update_lock_id=lock_id)
+
+    assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert lock_path.read_bytes() == original_lock
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_portable_upgrade_wrong_helper_lock_id_fails_closed(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, _ = _portable_upgrade_fixture(tmp_path)
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": "helper-owned-lock",
+                "pid": os.getpid(),
+                "processStartedAt": psutil.Process(os.getpid()).create_time(),
+                "phase": "helper",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_lock = lock_path.read_bytes()
+    original_launcher = (install_root / "PalServerConsole.exe").read_bytes()
+    original_program = (install_root / "Program" / "release.txt").read_text(encoding="utf-8")
+
+    blocked = _run_upgrade(script, install_root, package_root, update_lock_id="wrong-lock")
+
+    output = f"{blocked.stdout}\n{blocked.stderr}"
+    assert blocked.returncode != 0
+    assert "UPDATE_LOCK_OWNERSHIP_LOST" in output
+    assert lock_path.read_bytes() == original_lock
+    assert (install_root / "PalServerConsole.exe").read_bytes() == original_launcher
+    assert (
+        install_root / "Program" / "release.txt"
+    ).read_text(encoding="utf-8") == original_program
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_manual_upgrade_refuses_existing_update_lock(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, _ = _portable_upgrade_fixture(tmp_path)
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps(
+            {
+                "lockId": "helper-owned-lock",
+                "pid": os.getpid(),
+                "processStartedAt": psutil.Process(os.getpid()).create_time(),
+                "phase": "helper",
+                "instanceId": "north",
+                "createdAt": 2,
+            }
+        ),
+        encoding="utf-8",
+    )
+    original_lock = lock_path.read_bytes()
+
+    blocked = _run_upgrade(script, install_root, package_root)
+
+    output = f"{blocked.stdout}\n{blocked.stderr}"
+    assert blocked.returncode != 0
+    assert "UPDATE_LOCK_IN_PROGRESS" in output
+    assert lock_path.read_bytes() == original_lock
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_portable_upgrade_rejects_incomplete_helper_lock(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script = project_root / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, _ = _portable_upgrade_fixture(tmp_path)
+    lock_path = install_root / ".palserver-console-update.lock"
+    lock_path.write_text(
+        json.dumps({"lockId": "helper-owned-lock", "phase": "helper"}),
+        encoding="utf-8",
+    )
+    original_lock = lock_path.read_bytes()
+
+    blocked = _run_upgrade(script, install_root, package_root, update_lock_id="helper-owned-lock")
+
+    output = f"{blocked.stdout}\n{blocked.stderr}"
+    assert blocked.returncode != 0
+    assert "UPDATE_LOCK_INVALID" in output
+    assert lock_path.read_bytes() == original_lock
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
@@ -1475,9 +1788,14 @@ def test_portable_update_helper_transfers_lock_ownership(tmp_path: Path) -> None
     )
 
     script = f"""
-{_powershell_function_loader(
+    {_powershell_function_loader(
         update_helper,
-        ("Open-InstallUpdateGuard", "Set-UpdateLockOwner"),
+        (
+            "Open-InstallUpdateGuard",
+            "Write-UpdateLockJsonAtomically",
+            "Assert-UpdateLockMetadataComplete",
+            "Set-UpdateLockOwner",
+        ),
     )}
 $lockPath = {_powershell_literal(lock_path)}
 Set-UpdateLockOwner `

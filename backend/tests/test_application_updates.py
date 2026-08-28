@@ -942,6 +942,92 @@ def test_application_update_lock_reclaims_abandoned_owner(
     service._release_update_lock(lock_path)
 
 
+def test_application_update_lock_publishes_complete_metadata_atomically(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    real_replace = os.replace
+    publication: dict[str, object] = {}
+
+    def inspect_replace(
+        source: str | os.PathLike[str], destination: str | os.PathLike[str]
+    ) -> None:
+        source_path = Path(source)
+        destination_path = Path(destination)
+        assert source_path.parent == destination_path.parent == install_root
+        assert source_path.name.startswith(".palserver-console-update.lock.tmp-")
+        assert source_path.is_file()
+        assert not destination_path.exists()
+        metadata = json.loads(source_path.read_text(encoding="utf-8"))
+        assert {
+            "lockId",
+            "pid",
+            "processStartedAt",
+            "phase",
+            "instanceId",
+            "createdAt",
+        } <= metadata.keys()
+        assert metadata["phase"] == "prepare"
+        publication["metadata"] = metadata
+        real_replace(source, destination)
+
+    monkeypatch.setattr(os, "replace", inspect_replace)
+    service = ApplicationUpdateService(
+        "0.1.1", tmp_path / "data", install_root=install_root, instance_id="north"
+    )
+
+    published_path, lock_id = service._acquire_update_lock()
+
+    assert published_path == lock_path
+    published_metadata = cast(dict[str, object], publication["metadata"])
+    assert published_metadata["lockId"] == lock_id
+    assert json.loads(lock_path.read_text(encoding="utf-8"))["lockId"] == lock_id
+    service._release_update_lock(lock_path)
+
+
+def test_application_update_lock_write_failure_never_exposes_final_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+
+    def fail_dump(_metadata: object, _stream: object) -> None:
+        assert not lock_path.exists()
+        raise OSError("forced metadata serialization failure")
+
+    monkeypatch.setattr(json, "dump", fail_dump)
+    service = ApplicationUpdateService("0.1.1", tmp_path / "data", install_root=install_root)
+
+    with pytest.raises(OSError, match="forced metadata serialization failure"):
+        service._acquire_update_lock()
+
+    assert not lock_path.exists()
+    assert not list(install_root.glob(".palserver-console-update.lock.tmp-*"))
+
+
+def test_application_update_lock_publish_failure_cleans_temp_and_final_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+
+    def fail_replace(_source: str | os.PathLike[str], _destination: str | os.PathLike[str]) -> None:
+        raise OSError("forced atomic publication failure")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    service = ApplicationUpdateService("0.1.1", tmp_path / "data", install_root=install_root)
+
+    with pytest.raises(OSError, match="forced atomic publication failure"):
+        service._acquire_update_lock()
+
+    assert not lock_path.exists()
+    assert not list(install_root.glob(".palserver-console-update.lock.tmp-*"))
+
+
 def test_portable_application_update_in_progress_ignores_missing_lock(
     tmp_path: Path,
 ) -> None:

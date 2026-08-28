@@ -82,6 +82,108 @@ function Open-InstallUpdateGuard {
     }
 }
 
+function Write-UpdateLockJsonAtomically {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$UpdateLockPath,
+        [Parameter(Mandatory = $true)][string]$Json,
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("Create", "Replace")]
+        [string]$Mode
+    )
+
+    $fullLockPath = [System.IO.Path]::GetFullPath($UpdateLockPath)
+    $lockDirectory = [System.IO.Path]::GetDirectoryName($fullLockPath)
+    if ([string]::IsNullOrEmpty($lockDirectory)) {
+        throw "UPDATE_LOCK_INVALID: application update lock directory is unavailable."
+    }
+    $temporaryPath = Join-Path $lockDirectory (
+        ".{0}.tmp-{1}" -f [System.IO.Path]::GetFileName($fullLockPath), [guid]::NewGuid().ToString("N")
+    )
+    $backupPath = $null
+    $stream = $null
+    try {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        $bytes = $utf8NoBom.GetBytes($Json)
+        $stream = [System.IO.File]::Open(
+            $temporaryPath,
+            [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write,
+            [System.IO.FileShare]::None
+        )
+        $stream.Write($bytes, 0, $bytes.Length)
+        $stream.Flush($true)
+        $stream.Dispose()
+        $stream = $null
+
+        if ($Mode -eq "Create") {
+            if (Test-Path -LiteralPath $fullLockPath) {
+                throw "UPDATE_LOCK_IN_PROGRESS: application update lock already exists."
+            }
+            [System.IO.File]::Move($temporaryPath, $fullLockPath)
+        }
+        else {
+            if (-not (Test-Path -LiteralPath $fullLockPath -PathType Leaf)) {
+                throw "UPDATE_LOCK_MISSING: application update lock is missing."
+            }
+            $backupPath = Join-Path $lockDirectory (
+                ".{0}.backup-{1}" -f [System.IO.Path]::GetFileName($fullLockPath), [guid]::NewGuid().ToString("N")
+            )
+            [System.IO.File]::Replace($temporaryPath, $fullLockPath, $backupPath)
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+    finally {
+        if ($null -ne $stream) {
+            $stream.Dispose()
+        }
+        Remove-Item -LiteralPath $temporaryPath -Force -ErrorAction SilentlyContinue
+        if ($null -ne $backupPath) {
+            Remove-Item -LiteralPath $backupPath -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Assert-UpdateLockMetadataComplete {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][object]$Lock
+    )
+
+    foreach ($propertyName in @("lockId", "pid", "processStartedAt", "phase", "instanceId", "createdAt")) {
+        if ($null -eq $Lock.PSObject.Properties[$propertyName]) {
+            throw "UPDATE_LOCK_INVALID: application update lock metadata is incomplete."
+        }
+    }
+    if (
+        [string]::IsNullOrWhiteSpace([string]$Lock.lockId) -or
+        [string]::IsNullOrWhiteSpace([string]$Lock.phase) -or
+        [string]::IsNullOrWhiteSpace([string]$Lock.instanceId)
+    ) {
+        throw "UPDATE_LOCK_INVALID: application update lock metadata is incomplete."
+    }
+    try {
+        if ([long]$Lock.pid -le 0) {
+            throw "invalid pid"
+        }
+        $processStartedAt = [double]$Lock.processStartedAt
+        $createdAt = [double]$Lock.createdAt
+        if (
+            [double]::IsNaN($processStartedAt) -or
+            [double]::IsInfinity($processStartedAt) -or
+            $processStartedAt -le 0 -or
+            [double]::IsNaN($createdAt) -or
+            [double]::IsInfinity($createdAt) -or
+            $createdAt -le 0
+        ) {
+            throw "invalid timestamps"
+        }
+    }
+    catch {
+        throw "UPDATE_LOCK_INVALID: application update lock metadata is incomplete."
+    }
+}
+
 function Start-ConsoleLauncher {
     [CmdletBinding()]
     param(
@@ -138,6 +240,7 @@ function Set-UpdateLockOwner {
         catch {
             throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
         }
+        Assert-UpdateLockMetadataComplete -Lock $lock
         if ([string]$lock.lockId -ne $ExpectedLockId) {
             throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
         }
@@ -152,8 +255,10 @@ function Set-UpdateLockOwner {
             instanceId = [string]$lock.instanceId
             createdAt = $lock.createdAt
         } | ConvertTo-Json
-        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-        [System.IO.File]::WriteAllText($UpdateLockPath, $lockJson, $utf8NoBom)
+        Write-UpdateLockJsonAtomically `
+            -UpdateLockPath $UpdateLockPath `
+            -Json $lockJson `
+            -Mode Replace
     }
     finally {
         if ($null -ne $guard) {
@@ -182,6 +287,7 @@ function Release-UpdateLockForLaunch {
         catch {
             throw "UPDATE_LOCK_INVALID: application update lock is unreadable."
         }
+        Assert-UpdateLockMetadataComplete -Lock $lock
         $lockIdProperty = $lock.PSObject.Properties["lockId"]
         if ($null -eq $lockIdProperty -or [string]$lockIdProperty.Value -ne $ExpectedLockId) {
             throw "UPDATE_LOCK_OWNERSHIP_LOST: application update lock belongs to another update."
@@ -216,6 +322,7 @@ function Remove-UpdateLockIfOwned {
         catch {
             return
         }
+        Assert-UpdateLockMetadataComplete -Lock $lock
         if ([string]$lock.lockId -eq $ExpectedLockId) {
             Remove-Item -LiteralPath $UpdateLockPath -Force -ErrorAction SilentlyContinue
         }
@@ -269,7 +376,8 @@ try {
     & $upgradeScript `
         -NewPackage $packageRootPath `
         -InstallRoot $installRootPath `
-        -DataDirectory $dataDirectoryPath *>&1 |
+        -DataDirectory $dataDirectoryPath `
+        -UpdateLockId $UpdateLockId *>&1 |
         Out-File -LiteralPath $logPath -Encoding utf8
     if (-not $?) {
         throw "UPDATE_APPLY_FAILED: upgrade-portable.ps1 returned a failure."

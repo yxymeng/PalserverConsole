@@ -143,6 +143,26 @@ class _InstallUpdateGuard:
             ) from error
 
 
+def _write_update_lock_metadata_atomically(
+    lock_path: Path, metadata: dict[str, object]
+) -> None:
+    """Publish complete update metadata without exposing a partial final file."""
+
+    temporary_path = lock_path.with_name(
+        f"{lock_path.name}.tmp-{uuid.uuid4().hex}"
+    )
+    try:
+        with temporary_path.open("x", encoding="utf-8", newline="\n") as stream:
+            json.dump(metadata, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if lock_path.exists():
+            raise FileExistsError(f"Update lock already exists: {lock_path}")
+        os.replace(temporary_path, lock_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 class ApplicationUpdateService:
     def __init__(
         self,
@@ -479,9 +499,7 @@ class ApplicationUpdateService:
             with _InstallUpdateGuard(self.install_root):
                 for attempt in range(2):
                     lock_id = str(uuid.uuid4())
-                    try:
-                        descriptor = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                    except FileExistsError as error:
+                    if lock_path.exists():
                         if attempt == 0 and self._reclaim_abandoned_update_lock_unlocked(
                             lock_path
                         ):
@@ -489,23 +507,22 @@ class ApplicationUpdateService:
                         raise ApplicationUpdateError(
                             "APPLICATION_UPDATE_IN_PROGRESS",
                             "Another application update is already in progress.",
-                        ) from error
+                        )
+                    metadata = {
+                        "lockId": lock_id,
+                        "pid": os.getpid(),
+                        "processStartedAt": psutil.Process(os.getpid()).create_time(),
+                        "phase": "prepare",
+                        "instanceId": self.instance_id,
+                        "createdAt": int(time.time()),
+                    }
                     try:
-                        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                            json.dump(
-                                {
-                                    "lockId": lock_id,
-                                    "pid": os.getpid(),
-                                    "processStartedAt": psutil.Process(os.getpid()).create_time(),
-                                    "phase": "prepare",
-                                    "instanceId": self.instance_id,
-                                    "createdAt": int(time.time()),
-                                },
-                                stream,
-                            )
-                    except Exception:
-                        self._release_update_lock(lock_path)
-                        raise
+                        _write_update_lock_metadata_atomically(lock_path, metadata)
+                    except FileExistsError as error:
+                        raise ApplicationUpdateError(
+                            "APPLICATION_UPDATE_IN_PROGRESS",
+                            "Another application update is already in progress.",
+                        ) from error
                     return lock_path, lock_id
         except _UpdateGuardError as error:
             raise ApplicationUpdateError(
