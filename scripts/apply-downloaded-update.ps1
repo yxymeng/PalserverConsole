@@ -101,14 +101,16 @@ function Set-UpdateLockOwner {
     $processStartedAt = [DateTimeOffset]::new(
         (Get-Process -Id $PID).StartTime.ToUniversalTime()
     ).ToUnixTimeMilliseconds() / 1000.0
-    [ordered]@{
+    $lockJson = [ordered]@{
         lockId = $ExpectedLockId
         pid = $PID
         processStartedAt = $processStartedAt
         phase = "helper"
         instanceId = [string]$lock.instanceId
         createdAt = $lock.createdAt
-    } | ConvertTo-Json | Set-Content -LiteralPath $UpdateLockPath -Encoding UTF8
+    } | ConvertTo-Json
+    $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+    [System.IO.File]::WriteAllText($UpdateLockPath, $lockJson, $utf8NoBom)
 }
 
 function Release-UpdateLockForLaunch {

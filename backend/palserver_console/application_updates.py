@@ -217,7 +217,7 @@ class ApplicationUpdateService:
     @staticmethod
     def _reclaim_abandoned_update_lock(lock_path: Path) -> bool:
         try:
-            metadata = json.loads(lock_path.read_text(encoding="utf-8"))
+            metadata = json.loads(lock_path.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             return False
         if not isinstance(metadata, dict):

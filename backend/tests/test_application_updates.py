@@ -54,6 +54,13 @@ def _enable_graceful_shutdown(service: ApplicationUpdateService) -> None:
     service.bind_shutdown_requester(lambda: None)
 
 
+def _write_update_lock(
+    lock_path: Path, metadata: dict[str, object], *, bom: bool = False
+) -> None:
+    encoded = json.dumps(metadata).encode("utf-8")
+    lock_path.write_bytes((b"\xef\xbb\xbf" if bom else b"") + encoded)
+
+
 def test_application_update_check_uses_fixed_release_asset() -> None:
     release: dict[str, object] = {
         "tag_name": "v0.2.0",
@@ -572,6 +579,49 @@ def test_portable_application_update_in_progress_reclaims_only_abandoned_lock(
             return actual_process(pid)
         if owner_process == "access_denied":
             raise psutil.AccessDenied(pid)
+        if owner_process == "dead":
+            raise psutil.NoSuchProcess(pid)
+        start_time = 100.0 if owner_process == "live" else 101.0
+        return type("Owner", (), {"create_time": lambda self: start_time})()
+
+    monkeypatch.setattr(psutil, "Process", process)
+
+    assert portable_application_update_in_progress(install_root) is expected_in_progress
+    assert lock_path.exists() is expected_in_progress
+
+
+@pytest.mark.parametrize(
+    ("owner_process", "expected_in_progress"),
+    [
+        ("live", True),
+        ("dead", False),
+        ("reused", False),
+    ],
+)
+def test_portable_application_update_in_progress_handles_bom_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    owner_process: str,
+    expected_in_progress: bool,
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    lock_path = install_root / ".palserver-console-update.lock"
+    _write_update_lock(
+        lock_path,
+        {
+            "lockId": "active",
+            "pid": 4321,
+            "processStartedAt": 100.0,
+            "phase": "helper",
+        },
+        bom=True,
+    )
+    actual_process = psutil.Process
+
+    def process(pid: int) -> Any:
+        if pid != 4321:
+            return actual_process(pid)
         if owner_process == "dead":
             raise psutil.NoSuchProcess(pid)
         start_time = 100.0 if owner_process == "live" else 101.0

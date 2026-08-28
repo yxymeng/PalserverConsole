@@ -555,6 +555,10 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "UPDATE_FAILURE_RELAUNCH_FAILED" in application_update_helper
     assert '[string]$UpdateLockId' in application_update_helper
     assert "Set-UpdateLockOwner" in application_update_helper
+    assert "Set-Content -Encoding UTF8" not in application_update_helper
+    assert "System.Text.UTF8Encoding" in application_update_helper
+    assert "ArgumentList $false" in application_update_helper
+    assert "[System.IO.File]::WriteAllText" in application_update_helper
     assert "Release-UpdateLockForLaunch" in application_update_helper
     assert "Remove-UpdateLockIfOwned" in application_update_helper
     assert ".palserver-console-update.lock" in application_update_helper
@@ -791,6 +795,7 @@ $lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Jso
     assert lock["processStartedAt"] > 0
     assert lock["phase"] == "helper"
     assert lock["instanceId"] == "north"
+    assert lock_path.read_bytes()[:3] != b"\xef\xbb\xbf"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
