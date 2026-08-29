@@ -23,7 +23,7 @@ const shell: ShellStatus = {
   instanceId: "default",
 };
 
-test("UX-01：一级导航只保留首页、世界数据、配置和维护", () => {
+test("UX-01：一级导航只保留首页、世界数据、世界法则配置和维护", () => {
   const markup = renderToStaticMarkup(
     <ConsoleShell
       auth={auth}
@@ -37,7 +37,7 @@ test("UX-01：一级导航只保留首页、世界数据、配置和维护", () 
 
   expect(navigation).toContain("首页");
   expect(navigation).toContain("世界数据");
-  expect(navigation).toContain("配置");
+  expect(navigation).toContain("世界法则配置");
   expect(navigation).toContain("维护");
   expect(navigation).not.toContain("服务器管理");
   expect(navigation).not.toContain("官方备份");

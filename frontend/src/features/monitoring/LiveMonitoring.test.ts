@@ -64,8 +64,8 @@ test("首页在线玩家摘要覆盖空、单人、多人、加载、错误与�
     value: "8 人",
     detail: "Player1、Player2、Player3 等 8 人",
   });
-  expect(onlinePlayersSummary([{}], "ready")).toEqual({ value: "1 人", detail: "未知玩家" });
-  expect(onlinePlayersSummary([], "loading")).toEqual({ value: "读取中", detail: "正在读取在线玩家" });
+  expect(onlinePlayersSummary([{}], "ready")).toEqual({ value: "1 人", detail: "未知训练家" });
+  expect(onlinePlayersSummary([], "loading")).toEqual({ value: "读取中", detail: "正在读取在线训练家" });
   expect(onlinePlayersSummary([], "error")).toEqual({ value: "—", detail: "在线数据不可用" });
   expect(onlinePlayersSummary([{ name: "一梦" }, { name: "Luna" }, { name: "Player3" }], "ready", true)).toEqual({
     value: "3 人",

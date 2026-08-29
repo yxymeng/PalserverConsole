@@ -44,7 +44,7 @@ const ConfigPage = lazy(() =>
 const NAVIGATION = [
   { key: "overview", label: "首页", icon: Activity },
   { key: "world", label: text.world, icon: Database },
-  { key: "config", label: "配置", icon: FileCog },
+  { key: "config", label: "世界法则配置", icon: FileCog },
   { key: "maintenance", label: "维护", icon: Wrench },
 ] as const;
 
@@ -225,7 +225,7 @@ function ConsoleLayout({
               </Suspense>
             )}
             {active === "config" && (
-              <Suspense fallback={<PageLoading label="正在加载配置模块" />}>
+              <Suspense fallback={<PageLoading label="正在加载世界法则配置" />}>
                 <ConfigPage
                   auth={auth}
                   onAuthChanged={onAuthChanged}

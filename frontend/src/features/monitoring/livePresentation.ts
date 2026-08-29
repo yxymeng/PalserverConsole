@@ -28,11 +28,11 @@ export function onlinePlayersSummary(
   state: PlayerDataState,
   stale = false,
 ): { value: string; detail: string } {
-  if (state === "loading") return { value: "读取中", detail: "正在读取在线玩家" };
+  if (state === "loading") return { value: "读取中", detail: "正在读取在线训练家" };
   if (state === "error") return { value: "—", detail: "在线数据不可用" };
   if (state === "empty") return { value: "0 人", detail: stale ? "上次在线：当前无人在线" : "当前无人在线" };
 
-  const names = players.map((player) => playerText(player, ["name", "playerName", "accountName"], "未知玩家"));
+  const names = players.map((player) => playerText(player, ["name", "playerName", "accountName"], "未知训练家"));
   const visibleNames = names.slice(0, 3).join("、");
   const detail = names.length > 3 ? `${visibleNames} 等 ${names.length} 人` : visibleNames;
   return { value: `${players.length} 人`, detail: stale ? `上次在线：${detail}` : detail };

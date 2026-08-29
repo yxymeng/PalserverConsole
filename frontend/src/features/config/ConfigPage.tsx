@@ -99,8 +99,8 @@ const CONFIG_LABELS: Record<string, string> = {
   BaseCampWorkerMaxNum: "可分配至据点工作的帕鲁数量上限",
   MaxBuildingLimitNum: "每个玩家的建筑物最大数量",
   DropItemAliveMaxHours: "掉落物品存活最大小时数",
-  bAutoResetGuildNoOnlinePlayers: "自动重置无在线玩家的公会",
-  AutoResetGuildTimeNoOnlinePlayers: "自动重置无在线玩家的公会时间（小时）",
+  bAutoResetGuildNoOnlinePlayers: "自动重置无在线训练家的公会",
+  AutoResetGuildTimeNoOnlinePlayers: "自动重置无在线训练家的公会时间（小时）",
   GuildPlayerMaxNum: "公会玩家最大数量",
   PalEggDefaultHatchingTime: "巨大蛋孵化所需时间（小时）",
   WorkSpeedRate: "工作速率",
@@ -614,7 +614,7 @@ export function ConfigPage({
   }
   async function openFolder() { try { await requestJson("/api/config/open-folder", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
   const workspaceTabs = <div className="config-workspace-tabs" role="tablist" aria-label="配置工作区">
-    <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />游戏配置</button>
+    <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />世界法则配置</button>
     <button className={workspace === "instance" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "instance"} onClick={() => onWorkspaceChange("instance")}><ServerCog size={18} />实例与控制台</button>
   </div>;
   const consoleAndInstanceSettings = <section className="config-instance-workspace">

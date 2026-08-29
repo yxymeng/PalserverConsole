@@ -75,22 +75,22 @@ function OperationalHealthNotice({ onOpenMaintenance }: { onOpenMaintenance: () 
 
 function HomeHero({ children, status, config, snapshot }: { children: ReactNode; status: ShellStatus | null; config: ConfigDocument | null; snapshot: LiveSnapshot | null }) {
   const serverName = configText(config?.fields.ServerName)
-    || displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"], "PalServer");
-  const description = configText(config?.fields.ServerDescription) || "尚未配置服务器描述。";
+    || displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"], "未命名的帕鲁世界");
+  const description = configText(config?.fields.ServerDescription) || "这个世界还没有介绍，可在“世界法则配置”中填写。";
   const version = displayValue(snapshot?.info.data, ["version", "Version"], "");
   return (
     <Card className="psc-home-command" role="region" aria-label="首页服务器控制">
       <div className="psc-home-command-grid">
         <div className="psc-home-command-copy">
           <CardHeader>
-            <div className="psc-home-command-title">
-              <CardTitle role="heading" aria-level={2}>{serverName}</CardTitle>
+            <div className="psc-home-command-meta">
               <span className="psc-home-state" data-state={status?.serverState || "loading"}>
                 <span aria-hidden="true" />
                 {status ? serverStateLabel(status.serverState) : "读取中"}
               </span>
               {version && <span className="psc-home-version">v{version.replace(/^v/i, "")}</span>}
             </div>
+            <CardTitle role="heading" aria-level={2}>{serverName}</CardTitle>
             <CardDescription>{description}</CardDescription>
           </CardHeader>
           <CardContent>{children}</CardContent>
