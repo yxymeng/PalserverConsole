@@ -1,4 +1,4 @@
-import type { LiveSnapshot, WorldStatus } from "../../api/contracts";
+import type { LiveSnapshot, ProcessMetrics, WorldStatus } from "../../api/contracts";
 import type { LiveConnectionStatus } from "../../hooks/useLiveEvents";
 import { playerText } from "../../utils/format";
 
@@ -40,4 +40,21 @@ export function onlinePlayersSummary(
 
 export function worldStatusAfterResponse(status: WorldStatus | null, error: string): WorldStatus | null {
   return error ? null : status;
+}
+
+export function processMemoryPercent(process?: ProcessMetrics): number | null {
+  if (!process?.pids.length || !process.hostMemoryTotalBytes || process.hostMemoryTotalBytes <= 0) return null;
+  return Math.min(100, Math.max(0, process.memoryBytes / process.hostMemoryTotalBytes * 100));
+}
+
+export function serverFrameSummary(server?: Record<string, unknown>): { value: string } {
+  if (!server) return { value: "不可用" };
+  const entries = Object.entries(server);
+  const keys = ["serverfps", "serverFps", "ServerFPS", "fps"];
+  const raw = keys.map((key) => server[key] ?? entries.find(([actual]) => actual.toLowerCase() === key.toLowerCase())?.[1])
+    .find((value) => value !== undefined && value !== null && String(value).trim());
+  const fps = typeof raw === "number" ? raw : Number.parseFloat(String(raw ?? ""));
+  if (!Number.isFinite(fps) || fps <= 0) return { value: "不可用" };
+  const precision = Number.isInteger(fps) ? 0 : 1;
+  return { value: `${fps.toFixed(precision)} fps` };
 }

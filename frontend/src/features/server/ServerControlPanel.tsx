@@ -57,7 +57,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
 
   useEffect(() => { void refresh(); }, [refresh]);
   useEffect(() => {
-    const timer = window.setInterval(() => void refreshStatus(), 5_000);
+    const timer = window.setInterval(() => void refreshStatus(), 1_000);
     return () => window.clearInterval(timer);
   }, [refreshStatus]);
   useEffect(() => {
@@ -142,6 +142,7 @@ export function ServerControlPanel({ auth, initialStatus, onStatusChange }: { au
       <Button variant="outline" disabled={busy || operating || status?.serverState !== "running"} onClick={() => setPendingAction("restart")}><RotateCw data-icon="inline-start" aria-hidden="true" />重启</Button>
       <Button variant="ghost" size="icon" type="button" title="刷新服务器状态" aria-label="刷新服务器状态" onClick={() => void refresh()}>{busy ? <Spinner /> : <RefreshCw aria-hidden="true" />}</Button>
     </section>
+    <p className="psc-control-target" title={settings.executablePath || ""}>{settings.executablePath || "正在读取 PalServer.exe 路径"}</p>
     {operation && createPortal(<OperationStatusIsland operation={operation} onCancel={cancel} onForceStop={() => setPendingAction("force")} />, document.body)}
     {error && <Alert className="psc-control-feedback" variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>服务器操作未完成</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
     {message && <Alert className="psc-control-feedback" variant="success" role="status"><CheckCircle2 aria-hidden="true" /><AlertTitle>请求已提交</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}

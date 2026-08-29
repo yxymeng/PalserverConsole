@@ -17,7 +17,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
-  SidebarSeparator,
   SidebarTrigger,
   useSidebar,
 } from "../components/ui/sidebar";
@@ -64,10 +63,13 @@ export function ConsoleShell({
 }) {
   const [active, setActive] = useState<PageKey>("overview");
   const [configWorkspace, setConfigWorkspace] = useState<"game" | "instance">("game");
-  const sidebarStyle = { "--sidebar-width": "252px" } as CSSProperties;
+  const sidebarStyle = {
+    "--sidebar-width": "224px",
+    "--psc-shell-width": "1400px",
+  } as CSSProperties;
 
   return (
-    <SidebarProvider style={sidebarStyle}>
+    <SidebarProvider className="psc-shell" style={sidebarStyle}>
       <ConsoleLayout
         active={active}
         auth={auth}
@@ -115,7 +117,7 @@ function ConsoleLayout({
 
   return (
     <>
-      <Sidebar collapsible="offcanvas" className="psc-sidebar">
+      {isMobile ? <Sidebar collapsible="offcanvas">
         <SidebarHeader className="psc-sidebar-header">
           <div className="psc-brand-row">
             <BrandMark />
@@ -127,7 +129,6 @@ function ConsoleLayout({
             )}
           </div>
         </SidebarHeader>
-        <SidebarSeparator />
         <SidebarContent>
           <nav aria-label="主导航" className="psc-navigation">
             <SidebarMenu>
@@ -156,9 +157,44 @@ function ConsoleLayout({
           </Badge>
           <small>前端 v{FRONTEND_VERSION}</small>
         </SidebarFooter>
-      </Sidebar>
+      </Sidebar> : <aside className="psc-sidebar">
+        <SidebarHeader className="psc-sidebar-header">
+          <div className="psc-brand-row">
+            <BrandMark />
+            <span className="psc-brand-copy"><strong>{text.product}</strong><small>PalServer 值守台</small></span>
+          </div>
+        </SidebarHeader>
+        <SidebarContent>
+          <nav aria-label="主导航" className="psc-navigation">
+            <SidebarMenu>
+              {NAVIGATION.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <SidebarMenuItem key={item.key}>
+                    <SidebarMenuButton
+                      isActive={active === item.key}
+                      aria-current={active === item.key ? "page" : undefined}
+                      onClick={() => activate(item.key)}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </nav>
+        </SidebarContent>
+        <SidebarFooter className="psc-sidebar-footer">
+          <Badge variant={auth.local ? "success" : "warning"}>
+            <span className="status-dot" aria-hidden="true" />
+            {auth.local ? "本机访问" : "局域网会话"}
+          </Badge>
+          <small>前端 v{FRONTEND_VERSION}</small>
+        </SidebarFooter>
+      </aside>}
 
-      <SidebarInset className="psc-inset">
+      <SidebarInset className="psc-inset" aria-label={`${pageTitle}页面`}>
         <header className="psc-topbar">
           <div className="psc-topbar-inner">
             <SidebarTrigger className="md:hidden" aria-label="打开菜单" title="打开菜单" />
@@ -180,8 +216,8 @@ function ConsoleLayout({
             </div>
           </div>
         </header>
-        <main className="psc-main" aria-label={`${pageTitle}页面`}>
-          <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={4} blur="3px">
+        <div className="psc-main">
+          <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={0} blur="3px">
             {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} />}
             {active === "world" && (
               <Suspense fallback={<PageLoading label="正在加载世界数据模块" />}>
@@ -200,7 +236,7 @@ function ConsoleLayout({
             )}
             {active === "maintenance" && <MaintenancePage auth={auth} />}
           </BlurFade>
-        </main>
+        </div>
       </SidebarInset>
     </>
   );

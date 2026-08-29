@@ -92,6 +92,8 @@ class FakeProcessMetrics:
             "cpuPercent": 12.5,
             "cpuReady": True,
             "memoryBytes": 1048576,
+            "hostMemoryTotalBytes": 17179869184,
+            "hostMemoryAvailableBytes": 12884901888,
             "diskReadBytes": 10,
             "diskWriteBytes": 20,
             "diskReadBytesPerSecond": 1.0,
@@ -139,6 +141,15 @@ class FakeProcess:
         return self._children
 
 
+def test_monitor_defaults_to_one_second_refresh() -> None:
+    monitor = MonitorCoordinator(
+        config_loader=lambda: cast(Any, None),
+        process_metrics=FakeProcessMetrics(),  # type: ignore[arg-type]
+    )
+
+    assert monitor.interval_seconds == 1.0
+
+
 def test_process_metrics_include_oldest_process_start_time() -> None:
     collector = ProcessMetricsCollector(
         process_lookup=lambda _: cast(
@@ -169,6 +180,7 @@ def test_process_metrics_calculates_cpu_and_io_rates_from_two_samples() -> None:
         process_lookup=lambda _: cast(Any, [process]),
         clock=lambda: clock[0],
         logical_cpu_count=lambda: 2,
+        memory_snapshot=lambda: SimpleNamespace(total=16_384, available=12_288),
     )
 
     first, first_error = collector.collect(Path("C:/test/PalServer.exe"))
@@ -186,12 +198,28 @@ def test_process_metrics_calculates_cpu_and_io_rates_from_two_samples() -> None:
     assert second_error is None
     assert second["cpuPercent"] == 6.25
     assert second["memoryBytes"] == 2048
+    assert second["hostMemoryTotalBytes"] == 16_384
+    assert second["hostMemoryAvailableBytes"] == 12_288
     assert second["diskReadBytes"] == 300
     assert second["diskWriteBytes"] == 260
     assert second["diskReadBytesPerSecond"] == 100.0
     assert second["diskWriteBytesPerSecond"] == 30.0
     assert second["cpuReady"] is True
     assert second["ioReady"] is True
+
+
+def test_process_metrics_keep_host_memory_when_server_is_stopped() -> None:
+    collector = ProcessMetricsCollector(
+        process_lookup=lambda _: [],
+        memory_snapshot=lambda: SimpleNamespace(total=32_768, available=24_576),
+    )
+
+    metrics, error = collector.collect(Path("C:/test/PalServer.exe"))
+
+    assert error == "PROCESS_NOT_RUNNING"
+    assert metrics["memoryBytes"] == 0
+    assert metrics["hostMemoryTotalBytes"] == 32_768
+    assert metrics["hostMemoryAvailableBytes"] == 24_576
 
 
 def test_process_lookup_includes_palserver_descendants(
@@ -532,6 +560,11 @@ def test_m3_api_exposes_full_ip_sse_and_never_returns_admin_password(tmp_path: P
         players = client.get("/api/live/players")
         assert players.status_code == 200
         assert players.json()["data"][0]["ip"] == "203.0.113.9"
+        metrics = client.get("/api/live/metrics")
+        assert metrics.status_code == 200
+        process = metrics.json()["data"]["process"]
+        assert process["hostMemoryTotalBytes"] == 17_179_869_184
+        assert process["hostMemoryAvailableBytes"] == 12_884_901_888
         settings_response = client.get("/api/live/settings")
         assert "must-not-leak" not in settings_response.text
         assert settings_response.json()["data"]["AdminPassword"] == "[REDACTED]"

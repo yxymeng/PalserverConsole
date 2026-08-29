@@ -65,6 +65,8 @@ export type ProcessMetrics = {
   cpuPercent: number;
   cpuReady?: boolean;
   memoryBytes: number;
+  hostMemoryTotalBytes?: number;
+  hostMemoryAvailableBytes?: number;
   diskReadBytes: number;
   diskWriteBytes: number;
   diskReadBytesPerSecond?: number;

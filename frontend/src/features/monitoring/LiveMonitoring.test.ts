@@ -5,6 +5,8 @@ import {
   liveTitleText,
   onlinePlayersSummary,
   playerDataState,
+  processMemoryPercent,
+  serverFrameSummary,
   worldStatusAfterResponse,
 } from "./livePresentation";
 
@@ -84,4 +86,22 @@ test("世界快照 success -> failure -> success 不保留旧数据", () => {
   error = "";
   status = worldStatusAfterResponse(nextWorldStatus, error);
   expect(status?.gameTimeTicks).toBe(nextWorldStatus.gameTimeTicks);
+});
+
+test("内存进度使用服务器主机真实物理内存计算并限制在百分比范围内", () => {
+  const process = {
+    pids: [123], cpuPercent: 0, memoryBytes: 4_294_967_296,
+    hostMemoryTotalBytes: 17_179_869_184,
+    diskReadBytes: 0, diskWriteBytes: 0,
+  };
+  expect(processMemoryPercent(process)).toBe(25);
+  expect(processMemoryPercent({ ...process, memoryBytes: 34_359_738_368 })).toBe(100);
+  expect(processMemoryPercent({ ...process, hostMemoryTotalBytes: 0 })).toBeNull();
+  expect(processMemoryPercent({ ...process, pids: [] })).toBeNull();
+});
+
+test("服务器帧率只显示 fps 数值与单位", () => {
+  expect(serverFrameSummary({ serverfps: 59.1 })).toEqual({ value: "59.1 fps" });
+  expect(serverFrameSummary({ ServerFPS: "60" })).toEqual({ value: "60 fps" });
+  expect(serverFrameSummary({ serverfps: 0 })).toEqual({ value: "不可用" });
 });

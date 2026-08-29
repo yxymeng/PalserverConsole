@@ -96,17 +96,18 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     expect(characterBox.x).toBeGreaterThanOrEqual(heroBox.x + heroBox.width * .48);
     expect(characterBox.x + characterBox.width / 2).toBeLessThanOrEqual(heroBox.x + heroBox.width * .78);
   }
-  await expect(page.getByRole("heading", { name: "服务器控制" })).toBeVisible();
+  await expect(hero.getByRole("heading", { name: "PalServer" })).toBeVisible();
   const liveStatus = page.getByLabel("实时服务器状态");
   await expect(page.getByLabel("PalServer 当前状态")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "服务器状态" })).toHaveCount(0);
-  await expect(liveStatus).toContainText("服务器状态");
+  await expect(liveStatus).not.toContainText("服务器状态");
   await expect(liveStatus).toContainText("在线玩家");
-  const hostStatus = page.getByLabel("主机性能状态");
-  await expect(hostStatus).toContainText("CPU 使用率");
-  await expect(hostStatus).toContainText("内存使用");
-  await expect(hostStatus).toContainText("磁盘读取");
-  await expect(hostStatus).toContainText("磁盘写入");
+  const hostStatus = page.getByLabel("CPU 与内存状态");
+  await expect(hostStatus).toContainText("CPU");
+  await expect(hostStatus).toContainText("内存");
+  const diskStatus = page.getByLabel("磁盘读写状态");
+  await expect(diskStatus).toContainText("磁盘读取");
+  await expect(diskStatus).toContainText("磁盘写入");
 
   const startButton = page.getByRole("button", { name: "启动" });
   if (testInfo.project.name === "mobile") await startButton.tap();

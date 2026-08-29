@@ -11,10 +11,9 @@ import { Field, FieldGroup, FieldLabel } from "../../components/ui/field";
 import { Input } from "../../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../../components/ui/table";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
-import { liveConnectionLabel, useLiveEvents } from "../../hooks/useLiveEvents";
-import { displayValue, formatByteRate, formatBytes, formatPercent, liveStatus, playerId, playerText, sourceLabel } from "../../utils/format";
-import { serverStateLabel } from "../server/labels";
-import { liveTitleText, onlinePlayersSummary, playerDataState, worldStatusAfterResponse } from "./livePresentation";
+import { useLiveEvents } from "../../hooks/useLiveEvents";
+import { formatByteRate, formatBytes, formatPercent, playerId, playerText } from "../../utils/format";
+import { onlinePlayersSummary, playerDataState, processMemoryPercent, serverFrameSummary, worldStatusAfterResponse } from "./livePresentation";
 
 export function LiveMonitoring({
   auth,
@@ -99,7 +98,7 @@ export function LiveMonitoring({
     setDataError("");
   }, [publishSnapshot]);
   const handleMalformedSnapshot = useCallback(() => setDataError("实时数据格式无效。"), []);
-  const connectionStatus = useLiveEvents(
+  useLiveEvents(
     "/api/events",
     "snapshot",
     handleSnapshot,
@@ -123,53 +122,56 @@ export function LiveMonitoring({
 
   const players = playersFrom(snapshot?.players.data);
   const playerState = playerDataState(snapshot, dataError, players?.length ?? null);
-  const onlinePlayers = onlinePlayersSummary(players ?? [], playerState, snapshot?.players.stale === true);
   const process = snapshot?.metrics.data.process;
-  const liveTitle = liveTitleText(snapshot, dataError, connectionStatus);
-  const liveDotClass = connectionStatus === "open" && snapshot && !snapshot.info.stale ? "status-dot" : "status-dot stale-dot";
-
+  const playerSummary = onlinePlayersSummary(players ?? [], playerState, snapshot?.players.stale);
+  const frameSummary = serverFrameSummary(snapshot?.metrics.data.server);
   return <div className={embedded ? "live-monitoring-panel" : "page-stack live-page"}>
     <section className="section-heading live-monitoring-heading"><div><h2>实时状态</h2><p>服务器状态、性能与在线玩家集中显示。</p></div></section>
-    <section className="live-toolbar">
-      <div className="live-status-summary"><span className={liveDotClass} /><strong>{liveTitle}</strong><small>{liveStatus(snapshot?.info)} · {liveConnectionLabel(connectionStatus)}</small></div>
-      <Button variant="outline" size="icon" type="button" title="立即刷新实时数据" aria-label="立即刷新实时数据" onClick={() => void refresh()}><RefreshCw aria-hidden="true" /></Button>
-    </section>
     {dataError && <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>实时数据不可用</AlertTitle><AlertDescription>{dataError}</AlertDescription></Alert>}
     {actionError && <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>实时管理未完成</AlertTitle><AlertDescription>{actionError}</AlertDescription></Alert>}
     {message && <Alert variant="success" role="status"><CheckCircle2 aria-hidden="true" /><AlertTitle>操作已提交</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
-    <section className="live-metric-group" aria-labelledby="server-runtime-title">
-      <div className="live-metric-group-heading"><h3 id="server-runtime-title">服务器运行</h3><span>进程与在线状态</span></div>
-      <div className="metric-grid live-status-grid" aria-label="实时服务器状态">
-        <article><span>服务器状态</span><strong>{shell ? serverStateLabel(shell.serverState) : "读取中"}</strong><small>{shell ? `检测于 ${new Date(shell.observedAt * 1_000).toLocaleTimeString("zh-CN")}` : "正在读取服务器状态"}</small></article>
-        <article><span>在线玩家</span><strong>{snapshot ? players === null ? "—" : players.length : "读取中"}</strong><small>{sourceLabel(snapshot?.players)}</small></article>
+    <section className="live-metric-group" aria-label="服务器运行指标">
+      <div className="metric-grid live-status-grid" role="group" aria-label="实时服务器状态">
+        <article><span>在线玩家</span><strong>{playerSummary.value}</strong><small>{playerSummary.detail}</small></article>
         <UptimeMetric state={shell?.serverState} startedAt={process?.startedAt} />
-        <article><span>服务器帧率</span><strong>{displayValue(snapshot?.metrics.data.server, ["serverfps", "serverFps", "ServerFPS", "fps"])}</strong><small>{sourceLabel(snapshot?.metrics)}</small></article>
-      </div>
-    </section>
-    <section className="live-metric-group" aria-labelledby="world-runtime-title">
-      <div className="live-metric-group-heading"><h3 id="world-runtime-title">游戏世界</h3><span>{worldError ? "世界快照暂不可用" : "存档数据只读 · 在线玩家来自实时接口"}</span></div>
-      <div className="metric-grid live-status-grid world-status-grid" aria-label="游戏世界状态">
+        <article><span>服务器帧率</span><strong>{frameSummary.value}</strong></article>
         <WorldTimeMetric status={worldStatus} error={worldError} />
-        <article><span>在线玩家</span><strong>{onlinePlayers.value}</strong><small>{onlinePlayers.detail}</small></article>
-        <article><span>玩家 / 公会</span><strong>{worldCountsText(worldStatus, "players", "guilds")}</strong><small>存档实体数量</small></article>
-        <article><span>帕鲁 / 据点</span><strong>{worldCountsText(worldStatus, "pals", "bases")}</strong><small>存档实体数量</small></article>
       </div>
     </section>
-    <section className="live-metric-group" aria-labelledby="host-runtime-title">
-      <div className="live-metric-group-heading"><h3 id="host-runtime-title">主机性能</h3><span>PalServer 进程树</span></div>
-      <div className="metric-grid live-status-grid" aria-label="主机性能状态">
-        <article><span>CPU 使用率</span><strong>{processCpuText(process)}</strong><small>{process?.cpuReady === false ? "首次采样后显示实时值" : "PalServer 进程树的整机占比"}</small></article>
-        <article><span>内存使用</span><strong>{processMemoryText(process)}</strong><small>{process?.pids.length ? "PalServer 进程树内存" : "未检测到 PalServer 进程"}</small></article>
-        <article><span>磁盘读取</span><strong>{processRateText(process, process?.diskReadBytesPerSecond)}</strong><small>{process?.ioReady === false ? "正在建立速率基线" : "PalServer 进程树读取速度"}</small></article>
-        <article><span>磁盘写入</span><strong>{processRateText(process, process?.diskWriteBytesPerSecond)}</strong><small>{process?.ioReady === false ? "正在建立速率基线" : "PalServer 进程树写入速度"}</small></article>
-      </div>
-    </section>
-    <section className="live-info-row" aria-label="服务器附加信息">
-      <span><small>服务器</small><strong>{displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"])}</strong></span>
-      <span><small>版本</small><strong>{displayValue(snapshot?.info.data, ["version", "Version"])}</strong></span>
-    </section>
+    <div className="psc-home-detail-grid">
+      <section className="live-metric-group psc-home-host-card" aria-labelledby="host-runtime-title">
+        <div className="live-metric-group-heading"><div><h3 id="host-runtime-title">主机性能</h3><span>PalServer 进程占用</span></div></div>
+        <div className="psc-host-resource-stack" role="group" aria-label="CPU 与内存状态">
+          <HostResourceRow
+            label="CPU"
+            value={processCpuText(process)}
+            progress={process?.pids.length && process.cpuReady !== false ? Math.min(100, Math.max(0, process.cpuPercent)) : null}
+            detail={process?.cpuReady === false ? "首次采样后显示实时值" : ""}
+          />
+          <HostResourceRow
+            label="内存"
+            value={processMemoryText(process)}
+            progress={processMemoryPercent(process)}
+            detail={processMemoryDetail(process)}
+          />
+        </div>
+        <div className="psc-host-io-grid" role="group" aria-label="磁盘读写状态">
+          <article><span>磁盘读取</span><strong>{processRateText(process, process?.diskReadBytesPerSecond)}</strong>{process?.ioReady === false && <small>正在建立速率基线</small>}</article>
+          <article><span>磁盘写入</span><strong>{processRateText(process, process?.diskWriteBytesPerSecond)}</strong>{process?.ioReady === false && <small>正在建立速率基线</small>}</article>
+        </div>
+      </section>
+      <section className="live-metric-group psc-home-world-card" aria-labelledby="world-runtime-title">
+        <div className="live-metric-group-heading"><div><h3 id="world-runtime-title">存档规模</h3><span>{worldError ? "世界快照暂不可用" : "只读快照，不代表实时状态"}</span></div></div>
+        <div className="metric-grid live-status-grid world-status-grid" role="group" aria-label="存档规模">
+          <article><strong>{worldCountText(worldStatus, "players")}</strong><span>玩家</span></article>
+          <article><strong>{worldCountText(worldStatus, "pals")}</strong><span>帕鲁</span></article>
+          <article><strong>{worldCountText(worldStatus, "guilds")}</strong><span>公会</span></article>
+          <article><strong>{worldCountText(worldStatus, "bases")}</strong><span>据点</span></article>
+        </div>
+      </section>
+    </div>
     <section className="live-section">
-      <div className="section-heading"><div><h2>在线玩家</h2><p>{sourceLabel(snapshot?.players)}。完整 IP 按管理需求显示。</p></div><Users size={22} /></div>
+      <div className="section-heading"><div><h2>在线玩家</h2><p>完整 IP 按管理需求显示。</p></div><Users size={22} /></div>
       {playerState === "loading" || playerState === "error" ? <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><RefreshCw aria-hidden="true" /></EmptyMedia><EmptyTitle>{playerState === "error" ? "在线玩家数据不可用" : "正在读取在线玩家"}</EmptyTitle><EmptyDescription>{playerState === "error" ? "请先检查上方错误信息，然后重新刷新。" : "连接完成后会显示当前在线玩家。"}</EmptyDescription></EmptyHeader></Empty> : playerState === "ready" ? <><div className="psc-player-table-wrap"><Table className="psc-player-table"><TableHeader><TableRow><TableHead>玩家</TableHead><TableHead>Player ID</TableHead><TableHead>IP</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{(players ?? []).map((player, index) => {
         const id = playerId(player) || `unknown-${index}`;
         return <TableRow key={`${id}-${index}`}><TableCell>{playerText(player, ["name", "playerName", "accountName"], "未知玩家")}</TableCell><TableCell>{id}</TableCell><TableCell>{playerText(player, ["ip", "ipAddress"], "不可用")}</TableCell><TableCell><span className="psc-player-actions"><Button variant="outline" size="icon" type="button" title="踢出玩家" aria-label={`踢出玩家 ${id}`} disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX aria-hidden="true" /></Button><Button variant="destructive" size="icon" type="button" title="封禁玩家" aria-label={`封禁玩家 ${id}`} disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop aria-hidden="true" /></Button></span></TableCell></TableRow>;
@@ -214,11 +216,12 @@ function UptimeMetric({ state, startedAt }: { state?: ShellStatus["serverState"]
 
 function WorldTimeMetric({ status, error }: { status: WorldStatus | null; error: string }) {
   const formatted = formatWorldGameTime(status?.gameTimeTicks);
-  return <article><span>世界累计游戏时间</span><strong>{formatted.value}</strong><small>{formatted.detail || error || (status ? "存档未提供游戏时钟" : "正在读取世界时间")}</small></article>;
+  const detail = formatted === "不可用" ? error || (status ? "存档未提供游戏时钟" : "正在读取世界时间") : "";
+  return <article><span>世界累计游戏时间</span><strong>{formatted}</strong>{detail && <small>{detail}</small>}</article>;
 }
 
-function formatWorldGameTime(ticks: number | null | undefined): { value: string; detail: string } {
-  if (typeof ticks !== "number" || !Number.isFinite(ticks) || ticks < 0) return { value: "不可用", detail: "" };
+function formatWorldGameTime(ticks: number | null | undefined): string {
+  if (typeof ticks !== "number" || !Number.isFinite(ticks) || ticks < 0) return "不可用";
   const ticksPerDay = 864_000_000_000;
   const ticksPerHour = 36_000_000_000;
   const ticksPerMinute = 600_000_000;
@@ -226,19 +229,27 @@ function formatWorldGameTime(ticks: number | null | undefined): { value: string;
   const remainder = ticks % ticksPerDay;
   const hours = Math.floor(remainder / ticksPerHour);
   const minutes = Math.floor(remainder % ticksPerHour / ticksPerMinute);
-  return {
-    value: `${days} 天 ${hours} 小时`,
-    detail: `存档游戏时钟 · 第 ${days} 天 ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`,
-  };
+  return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分`;
 }
 
-function worldCountsText(
-  status: WorldStatus | null,
-  left: keyof WorldStatus["counts"],
-  right: keyof WorldStatus["counts"],
-): string {
+function worldCountText(status: WorldStatus | null, key: keyof WorldStatus["counts"]): string {
   if (!status) return "读取中";
-  return `${status.counts[left] ?? "-"} / ${status.counts[right] ?? "-"}`;
+  return String(status.counts[key] ?? "-");
+}
+
+function HostResourceRow({ label, value, progress, detail }: { label: string; value: string; progress: number | null; detail: string }) {
+  return <div className="psc-host-resource">
+    <div><span>{label}</span><strong>{value}</strong></div>
+    {progress !== null && <div
+      className="psc-host-resource-track"
+      role="progressbar"
+      aria-label={`${label} 使用率`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={progress}
+    ><span style={{ width: `${progress}%` }} /></div>}
+    {detail && <small>{detail}</small>}
+  </div>;
 }
 
 function processCpuText(process?: ProcessMetrics) {
@@ -250,6 +261,15 @@ function processCpuText(process?: ProcessMetrics) {
 function processMemoryText(process?: ProcessMetrics) {
   if (!process) return "不可用";
   return process.pids.length ? formatBytes(process.memoryBytes) : "未运行";
+}
+
+function processMemoryDetail(process?: ProcessMetrics): string {
+  if (!process?.pids.length) return "未检测到 PalServer 进程";
+  if (!process.hostMemoryTotalBytes) return "主机内存容量暂不可用";
+  const available = process.hostMemoryAvailableBytes;
+  return available === undefined
+    ? `主机总计 ${formatBytes(process.hostMemoryTotalBytes)}`
+    : `主机可用 ${formatBytes(available)} / 总计 ${formatBytes(process.hostMemoryTotalBytes)}`;
 }
 
 function processRateText(process: ProcessMetrics | undefined, value: number | undefined) {
