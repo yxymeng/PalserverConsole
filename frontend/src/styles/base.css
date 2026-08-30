@@ -37,8 +37,8 @@
   --grid-line: transparent;
   --operation-island: #334f54;
   --operation-island-shadow: rgb(35 57 61 / 16%);
-  --radius: 12px;
-  --radius-sm: 7px;
+  --radius: 16px;
+  --radius-sm: 8px;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 

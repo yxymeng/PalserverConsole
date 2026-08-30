@@ -1,4 +1,4 @@
-import type { WorldPlayerProgress, WorldPlayerProgressField } from "../../api/contracts";
+import type { WorldPlayerProgress, WorldPlayerProgressField, WorldPlayerProgressTotalField } from "../../api/contracts";
 
 export const PLAYER_PROGRESS_LABELS: Record<WorldPlayerProgressField, string> = {
   discoveredPalSpecies: "已发现帕鲁种类",
@@ -51,6 +51,17 @@ export function playerProgressUnavailable(progress: WorldPlayerProgress): string
 export function playerProgressValue(progress: WorldPlayerProgress, field: WorldPlayerProgressField): string | null {
   const value = progress.values[field];
   return value === undefined ? null : number(value);
+}
+
+export function playerProgressTotal(progress: WorldPlayerProgress, field: WorldPlayerProgressField): number | null {
+  const total = playerProgressGameTotal(progress, field);
+  const value = progress.values[field];
+  return total !== null && value !== undefined && total >= value ? total : null;
+}
+
+export function playerProgressGameTotal(progress: WorldPlayerProgress, field: WorldPlayerProgressTotalField): number | null {
+  const total = progress.totals?.[field];
+  return total !== undefined && total > 0 ? total : null;
 }
 
 function number(value: number): string {

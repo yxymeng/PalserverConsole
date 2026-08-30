@@ -1,9 +1,9 @@
-import { AlertTriangle, CheckCircle2, CircleStop, Clock3, Gauge, History, RefreshCw, Send, UserRoundX, Users } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleStop, Clock3, Compass, Gauge, History, Radio, RefreshCw, Send, UserRoundX, Users, Wifi } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { AuthStatus, LiveSnapshot, LiveValue, ProcessMetrics, ShellStatus, WorldStatus } from "../../api/contracts";
-import { isAbortError, requestJson } from "../../api/client";
+import type { AuthStatus, LiveSnapshot, LiveValue, ProcessMetrics, ShellStatus, WorldEntityListResponse, WorldPlayerListItem, WorldStatus } from "../../api/contracts";
+import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { ConfirmActionDialog } from "../../components/ConfirmActionDialog";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Button } from "../../components/ui/button";
@@ -14,7 +14,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { useLiveEvents } from "../../hooks/useLiveEvents";
 import { formatByteRate, formatBytes, formatPercent, playerId, playerText } from "../../utils/format";
-import { onlinePlayersSummary, playerDataState, processMemoryPercent, serverFrameSummary, worldStatusAfterResponse } from "./livePresentation";
+import { onlinePlayersSummary, playerDataState, playerLevelText, playerPingPresentation, playerSyncPresentation, processMemoryPercent, serverFrameSummary, worldPlayerId, worldStatusAfterResponse } from "./livePresentation";
+import { PlayerExplorationDialog, type PlayerExplorationState } from "./PlayerExplorationDialog";
 
 export function LiveMonitoring({
   auth,
@@ -37,6 +38,8 @@ export function LiveMonitoring({
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [pendingPlayerAction, setPendingPlayerAction] = useState<{ kind: "kick" | "ban"; id: string } | null>(null);
+  const [exploration, setExploration] = useState<PlayerExplorationState | null>(null);
+  const explorationSequence = useRef(0);
   const nextRequestSignal = useAbortableRequest();
 
   const publishSnapshot = useCallback((nextSnapshot: LiveSnapshot) => {
@@ -121,13 +124,45 @@ export function LiveMonitoring({
     } finally { setBusy(false); }
   }
 
+  const loadExploration = useCallback(async (playerId: string, playerName: string) => {
+    const sequence = ++explorationSequence.current;
+    setExploration({ playerId, playerName, status: "loading", detail: null, error: "" });
+    try {
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const status = await requestJson<WorldStatus>("/api/world/snapshots/current");
+        if (!status.snapshotId) throw new Error("当前没有可用的世界存档快照，请先在“世界”页面完成只读解析。");
+        try {
+          const query = new URLSearchParams({ page: "1", pageSize: "200", sort: "id", snapshotId: status.snapshotId });
+          const response = await requestJson<WorldEntityListResponse>(`/api/world/players?${query}`);
+          const detail = response.items.find((item): item is WorldPlayerListItem => "progress" in item && (sameStablePlayerId(item.id, playerId) || sameStablePlayerId(item.instanceId, playerId)));
+          if (!detail) throw new ApiRequestError("PLAYER_NOT_FOUND", "在线训练家的 Player ID 未在当前存档快照中找到。可能是玩家刚加入，而存档尚未记录。", true);
+          if (sequence === explorationSequence.current) setExploration({ playerId, playerName, status: "ready", detail, error: "" });
+          return;
+        } catch (caught) {
+          if (caught instanceof ApiRequestError && caught.code === "SNAPSHOT_REPLACED" && attempt === 0) continue;
+          throw caught;
+        }
+      }
+    } catch (caught) {
+      if (sequence !== explorationSequence.current) return;
+      setExploration({
+        playerId,
+        playerName,
+        status: "error",
+        detail: null,
+        error: caught instanceof Error ? caught.message : "玩家探索进度读取失败。",
+      });
+    }
+  }, []);
+
   const players = playersFrom(snapshot?.players.data);
   const playerState = playerDataState(snapshot, dataError, players?.length ?? null);
   const process = snapshot?.metrics.data.process;
   const playerSummary = onlinePlayersSummary(players ?? [], playerState, snapshot?.players.stale);
+  const playerSync = playerSyncPresentation(snapshot?.players);
   const frameSummary = serverFrameSummary(snapshot?.metrics.data.server);
   return <div className={embedded ? "live-monitoring-panel" : "page-stack live-page"}>
-    <section className="section-heading live-monitoring-heading"><div><h2>实时状态</h2><p>服务器状态、性能与在线训练家集中显示。</p></div></section>
+    <section className="section-heading live-monitoring-heading"><div><h2>实时状态</h2></div></section>
     {dataError && <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>实时数据不可用</AlertTitle><AlertDescription>{dataError}</AlertDescription></Alert>}
     {actionError && <Alert variant="destructive"><AlertTriangle aria-hidden="true" /><AlertTitle>实时管理未完成</AlertTitle><AlertDescription>{actionError}</AlertDescription></Alert>}
     {message && <Alert variant="success" role="status"><CheckCircle2 aria-hidden="true" /><AlertTitle>操作已提交</AlertTitle><AlertDescription>{message}</AlertDescription></Alert>}
@@ -171,19 +206,31 @@ export function LiveMonitoring({
         </div>
       </section>
     </div>
-    <section className="live-section">
-      <div className="section-heading"><div><h2>在线训练家</h2><p>完整 IP 按管理需求显示。</p></div><Users size={22} /></div>
-      {playerState === "loading" || playerState === "error" ? <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><RefreshCw aria-hidden="true" /></EmptyMedia><EmptyTitle>{playerState === "error" ? "在线训练家数据不可用" : "正在读取在线训练家"}</EmptyTitle><EmptyDescription>{playerState === "error" ? "请先检查上方错误信息，然后重新刷新。" : "连接完成后会显示当前在线训练家。"}</EmptyDescription></EmptyHeader></Empty> : playerState === "ready" ? <><div className="psc-player-table-wrap"><Table className="psc-player-table"><TableHeader><TableRow><TableHead>训练家</TableHead><TableHead>Player ID</TableHead><TableHead>IP</TableHead><TableHead>操作</TableHead></TableRow></TableHeader><TableBody>{(players ?? []).map((player, index) => {
+    <section className="live-section psc-online-players" aria-labelledby="online-players-title">
+      <header className="psc-player-panel-heading">
+        <div className="psc-player-panel-title">
+          <span className="psc-player-panel-icon"><Users aria-hidden="true" /></span>
+          <div><h2 id="online-players-title">在线训练家 <span>({players?.length ?? 0})</span></h2></div>
+        </div>
+        <span className="psc-player-sync" data-state={playerSync.state}><Radio aria-hidden="true" />{playerSync.label}</span>
+      </header>
+      {playerState === "loading" || playerState === "error" ? <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><RefreshCw aria-hidden="true" /></EmptyMedia><EmptyTitle>{playerState === "error" ? "在线训练家数据不可用" : "正在读取在线训练家"}</EmptyTitle><EmptyDescription>{playerState === "error" ? "请先检查上方错误信息，然后重新刷新。" : "连接完成后会显示当前在线训练家。"}</EmptyDescription></EmptyHeader></Empty> : playerState === "ready" ? <><div className="psc-player-table-wrap"><Table className="psc-player-table"><TableHeader><TableRow><TableHead>训练家</TableHead><TableHead>等级</TableHead><TableHead>连接地址</TableHead><TableHead>延迟 (Ping)</TableHead><TableHead>探索度</TableHead><TableHead className="psc-player-action-heading">快捷操作</TableHead></TableRow></TableHeader><TableBody>{(players ?? []).map((player, index) => {
         const id = playerId(player) || `unknown-${index}`;
-        return <TableRow key={`${id}-${index}`}><TableCell>{playerText(player, ["name", "playerName", "accountName"], "未知训练家")}</TableCell><TableCell>{id}</TableCell><TableCell>{playerText(player, ["ip", "ipAddress"], "不可用")}</TableCell><TableCell><span className="psc-player-actions"><Button variant="outline" size="icon" type="button" title="踢出训练家" aria-label={`踢出训练家 ${id}`} disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX aria-hidden="true" /></Button><Button variant="destructive" size="icon" type="button" title="封禁训练家" aria-label={`封禁训练家 ${id}`} disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop aria-hidden="true" /></Button></span></TableCell></TableRow>;
+        const savePlayerId = worldPlayerId(player);
+        const ping = playerPingPresentation(player, snapshot?.players.source);
+        const name = playerText(player, ["name", "playerName", "accountName"], "未知训练家");
+        return <TableRow key={`${id}-${index}`}><TableCell><span className="psc-player-identity"><span className="psc-player-online-dot" aria-hidden="true" /><span><strong>{name}</strong><small>{id}</small></span></span></TableCell><TableCell><span className="psc-player-level">{playerLevelText(player)}</span></TableCell><TableCell><span className="psc-player-ip">{playerText(player, ["ip", "ipAddress"], "不可用")}</span></TableCell><TableCell><span className="psc-player-ping" data-tone={ping.tone}><Wifi aria-hidden="true" />{ping.value}</span></TableCell><TableCell><Button className="psc-player-exploration-trigger" variant="ghost" size="sm" type="button" disabled={!savePlayerId} title={savePlayerId ? `查看 ${name} 的探索进度` : "实时数据未提供可关联存档的 Player ID"} onClick={() => void loadExploration(savePlayerId, name)}><Compass aria-hidden="true" />探索进度</Button></TableCell><TableCell><span className="psc-player-actions"><Button variant="outline" size="sm" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX aria-hidden="true" />移出</Button><Button variant="destructive" size="sm" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop aria-hidden="true" />封禁</Button></span></TableCell></TableRow>;
       })}</TableBody></Table></div><div className="psc-player-list">{(players ?? []).map((player, index) => {
         const id = playerId(player) || `unknown-${index}`;
-        return <article className="psc-player-card" key={`mobile-${id}-${index}`}><div><strong>{playerText(player, ["name", "playerName", "accountName"], "未知训练家")}</strong><small>在线训练家</small></div><dl><div><dt>Player ID</dt><dd>{id}</dd></div><div><dt>IP</dt><dd>{playerText(player, ["ip", "ipAddress"], "不可用")}</dd></div></dl><div className="psc-player-card-actions"><Button variant="outline" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX data-icon="inline-start" aria-hidden="true" />踢出</Button><Button variant="destructive" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop data-icon="inline-start" aria-hidden="true" />封禁</Button></div></article>;
+        const savePlayerId = worldPlayerId(player);
+        const ping = playerPingPresentation(player, snapshot?.players.source);
+        const name = playerText(player, ["name", "playerName", "accountName"], "未知训练家");
+        return <article className="psc-player-card" key={`mobile-${id}-${index}`}><div className="psc-player-card-heading"><span className="psc-player-identity"><span className="psc-player-online-dot" aria-hidden="true" /><strong>{name}</strong></span><span className="psc-player-card-live">在线</span></div><div className="psc-player-card-stats"><span className="psc-player-level">{playerLevelText(player)}</span><span className="psc-player-ping" data-tone={ping.tone}><Wifi aria-hidden="true" />{ping.value}</span></div><dl><div><dt>Player ID</dt><dd>{id}</dd></div><div><dt>连接地址</dt><dd>{playerText(player, ["ip", "ipAddress"], "不可用")}</dd></div></dl><Button className="psc-player-exploration-trigger" variant="ghost" type="button" disabled={!savePlayerId} title={savePlayerId ? `查看 ${name} 的探索进度` : "实时数据未提供可关联存档的 Player ID"} onClick={() => void loadExploration(savePlayerId, name)}><Compass data-icon="inline-start" aria-hidden="true" />探索进度</Button><div className="psc-player-card-actions"><Button variant="outline" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "kick", id })}><UserRoundX data-icon="inline-start" aria-hidden="true" />移出</Button><Button variant="destructive" type="button" disabled={busy || id.startsWith("unknown-")} onClick={() => setPendingPlayerAction({ kind: "ban", id })}><CircleStop data-icon="inline-start" aria-hidden="true" />封禁</Button></div></article>;
       })}</div></> : <Empty className="psc-empty"><EmptyHeader><EmptyMedia variant="icon"><Users aria-hidden="true" /></EmptyMedia><EmptyTitle>当前没有在线训练家</EmptyTitle><EmptyDescription>连接正常后，新加入的训练家会显示在这里。</EmptyDescription></EmptyHeader></Empty>}
+      <form className="psc-player-broadcast" onSubmit={(event) => { event.preventDefault(); if (announcement.trim()) void action("/api/live/announce", { message: announcement.trim() }); }}><Input aria-label="服务器公告" maxLength={500} value={announcement} onChange={(event) => setAnnouncement(event.target.value)} placeholder="输入全服广播消息，例如：10 分钟后进行服务器维护" /><Button disabled={busy || !announcement.trim()} type="submit"><Send data-icon="inline-start" aria-hidden="true" />发送广播</Button></form>
     </section>
-    <section className="live-actions psc-live-actions">
-      <FieldGroup className="psc-live-action-grid">
-        <form onSubmit={(event) => { event.preventDefault(); if (announcement.trim()) void action("/api/live/announce", { message: announcement.trim() }); }}><Field><FieldLabel htmlFor="announcement">服务器公告</FieldLabel><div className="psc-field-action"><Input id="announcement" maxLength={500} value={announcement} onChange={(event) => setAnnouncement(event.target.value)} placeholder="输入公告内容" /><Button disabled={busy || !announcement.trim()} type="submit"><Send data-icon="inline-start" aria-hidden="true" />发送</Button></div></Field></form>
+    <section className="live-actions psc-live-actions" aria-label="封禁管理">
+      <FieldGroup className="psc-live-action-grid psc-live-action-grid-single">
         <form onSubmit={(event) => { event.preventDefault(); if (unbanId.trim()) void action(`/api/live/players/${encodeURIComponent(unbanId.trim())}/unban`); }}><Field><FieldLabel htmlFor="unban-id">解除封禁 User ID</FieldLabel><div className="psc-field-action"><Input id="unban-id" maxLength={256} value={unbanId} onChange={(event) => setUnbanId(event.target.value)} placeholder="输入 User ID" /><Button variant="outline" disabled={busy || !unbanId.trim()} type="submit">解除封禁</Button></div></Field></form>
       </FieldGroup>
     </section>
@@ -200,6 +247,11 @@ export function LiveMonitoring({
         const { kind, id } = pendingPlayerAction;
         void action(`/api/live/players/${encodeURIComponent(id)}/${kind}`, { message: kind === "ban" ? "管理员已封禁此账号。" : "管理员已将你踢出服务器。" });
       }}
+    />
+    <PlayerExplorationDialog
+      state={exploration}
+      onClose={() => { explorationSequence.current += 1; setExploration(null); }}
+      onRetry={() => { if (exploration) void loadExploration(exploration.playerId, exploration.playerName); }}
     />
   </div>;
 }
@@ -306,4 +358,8 @@ function playersFrom(data: unknown): Record<string, unknown>[] | null {
   }
   if (data && typeof data === "object" && Array.isArray((data as Record<string, unknown>).players)) return playersFrom((data as Record<string, unknown>).players);
   return null;
+}
+
+function sameStablePlayerId(left: string, right: string): boolean {
+  return left.replace(/-/g, "").toLowerCase() === right.replace(/-/g, "").toLowerCase();
 }

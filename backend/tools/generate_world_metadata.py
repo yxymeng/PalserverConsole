@@ -22,6 +22,27 @@ PALWORLD_SAVE_TOOLS_FILES = {
         "b9172f389bf56a307194d25b70aca23f8610ef81de32bb44bda827f65b83add1",
     ),
 }
+PALWORLD_SAVE_TOOLS_PROGRESS_REVISION = "79da8fb0ef289027217ea2cd66c4e1364a319898"
+PALWORLD_SAVE_TOOLS_PROGRESS_FILES = {
+    "fastTravel": (
+        "resources/game_data/fast_travel_points.json",
+        "4361025dd056ba595b59a8bf76bf714437154e270f69f45e2c8c67bea2f42981",
+    ),
+    "exploredAreas": (
+        "resources/game_data/world_map_areas.json",
+        "a6fbb258cc33890c3098b069d340a775bebb23f123b8ad79713fd68b086bcce4",
+    ),
+}
+PALWORLD_MODDING_KIT_REPOSITORY = "https://github.com/localcc/PalworldModdingKit"
+PALWORLD_MODDING_KIT_REVISION = "e6632458b97af0083eb81715775651b08104ef6a"
+PALWORLD_BOSS_TYPE_FILE = (
+    "Source/Pal/Public/EPalBossType.h",
+    "0b9fd73e8eb876357b1e3664ac94ba0af975e866ffafe175445104f937264cae",
+)
+PALWORLD_OILRIG_TYPE_FILE = (
+    "Source/Pal/Public/EPalOilrigType.h",
+    "df4c8f4c0a37ec41ecb2204bbb39c75c72b0c80522d5b78e7185694e5c1edadb",
+)
 PALWORLD_SERVER_TOOL_REPOSITORY = "https://github.com/zaigie/palworld-server-tool"
 PALWORLD_SERVER_TOOL_REVISION = "f45a48ef25ce08a5311a27e55b17062ba0bb4362"
 PALWORLD_SERVER_TOOL_SKILLS = (
@@ -73,6 +94,7 @@ CHARACTER_NAME_MARKUP_RE = re.compile(
     r"<characterName id=\|([^|<>]+)\|/?>"
 )
 DATA_VERSION = "2026.08.25.3"
+PROGRESS_TOTALS_DATA_VERSION = "2026.08.30.2"
 OUTPUT = (
     Path(__file__).resolve().parents[1]
     / "palserver_console/metadata/data/world-metadata-v1.json"
@@ -118,6 +140,37 @@ def main() -> None:
         PALWORLD_ITEM_DIRECTORY / PALWORLD_ITEM_FILES["itemNamesZhHans"][0],
         PALWORLD_ITEM_FILES["itemNamesZhHans"][1],
     )
+    fast_travel = _pinned_json(
+        PALWORLD_SAVE_TOOLS_REPOSITORY,
+        PALWORLD_SAVE_TOOLS_PROGRESS_REVISION,
+        *PALWORLD_SAVE_TOOLS_PROGRESS_FILES["fastTravel"],
+    )
+    map_areas = _pinned_json(
+        PALWORLD_SAVE_TOOLS_REPOSITORY,
+        PALWORLD_SAVE_TOOLS_PROGRESS_REVISION,
+        *PALWORLD_SAVE_TOOLS_PROGRESS_FILES["exploredAreas"],
+    )
+    boss_types = _pinned_text(
+        PALWORLD_MODDING_KIT_REPOSITORY,
+        PALWORLD_MODDING_KIT_REVISION,
+        *PALWORLD_BOSS_TYPE_FILE,
+    )
+    oilrig_types = _pinned_text(
+        PALWORLD_MODDING_KIT_REPOSITORY,
+        PALWORLD_MODDING_KIT_REVISION,
+        *PALWORLD_OILRIG_TYPE_FILE,
+    )
+    area_rows = map_areas.get("areas")
+    if not isinstance(area_rows, list) or not all(
+        isinstance(value, str) for value in area_rows
+    ):
+        raise ValueError("Unexpected world_map_areas.json areas payload.")
+    progress_totals = {
+        "fastTravel": len(fast_travel),
+        "exploredAreas": len(area_rows),
+        "towerBosses": _tower_boss_total(boss_types),
+        "oilRigLocations": _oil_rig_total(oilrig_types),
+    }
     pals: dict[str, object] = {}
     for raw in payload["pals"]:
         work = {
@@ -235,12 +288,46 @@ def main() -> None:
                     for name, (path, digest) in PALWORLD_ITEM_FILES.items()
                 },
             },
+            "palworldProgress": {
+                "repository": PALWORLD_SAVE_TOOLS_REPOSITORY,
+                "revision": PALWORLD_SAVE_TOOLS_PROGRESS_REVISION,
+                "license": "MIT",
+                "files": {
+                    name: {"path": path, "sha256": digest}
+                    for name, (path, digest) in PALWORLD_SAVE_TOOLS_PROGRESS_FILES.items()
+                },
+            },
+            "palworldModdingKit": {
+                "repository": PALWORLD_MODDING_KIT_REPOSITORY,
+                "revision": PALWORLD_MODDING_KIT_REVISION,
+                "license": "MIT",
+                "files": {
+                    "towerBossTypes": {
+                        "path": PALWORLD_BOSS_TYPE_FILE[0],
+                        "sha256": PALWORLD_BOSS_TYPE_FILE[1],
+                    },
+                    "oilRigTypes": {
+                        "path": PALWORLD_OILRIG_TYPE_FILE[0],
+                        "sha256": PALWORLD_OILRIG_TYPE_FILE[1],
+                    },
+                },
+            },
         },
         "generatedBy": "backend/tools/generate_world_metadata.py",
+        "progressTotalsDataVersion": PROGRESS_TOTALS_DATA_VERSION,
+        "progressTotals": progress_totals,
         "collections": collections,
         "integrity": {
             "algorithm": "sha256",
             "collectionsSha256": hashlib.sha256(canonical).hexdigest(),
+            "progressTotalsSha256": hashlib.sha256(
+                json.dumps(
+                    progress_totals,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest(),
             "counts": {name: len(values) for name, values in collections.items()},
         },
     }
@@ -289,6 +376,56 @@ def _pinned_json(repository: str, revision: str, path: str, expected_sha256: str
     if not isinstance(payload, dict):
         raise ValueError(f"Unexpected {path} payload.")
     return payload
+
+
+def _pinned_text(
+    repository: str, revision: str, path: str, expected_sha256: str
+) -> str:
+    url = (
+        f"{repository.replace('https://github.com/', 'https://raw.githubusercontent.com/')}"
+        f"/{revision}/{path}"
+    )
+    source: bytes = urllib.request.urlopen(url, timeout=30).read()  # noqa: S310
+    actual_sha256 = hashlib.sha256(source).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise ValueError(f"Unexpected {path} SHA-256: {actual_sha256}")
+    return source.decode("utf-8")
+
+
+def _tower_boss_total(source: str) -> int:
+    match = re.search(
+        r"enum class EPalBossType\s*:\s*uint8\s*\{(?P<body>.*?)\};", source, re.S
+    )
+    if match is None:
+        raise ValueError("Unexpected EPalBossType enum payload.")
+    members = [
+        value
+        for value in re.findall(
+            r"(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*,?\s*$", match.group("body")
+        )
+        if value not in {"None", "Max"}
+    ]
+    if not members:
+        raise ValueError("EPalBossType enum has no gameplay members.")
+    return len(members)
+
+
+def _oil_rig_total(source: str) -> int:
+    match = re.search(
+        r"enum class EPalOilrigType\s*:\s*uint8\s*\{(?P<body>.*?)\};", source, re.S
+    )
+    if match is None:
+        raise ValueError("Unexpected EPalOilrigType enum payload.")
+    members = [
+        value
+        for value in re.findall(
+            r"(?m)^\s*([A-Za-z][A-Za-z0-9_]*)\s*,?\s*$", match.group("body")
+        )
+        if value != "Debug"
+    ]
+    if not members:
+        raise ValueError("EPalOilrigType enum has no gameplay members.")
+    return len(members)
 
 
 def _fmodel_rows(path: Path, expected_sha256: str | None = None) -> dict[str, object]:

@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import ProfileError, ServerProfile
+from ..metadata import WorldMetadataError, load_world_metadata
 from ..metadata.loader import METADATA_SCHEMA_NAME, METADATA_SCHEMA_VERSION
 from ..persistence import Database
 from ..steam import is_reparse_point
@@ -63,6 +64,26 @@ def _worker_output_text(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value or "")
+
+
+def _with_player_progress_totals(item: Mapping[str, object]) -> dict[str, object]:
+    result = dict(item)
+    progress = item.get("progress")
+    if not isinstance(progress, Mapping):
+        return result
+    try:
+        metadata = load_world_metadata()
+        totals = metadata.player_progress_totals
+        data_version: str | None = metadata.player_progress_totals_data_version
+    except WorldMetadataError:
+        totals = {}
+        data_version = None
+    result["progress"] = {
+        **progress,
+        "totals": dict(totals),
+        "totalsDataVersion": data_version,
+    }
+    return result
 
 
 @dataclass(frozen=True)
@@ -503,6 +524,8 @@ class WorldSnapshotService:
             status=status,
             sort=sort,
         )
+        if resource == "players":
+            items = [_with_player_progress_totals(item) for item in items]
         state = self._status_for_snapshot(current)
         return {
             "items": items,
@@ -699,7 +722,7 @@ class WorldSnapshotService:
             raise WorldDataError("PLAYER_NOT_FOUND", "玩家不存在于当前存档缓存。")
         state = self._status_for_snapshot(current)
         return {
-            **result,
+            **_with_player_progress_totals(result),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],
@@ -723,7 +746,7 @@ class WorldSnapshotService:
             raise WorldDataError("WORLD_ENTITY_NOT_FOUND", "实体不存在于当前存档缓存。")
         state = self._status_for_snapshot(current)
         response: dict[str, object] = {
-            **result,
+            **(_with_player_progress_totals(result) if resource == "players" else result),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],

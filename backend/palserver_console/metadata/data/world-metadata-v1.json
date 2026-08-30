@@ -70,9 +70,46 @@
           "sha256": "b37500780c6f9183753cd1a48de63f61814d38676c55561211b02938c57f1ea7"
         }
       }
+    },
+    "palworldProgress": {
+      "repository": "https://github.com/deafdudecomputers/PalworldSaveTools",
+      "revision": "79da8fb0ef289027217ea2cd66c4e1364a319898",
+      "license": "MIT",
+      "files": {
+        "fastTravel": {
+          "path": "resources/game_data/fast_travel_points.json",
+          "sha256": "4361025dd056ba595b59a8bf76bf714437154e270f69f45e2c8c67bea2f42981"
+        },
+        "exploredAreas": {
+          "path": "resources/game_data/world_map_areas.json",
+          "sha256": "a6fbb258cc33890c3098b069d340a775bebb23f123b8ad79713fd68b086bcce4"
+        }
+      }
+    },
+    "palworldModdingKit": {
+      "repository": "https://github.com/localcc/PalworldModdingKit",
+      "revision": "e6632458b97af0083eb81715775651b08104ef6a",
+      "license": "MIT",
+      "files": {
+        "towerBossTypes": {
+          "path": "Source/Pal/Public/EPalBossType.h",
+          "sha256": "0b9fd73e8eb876357b1e3664ac94ba0af975e866ffafe175445104f937264cae"
+        },
+        "oilRigTypes": {
+          "path": "Source/Pal/Public/EPalOilrigType.h",
+          "sha256": "df4c8f4c0a37ec41ecb2204bbb39c75c72b0c80522d5b78e7185694e5c1edadb"
+        }
+      }
     }
   },
   "generatedBy": "backend/tools/generate_world_metadata.py",
+  "progressTotalsDataVersion": "2026.08.30.2",
+  "progressTotals": {
+    "fastTravel": 174,
+    "exploredAreas": 123,
+    "towerBosses": 13,
+    "oilRigLocations": 3
+  },
   "collections": {
     "pals": {
       "Alpaca": {
@@ -44936,6 +44973,7 @@
   "integrity": {
     "algorithm": "sha256",
     "collectionsSha256": "da1f9603d4364f435a3f7c48dacee59463d3af4430a5d1b86c4e9817ee13a623",
+    "progressTotalsSha256": "689dd594cf840fb471684712c8751007f8bf5553d6489a4b6ac7f6493a70fb25",
     "counts": {
       "pals": 753,
       "skills": 2280,

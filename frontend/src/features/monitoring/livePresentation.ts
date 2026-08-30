@@ -1,8 +1,13 @@
-import type { LiveSnapshot, ProcessMetrics, WorldStatus } from "../../api/contracts";
+import type { LiveSnapshot, LiveValue, ProcessMetrics, WorldStatus } from "../../api/contracts";
 import type { LiveConnectionStatus } from "../../hooks/useLiveEvents";
 import { playerText } from "../../utils/format";
 
 export type PlayerDataState = "loading" | "error" | "empty" | "ready";
+export type PlayerPingTone = "good" | "medium" | "high" | "unavailable";
+
+export function worldPlayerId(player: Record<string, unknown>): string {
+  return playerText(player, ["playerId", "playerUid"], "");
+}
 
 export function liveTitleText(snapshot: LiveSnapshot | null, error: string, connectionStatus: LiveConnectionStatus): string {
   if (error) return "实时数据不可用";
@@ -38,6 +43,30 @@ export function onlinePlayersSummary(
   return { value: `${players.length} 人`, detail: stale ? `上次在线：${detail}` : detail };
 }
 
+export function playerLevelText(player: Record<string, unknown>): string {
+  const level = playerNumber(player, ["level", "playerLevel"]);
+  return level !== null && level > 0 ? `Lv.${Math.trunc(level)}` : "不可用";
+}
+
+export function playerPingPresentation(
+  player: Record<string, unknown>,
+  source?: string,
+): { value: string; tone: PlayerPingTone } {
+  if (source?.toLowerCase() !== "rest") return { value: "不可用", tone: "unavailable" };
+  const ping = playerNumber(player, ["ping", "latency"]);
+  if (ping === null || ping < 0) return { value: "不可用", tone: "unavailable" };
+  const value = `${ping.toLocaleString("zh-CN", { maximumFractionDigits: 1 })} ms`;
+  return { value, tone: ping < 50 ? "good" : ping < 100 ? "medium" : "high" };
+}
+
+export function playerSyncPresentation(value?: LiveValue<unknown>): { label: string; state: string } {
+  if (!value) return { label: "正在连接", state: "loading" };
+  if (value.stale || value.errorCode) return { label: "数据不可用", state: "error" };
+  if (value.source.toLowerCase() === "rest") return { label: "实时同步", state: "live" };
+  if (value.source.toLowerCase() === "rcon") return { label: "RCON 降级", state: "fallback" };
+  return { label: "实时数据", state: "live" };
+}
+
 export function worldStatusAfterResponse(status: WorldStatus | null, error: string): WorldStatus | null {
   return error ? null : status;
 }
@@ -57,4 +86,15 @@ export function serverFrameSummary(server?: Record<string, unknown>): { value: s
   if (!Number.isFinite(fps) || fps <= 0) return { value: "不可用" };
   const precision = Number.isInteger(fps) ? 0 : 1;
   return { value: `${fps.toFixed(precision)} fps` };
+}
+
+function playerNumber(player: Record<string, unknown>, keys: string[]): number | null {
+  const entries = Object.entries(player);
+  for (const key of keys) {
+    const raw = player[key] ?? entries.find(([actual]) => actual.toLowerCase() === key.toLowerCase())?.[1];
+    if (raw === undefined || raw === null || String(raw).trim() === "") continue;
+    const value = typeof raw === "number" ? raw : Number.parseFloat(String(raw));
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
 }

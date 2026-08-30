@@ -5,9 +5,13 @@ import {
   liveTitleText,
   onlinePlayersSummary,
   playerDataState,
+  playerLevelText,
+  playerPingPresentation,
+  playerSyncPresentation,
   processMemoryPercent,
   serverFrameSummary,
   worldStatusAfterResponse,
+  worldPlayerId,
 } from "./livePresentation";
 
 const snapshot = {
@@ -86,6 +90,29 @@ test("世界快照 success -> failure -> success 不保留旧数据", () => {
   error = "";
   status = worldStatusAfterResponse(nextWorldStatus, error);
   expect(status?.gameTimeTicks).toBe(nextWorldStatus.gameTimeTicks);
+});
+
+test("在线训练家等级与 Ping 不使用参考仓库的模拟默认值", () => {
+  expect(playerLevelText({ level: 42 })).toBe("Lv.42");
+  expect(playerLevelText({})).toBe("不可用");
+  expect(playerPingPresentation({ ping: 28 }, "rest")).toEqual({ value: "28 ms", tone: "good" });
+  expect(playerPingPresentation({ ping: 78.5 }, "rest")).toEqual({ value: "78.5 ms", tone: "medium" });
+  expect(playerPingPresentation({ ping: 128 }, "rest")).toEqual({ value: "128 ms", tone: "high" });
+  expect(playerPingPresentation({ ping: 28 }, "rcon")).toEqual({ value: "不可用", tone: "unavailable" });
+  expect(playerPingPresentation({}, "rest")).toEqual({ value: "不可用", tone: "unavailable" });
+});
+
+test("在线训练家同步徽章区分 REST、RCON 与过期数据", () => {
+  expect(playerSyncPresentation()).toEqual({ label: "正在连接", state: "loading" });
+  expect(playerSyncPresentation({ data: [], source: "rest", observedAt: 1, stale: false, errorCode: null })).toEqual({ label: "实时同步", state: "live" });
+  expect(playerSyncPresentation({ data: [], source: "rcon", observedAt: 1, stale: false, errorCode: null })).toEqual({ label: "RCON 降级", state: "fallback" });
+  expect(playerSyncPresentation({ data: [], source: "rest", observedAt: 1, stale: true, errorCode: "REST_TIMEOUT" })).toEqual({ label: "数据不可用", state: "error" });
+});
+
+test("探索进度只使用可关联存档的 PlayerUId，不使用管理 User ID 或姓名猜配", () => {
+  expect(worldPlayerId({ playerId: "save-player-id", userId: "admin-user-id", name: "Alice" })).toBe("save-player-id");
+  expect(worldPlayerId({ playerUid: "rcon-player-id", steamId: "steam-id" })).toBe("rcon-player-id");
+  expect(worldPlayerId({ userId: "admin-user-id", name: "Alice" })).toBe("");
 });
 
 test("内存进度使用服务器主机真实物理内存计算并限制在百分比范围内", () => {

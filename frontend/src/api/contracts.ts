@@ -164,10 +164,13 @@ export type WorldPlayerListItem = {
   lastRecordedAt: string | null; progress: WorldPlayerProgress;
 };
 export type WorldPlayerProgressField = "discoveredPalSpecies" | "capturedPals" | "fastTravel" | "relics" | "memos" | "exploredAreas" | "fieldBosses" | "towerBosses" | "dungeonClears" | "oilRigClears" | "technologyPoints" | "ancientTechnologyPoints" | "recipes";
+export type WorldPlayerProgressTotalField = WorldPlayerProgressField | "oilRigLocations";
 export type WorldPlayerProgress = {
   state: "complete" | "partial" | "unavailable";
   values: Partial<Record<WorldPlayerProgressField, number>>;
   unavailable: WorldPlayerProgressField[];
+  totals?: Partial<Record<WorldPlayerProgressTotalField, number>>;
+  totalsDataVersion?: string | null;
 };
 export type WorldPalListItem = {
   id: string; ownerPlayerId: string | null; characterId: string; nickname: string | null; level: number | null;

@@ -11,13 +11,11 @@ import { LiveMonitoring } from "../monitoring/LiveMonitoring";
 import { serverStateLabel } from "../server/labels";
 import { ServerControlPanel } from "../server/ServerControlPanel";
 
-export function Overview({ shell, auth, onOpenMaintenance }: { shell: ShellStatus | null; auth: AuthStatus; onOpenMaintenance: () => void }) {
-  const [shellStatus, setShellStatus] = useState(shell);
+export function Overview({ shell, auth, onOpenMaintenance, onShellStatusChange }: { shell: ShellStatus | null; auth: AuthStatus; onOpenMaintenance: () => void; onShellStatusChange: (status: ShellStatus) => void }) {
   const [config, setConfig] = useState<ConfigDocument | null>(null);
   const [liveSnapshot, setLiveSnapshot] = useState<LiveSnapshot | null>(null);
   const nextConfigSignal = useAbortableRequest();
 
-  useEffect(() => setShellStatus(shell), [shell]);
   useEffect(() => {
     requestJson<ConfigDocument>("/api/config/current", { signal: nextConfigSignal() })
       .then(setConfig)
@@ -33,10 +31,10 @@ export function Overview({ shell, auth, onOpenMaintenance }: { shell: ShellStatu
           <AlertDescription>仅在可信内网使用，禁止将 PalServerConsole 暴露到公网。</AlertDescription>
         </Alert>
       )}
-      <HomeHero status={shellStatus} config={config} snapshot={liveSnapshot}>
-        <ServerControlPanel auth={auth} initialStatus={shellStatus} onStatusChange={setShellStatus} />
+      <HomeHero status={shell} config={config} snapshot={liveSnapshot}>
+        <ServerControlPanel auth={auth} initialStatus={shell} onStatusChange={onShellStatusChange} />
       </HomeHero>
-      <LiveMonitoring auth={auth} embedded shell={shellStatus} onSnapshot={setLiveSnapshot} />
+      <LiveMonitoring auth={auth} embedded shell={shell} onSnapshot={setLiveSnapshot} />
       <OperationalHealthNotice onOpenMaintenance={onOpenMaintenance} />
     </div>
   );

@@ -39,7 +39,11 @@ from palserver_console.world.cache import (
     validate_cache_file,
 )
 from palserver_console.world.pal_care_species import max_full_stomach
-from palserver_console.world.service import WorldDataError, WorldSnapshotService
+from palserver_console.world.service import (
+    WorldDataError,
+    WorldSnapshotService,
+    _with_player_progress_totals,
+)
 
 
 def _profile_fixture(tmp_path: Path) -> tuple[Database, Path, Path, Path]:
@@ -445,6 +449,21 @@ def test_synthetic_player_progress_distinguishes_complete_partial_missing_and_ab
     assert detail["progress"] == complete
 
 
+def test_player_progress_response_adds_versioned_game_resource_totals() -> None:
+    result = _with_player_progress_totals(
+        {"progress": world_cache._player_progress(_complete_progress_save())}
+    )
+    progress = cast(dict[str, object], result["progress"])
+
+    assert progress["totals"] == {
+        "fastTravel": 174,
+        "exploredAreas": 123,
+        "towerBosses": 13,
+        "oilRigLocations": 3,
+    }
+    assert progress["totalsDataVersion"] == "2026.08.30.2"
+
+
 def test_real_derived_player_progress_golden_baseline() -> None:
     fixture_path = (
         Path(__file__).parents[2] / "fixtures" / "golden" / "player-progress-v1.json"
@@ -568,6 +587,8 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
             "Wood": ItemMetadata(name="木材", category="材料", rarity="普通"),
             "FutureOre": ItemMetadata(name=None, category="矿石", rarity="稀有"),
         },
+        player_progress_totals={},
+        player_progress_totals_data_version="test-progress",
         _pals_casefold={},
         _skills_casefold={},
         _items_casefold={
@@ -942,6 +963,8 @@ def test_inventory_world_locations_scopes_and_group_summaries(
         pals={},
         skills={},
         items={"Wood": ItemMetadata(name="木材", category="材料", rarity="普通")},
+        player_progress_totals={},
+        player_progress_totals_data_version="test-progress",
         _pals_casefold={},
         _skills_casefold={},
         _items_casefold={

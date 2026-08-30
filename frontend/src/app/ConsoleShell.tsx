@@ -1,5 +1,5 @@
 import { Activity, Database, FileCog, LogOut, Wrench } from "lucide-react";
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { requestJson } from "../api/client";
@@ -70,17 +70,20 @@ export function ConsoleShell({
 }) {
   const [active, setActive] = useState<PageKey>(initialPage);
   const [configWorkspace, setConfigWorkspace] = useState<"game" | "instance">("game");
+  const [currentShell, setCurrentShell] = useState(shell);
+  useEffect(() => setCurrentShell(shell), [shell]);
   return (
     <div className="psc-shell">
       <ConsoleLayout
         active={active}
         auth={auth}
-        shell={shell}
+        shell={currentShell}
         theme={theme}
         onActiveChange={setActive}
         configWorkspace={configWorkspace}
         onConfigWorkspaceChange={setConfigWorkspace}
         onAuthChanged={onAuthChanged}
+        onShellStatusChange={setCurrentShell}
         onThemeToggle={onThemeToggle}
       />
     </div>
@@ -96,6 +99,7 @@ function ConsoleLayout({
   configWorkspace,
   onConfigWorkspaceChange,
   onAuthChanged,
+  onShellStatusChange,
   onThemeToggle,
 }: {
   active: PageKey;
@@ -106,6 +110,7 @@ function ConsoleLayout({
   configWorkspace: "game" | "instance";
   onConfigWorkspaceChange: (workspace: "game" | "instance") => void;
   onAuthChanged: () => void;
+  onShellStatusChange: (status: ShellStatus) => void;
   onThemeToggle: () => void;
 }) {
   const pageTitle = NAVIGATION.find((item) => item.key === active)?.label || "首页";
@@ -142,7 +147,7 @@ function ConsoleLayout({
 
       <main className="psc-main" aria-label={`${pageTitle}页面`}>
         <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={0} blur="3px">
-          {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} />}
+          {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} onShellStatusChange={onShellStatusChange} />}
           {active === "world" && (
             <PageLoadBoundary errorTitle="世界界面加载失败" retryLabel="重试加载世界" onRetry={() => retryPage("world")}>
               <Suspense fallback={<PageSkeleton page="world" label="正在加载世界界面" />}>
