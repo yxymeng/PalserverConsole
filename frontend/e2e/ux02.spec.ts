@@ -85,7 +85,7 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   await expect(hostStatus).toContainText("2.0 KB/秒");
   const worldStatus = page.getByLabel("游戏世界状态");
   await expect(worldStatus).not.toContainText("世界存档");
-  await expect(worldStatus).toContainText("在线玩家");
+  await expect(worldStatus).toContainText("在线训练家");
   await expect(worldStatus).toContainText("1 人");
   await expect(worldStatus).toContainText("测试玩家");
   await expect(worldStatus).toContainText("128 天 1 小时");
@@ -94,12 +94,10 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   if (testInfo.project.name === "mobile") {
     await expect(page.locator(".psc-player-card")).toBeVisible();
     await expect(page.locator(".psc-player-table-wrap")).toBeHidden();
-    await page.getByRole("button", { name: "打开菜单" }).click();
     const navigation = page.getByRole("navigation", { name: "主导航" });
-    await expect(page.locator('.brand-mark img[src="/zoe-console-icon.png"]')).toBeVisible();
     await expect(navigation.getByRole("button")).toHaveCount(4);
     await navigation.getByRole("button", { name: "首页" }).click();
-    await expect(navigation).toBeHidden();
+    await expect(navigation).toBeVisible();
   } else {
     await expect(page.locator(".psc-player-table-wrap")).toBeVisible();
     await expect(page.locator(".psc-player-list")).toBeHidden();

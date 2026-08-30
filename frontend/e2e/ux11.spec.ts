@@ -21,17 +21,16 @@ async function routeShell(page: Page) {
   await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
 }
 
-async function openWorldData(page: Page, mobile: boolean) {
+async function openWorldData(page: Page) {
   await page.goto("/");
-  if (mobile) await page.getByTitle("打开菜单").click();
-  await page.getByRole("button", { name: "世界数据" }).click();
+  await page.getByRole("button", { name: "世界", exact: true }).click();
 }
 
-test("UX-11：无可用快照时六个工作区都明确说明影响", async ({ page }, testInfo) => {
+test("UX-11：无可用快照时六个工作区都明确说明影响", async ({ page }) => {
   await routeShell(page);
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: { ...status, snapshotId: null, parseStatus: "unavailable", overview: null } }));
 
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(page.getByRole("heading", { name: "存档快照不可用" })).toBeVisible();
   await expect(page.locator(".world-overview-empty")).toContainText("总览等待可用快照");
 
@@ -43,7 +42,7 @@ test("UX-11：无可用快照时六个工作区都明确说明影响", async ({ 
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
-test("UX-11：请求失败保留英文标识并可重试", async ({ page }, testInfo) => {
+test("UX-11：请求失败保留英文标识并可重试", async ({ page }) => {
   await routeShell(page);
   let failSnapshot = true;
   let failPlayerList = true;
@@ -60,7 +59,7 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }, test
     return route.fulfill({ status: 404, json: { errorCode: "WORLD_TEST_UNROUTED", message: path } });
   });
 
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   const failure = page.locator(".world-request-failure");
   await expect(failure).toContainText("WORLD_SNAPSHOT_UNAVAILABLE");
   failSnapshot = false;
@@ -75,38 +74,38 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }, test
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
-test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }, testInfo) => {
+test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }) => {
   await routeShell(page);
   let livePlayers: { data: unknown; source: string; observedAt: number; stale: boolean; errorCode: string | null } = { data: [{}, {}, {}], source: "rest", observedAt: 1, stale: false, errorCode: null };
   await page.route("**/api/live/players", (route) => route.fulfill({ json: livePlayers }));
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
 
   const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(playerMetric()).toContainText("3 / 1");
 
   livePlayers = { ...livePlayers, stale: true };
   await page.reload();
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(playerMetric()).toContainText("— / 1");
 
   livePlayers = { ...livePlayers, stale: false, errorCode: "LIVE_PLAYERS_UNAVAILABLE" };
   await page.reload();
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(playerMetric()).toContainText("— / 1");
 
   livePlayers = { ...livePlayers, data: [], errorCode: null };
   await page.reload();
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(playerMetric()).toContainText("0 / 1");
 
   livePlayers = { ...livePlayers, data: { raw: "name,playeruid,steamid" } };
   await page.reload();
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(playerMetric()).toContainText("— / 1");
 });
 
-test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }, testInfo) => {
+test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }) => {
   await routeShell(page);
   let playerCount = 1;
   await page.route("**/api/live/players", (route) => route.fulfill({
@@ -121,7 +120,7 @@ test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }, t
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
 
   const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
-  await openWorldData(page, testInfo.project.name === "mobile");
+  await openWorldData(page);
   await expect(playerMetric()).toContainText("1 / 1");
   playerCount = 2;
   await expect(playerMetric()).toContainText("2 / 1", { timeout: 7_000 });

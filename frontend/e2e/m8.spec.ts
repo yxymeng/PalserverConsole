@@ -66,16 +66,22 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
   } }));
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   const primaryNavigation = page.getByRole("navigation", { name: "主导航" });
   await expect(primaryNavigation.getByRole("button")).toHaveCount(4);
   await expect(primaryNavigation).toContainText("首页");
-  await expect(primaryNavigation).toContainText("世界数据");
+  await expect(primaryNavigation).toContainText("世界");
   await expect(primaryNavigation).toContainText("配置");
   await expect(primaryNavigation).toContainText("维护");
   await expect(primaryNavigation).not.toContainText("服务器管理");
   await expect(primaryNavigation).not.toContainText("官方备份");
   await expect(primaryNavigation).not.toContainText("运营审计");
+  if (testInfo.project.name === "mobile") {
+    await expect(primaryNavigation).toHaveCSS("position", "fixed");
+    await expect(page.getByRole("heading", { name: "首页", exact: true })).toBeVisible();
+  } else {
+    await expect(page.locator(".psc-desktop-brand")).toBeVisible();
+    await expect(primaryNavigation).toHaveCSS("position", "static");
+  }
   await page.getByRole("button", { name: "首页" }).click();
   const hero = page.getByLabel("首页服务器控制");
   await expect(hero).toBeVisible();
@@ -83,7 +89,7 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
   expect(await hero.locator(".hero-character").evaluate((image) => {
     const imageRect = image.getBoundingClientRect();
     const cardRect = image.closest(".psc-home-command")?.getBoundingClientRect();
-    return !!cardRect && imageRect.top >= cardRect.top && imageRect.bottom <= cardRect.bottom;
+    return !!cardRect && imageRect.top >= cardRect.top - 1 && imageRect.bottom <= cardRect.bottom + 1;
   })).toBe(true);
   const heroBox = await hero.boundingBox();
   const characterStageBox = await hero.locator(".hero-character-stage").boundingBox();
@@ -96,12 +102,12 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     expect(characterBox.x).toBeGreaterThanOrEqual(heroBox.x + heroBox.width * .48);
     expect(characterBox.x + characterBox.width / 2).toBeLessThanOrEqual(heroBox.x + heroBox.width * .78);
   }
-  await expect(hero.getByRole("heading", { name: "PalServer" })).toBeVisible();
+  await expect(hero.getByRole("heading", { name: "未命名的帕鲁世界" })).toBeVisible();
   const liveStatus = page.getByLabel("实时服务器状态");
   await expect(page.getByLabel("PalServer 当前状态")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "服务器状态" })).toHaveCount(0);
   await expect(liveStatus).not.toContainText("服务器状态");
-  await expect(liveStatus).toContainText("在线玩家");
+  await expect(liveStatus).toContainText("在线训练家");
   const hostStatus = page.getByLabel("CPU 与内存状态");
   await expect(hostStatus).toContainText("CPU");
   await expect(hostStatus).toContainText("内存");

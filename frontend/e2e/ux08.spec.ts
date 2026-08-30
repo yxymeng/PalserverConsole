@@ -32,7 +32,6 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   await page.getByRole("button", { name: "维护" }).click();
 
   const sections = page.getByRole("tablist", { name: "维护分区" });

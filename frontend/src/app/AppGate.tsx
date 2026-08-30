@@ -5,6 +5,7 @@ import { isAbortError, requestJson } from "../api/client";
 import { useAbortableRequest } from "../hooks/useAbortableRequest";
 import { ConsoleShell } from "./ConsoleShell";
 import { BrandMark } from "./BrandMark";
+import { AppShellSkeleton } from "./PageLoadingStates";
 import { text } from "./text";
 import { ThemeToggle } from "./ThemeToggle";
 
@@ -92,15 +93,7 @@ export function AppGate() {
 }
 
 function LoadingScreen({ theme, onThemeToggle }: { theme: Theme; onThemeToggle: () => void }) {
-  return (
-    <main className="centered-page" aria-live="polite">
-      <ThemeToggle theme={theme} onToggle={onThemeToggle} className="screen-theme-toggle" />
-      <BrandMark />
-      <p className="product-name">{text.product}</p>
-      <RefreshCw className="spin" size={20} />
-      <p className="muted">{text.loading}</p>
-    </main>
-  );
+  return <AppShellSkeleton theme={theme} onThemeToggle={onThemeToggle} />;
 }
 
 function ConnectionError({ message, onRetry, theme, onThemeToggle }: { message: string; onRetry: () => void; theme: Theme; onThemeToggle: () => void }) {

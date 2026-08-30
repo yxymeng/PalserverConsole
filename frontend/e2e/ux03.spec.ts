@@ -40,19 +40,15 @@ test("UX-03：常用配置保持精简，高级配置可搜索全部低频字段
   await page.route("**/api/config/diff", (route) => route.fulfill({ json: { hasDraft: false, conflict: null, text: "", fields: [] } }));
 
   await page.goto("/");
-  await page.getByRole("button", { name: "查看实例与控制台" }).click();
-  const instancePanel = page.getByRole("dialog");
-  await expect(instancePanel).toContainText("test-world");
-  await expect(instancePanel).toContainText("8223");
-  await expect(instancePanel.getByText("运行目标", { exact: true })).toBeVisible();
-  await expect(instancePanel.locator(".psc-instance-endpoints")).toBeVisible();
-  await page.waitForTimeout(350);
-  await page.screenshot({ path: testInfo.outputPath(`ux03-instance-${testInfo.project.name}.png`), fullPage: true });
-  await instancePanel.getByRole("button", { name: "进入实例设置" }).click();
+  await expect(page.getByRole("button", { name: "查看实例与控制台" })).toHaveCount(0);
+  await page.getByRole("button", { name: "配置", exact: true }).click();
+  await page.getByRole("tab", { name: "实例与控制台" }).click();
   await expect(page.getByRole("tab", { name: "实例与控制台" })).toHaveAttribute("aria-selected", "true");
-  await page.getByRole("tab", { name: "游戏配置" }).click();
+  await expect(page.locator(".instance-target-strip")).toContainText("test-world");
+  await expect(page.locator(".console-port-summary")).toContainText("8223");
+  await page.getByRole("tab", { name: "世界法则配置" }).click();
 
-  await expect(page.getByRole("tab", { name: "游戏配置" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: "世界法则配置" })).toHaveAttribute("aria-selected", "true");
   await expect(page.getByText("编辑 → 保存草稿 → 应用到服务器")).toBeVisible();
   await expect(page.getByRole("button", { name: "保存草稿" })).toBeDisabled();
   await expect(page.getByRole("tab", { name: "常用配置" })).toHaveAttribute("aria-selected", "true");

@@ -583,6 +583,7 @@ export function ConfigPage({
   const nextRequestSignal = useAbortableRequest();
   const load = useCallback(async () => {
     const signal = nextRequestSignal();
+    setError("");
     try {
       const next = await requestJson<ConfigDocument>("/api/config/draft", { signal });
       setDocument(next);
@@ -632,7 +633,7 @@ export function ConfigPage({
     </div>
   </section>;
   if (workspace === "instance") return <div className="page-stack config-page">{workspaceTabs}{consoleAndInstanceSettings}</div>;
-  if (!document) return <div className="page-stack config-page">{workspaceTabs}<section className="config-loading" aria-live="polite">{error ? <p className="form-error" role="alert">{error}</p> : <><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></>}</section></div>;
+  if (!document) return <div className="page-stack config-page">{workspaceTabs}{error ? <section className="config-load-error" role="alert"><AlertTriangle aria-hidden="true" /><div><h2>世界法则读取失败</h2><p>没有取得 PalWorldSettings.ini，尚未显示或修改任何配置。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void load()}><RotateCw size={17} />重新读取世界法则</button></section> : <section className="config-loading" role="status" aria-label="正在读取世界法则" aria-busy="true"><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></section>}</div>;
 
   const allKeys = [
     ...document.schema.filter((key) => key === "AdminPassword" || key in fields),

@@ -57,8 +57,7 @@ async function routeMaintenanceApis(page: Page, healthFailure: boolean, onHealth
   } }));
 }
 
-async function openMaintenance(page: Page, mobile: boolean) {
-  if (mobile) await page.getByTitle("打开菜单").click();
+async function openMaintenance(page: Page) {
   await page.getByRole("button", { name: "维护", exact: true }).click();
 }
 
@@ -76,7 +75,7 @@ test("Block 3：非 health hash 加载顶部健康状态并支持刷新", async 
   await routeMaintenanceApis(page, false, () => { healthRequests += 1; });
 
   await page.goto("/#maintenance-update");
-  await openMaintenance(page, testInfo.project.name === "mobile");
+  await openMaintenance(page);
   await expect(page.getByRole("heading", { name: "服务器更新" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "PalServerConsole 更新" })).toBeVisible();
   await page.getByRole("button", { name: "检查更新", exact: true }).click();
@@ -93,7 +92,7 @@ test("Block 3：直接进入 backups hash 也加载顶部健康状态", async ({
   await routeMaintenanceApis(page, false, () => undefined);
 
   await page.goto("/#maintenance-backups");
-  await openMaintenance(page, testInfo.project.name === "mobile");
+  await openMaintenance(page);
   await expect(page.getByRole("heading", { name: "官方备份" })).toBeVisible();
   await expectHealthSummary(page, "运行正常", testInfo.project.name === "mobile");
 });
@@ -102,7 +101,7 @@ test("Block 3：health 请求失败时非 health Tab 仍可用并显示需要关
   await routeMaintenanceApis(page, true, () => undefined);
 
   await page.goto("/#maintenance-update");
-  await openMaintenance(page, testInfo.project.name === "mobile");
+  await openMaintenance(page);
   await expect(page.getByRole("heading", { name: "服务器更新" })).toBeVisible();
   await expectHealthSummary(page, "需要关注", testInfo.project.name === "mobile");
 

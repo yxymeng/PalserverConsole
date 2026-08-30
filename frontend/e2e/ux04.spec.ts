@@ -130,8 +130,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   });
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
-  await page.getByRole("button", { name: "世界数据" }).click();
+  await page.getByRole("button", { name: "世界", exact: true }).click();
 
   const tabs = page.getByRole("tablist", { name: "世界资产工作区" });
   await expect(tabs.getByRole("tab")).toHaveCount(6);
@@ -348,7 +347,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });
 
-test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async ({ page }, testInfo) => {
+test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async ({ page }) => {
   const snapshot = {
     contract: worldContract, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1,
     snapshotId: "race", stale: false, errorCode: null, error: null, parsing: false, parseStatus: "ready", reparseGeneration: 0,
@@ -400,8 +399,7 @@ test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async 
   });
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
-  await page.getByRole("button", { name: "世界数据" }).click();
+  await page.getByRole("button", { name: "世界", exact: true }).click();
   await page.getByRole("tab", { name: "仓库" }).click();
   const itemA = page.locator(".inventory-item-summary").filter({ hasText: "物品 A" });
   const itemB = page.locator(".inventory-item-summary").filter({ hasText: "物品 B" });

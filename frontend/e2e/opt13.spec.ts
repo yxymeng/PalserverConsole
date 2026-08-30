@@ -47,7 +47,6 @@ test("OPT-13 总览展示容量风险并要求清理预览", async ({ page }, te
   } }));
 
   await page.goto("/");
-  if (testInfo.project.name === "mobile") await page.getByTitle("打开菜单").click();
   await page.getByRole("button", { name: "维护" }).click();
 
   await expect(page.getByRole("heading", { name: "运维健康与容量" })).toBeVisible();

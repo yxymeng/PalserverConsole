@@ -23,7 +23,7 @@ const shell: ShellStatus = {
   instanceId: "default",
 };
 
-test("UX-01：一级导航只保留首页、世界数据、世界法则配置和维护", () => {
+test("UX-01：桌面与手机一级导航都只保留首页、世界、配置和维护", () => {
   const markup = renderToStaticMarkup(
     <ConsoleShell
       auth={auth}
@@ -33,14 +33,16 @@ test("UX-01：一级导航只保留首页、世界数据、世界法则配置和
       onThemeToggle={() => undefined}
     />,
   );
-  const navigation = markup.match(/<nav[^>]*>[\s\S]*?<\/nav>/)?.[0] || "";
+  const navigations = markup.match(/<nav[^>]*aria-label="主导航"[^>]*>[\s\S]*?<\/nav>/g) || [];
 
-  expect(navigation).toContain("首页");
-  expect(navigation).toContain("世界数据");
-  expect(navigation).toContain("世界法则配置");
-  expect(navigation).toContain("维护");
-  expect(navigation).not.toContain("服务器管理");
-  expect(navigation).not.toContain("官方备份");
-  expect(navigation).not.toContain("运营审计");
-  expect(navigation.match(/<button/g)).toHaveLength(4);
+  expect(navigations).toHaveLength(2);
+  navigations.forEach((navigation) => {
+    expect(navigation).toContain("首页");
+    expect(navigation).toContain("世界");
+    expect(navigation).toContain("配置");
+    expect(navigation).toContain("维护");
+    expect(navigation).not.toContain("世界数据");
+    expect(navigation).not.toContain("世界法则配置");
+    expect(navigation.match(/<button/g)).toHaveLength(4);
+  });
 });
