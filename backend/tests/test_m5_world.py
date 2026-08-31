@@ -525,6 +525,8 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     work_pals, work_total = query_cache(cache, "work-pals", page=1, page_size=50)
     assert base_total == 2
     assert len(bases) == 1
+    assert bases[0]["workerCount"] == len(cast(list[dict[str, object]], bases[0]["workers"]))
+    assert bases[0]["maxWorkerCount"] is not None
     assert work_total == 2
     assert {item["baseId"] for item in work_pals} == {
         str(uuid.UUID(int=101)),
@@ -1100,22 +1102,27 @@ def test_lists_include_linked_relation_names(tmp_path: Path) -> None:
     level, players = _synthetic_properties()
     cache = tmp_path / "world-cache.sqlite"
     build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
-    player_id = str(uuid.UUID(int=300))
+    player_id = str(uuid.UUID(int=1))
     guild_id = str(uuid.UUID(int=500))
     with sqlite3.connect(cache) as connection:
         connection.execute(
             "INSERT INTO guilds VALUES(?, ?, ?, ?, ?)",
-            (guild_id, "测试工会", 1, 0, "{}"),
+            (guild_id, "测试工会", 1, 0, json.dumps({"adminPlayerId": player_id})),
         )
         connection.execute("UPDATE players SET guild_id = ? WHERE id = ?", (guild_id, player_id))
 
     rows, total = query_cache(cache, "players", page=1, page_size=50)
+    guilds, guild_total = query_cache(cache, "guilds", page=1, page_size=50)
     bases, base_total = query_cache(cache, "bases", page=1, page_size=50)
 
     assert total == 1
     assert rows[0]["guildName"] == "测试工会"
+    assert guild_total == 1
+    assert guilds[0]["adminPlayerName"] == rows[0]["name"]
+    assert cast(list[dict[str, object]], guilds[0]["members"])[0]["role"] == "leader"
     assert base_total == 2
     assert {row["guildName"] for row in bases} == {"测试工会"}
+    assert all(row["workerCount"] == len(cast(list[object], row["workers"])) for row in bases)
 
 
 def test_base_and_guild_asset_details_use_only_stable_relations(tmp_path: Path) -> None:
@@ -1142,6 +1149,7 @@ def test_base_and_guild_asset_details_use_only_stable_relations(tmp_path: Path) 
                     {
                         "memberIds": [player_id, missing_player],
                         "baseIds": [base_a, "missing-base"],
+                        "adminPlayerId": player_id,
                     }
                 ),
             ),
@@ -1212,6 +1220,10 @@ def test_base_and_guild_asset_details_use_only_stable_relations(tmp_path: Path) 
     assert unavailable_base["guild"] is None
 
     assert guild_detail is not None
+    assert guild_detail["adminPlayerId"] == player_id
+    guild_members = cast(list[dict[str, object]], guild_detail["members"])
+    assert guild_detail["adminPlayerName"] == guild_members[0]["name"]
+    assert guild_members[0]["role"] == "leader"
     assert guild_detail["assetSummary"] == {
         "memberCount": 1,
         "baseCount": 1,

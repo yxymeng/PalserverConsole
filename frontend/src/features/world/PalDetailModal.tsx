@@ -1,0 +1,100 @@
+import { Award, Briefcase, ChevronRight, Flame, Gauge, MapPin, Search, Sparkles, Swords, User, X, Zap } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+
+import type { WorldPalDetail, WorldPalRosterItem, WorldPalSkill } from "../../api/contracts";
+import { resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
+
+type PalData = WorldPalDetail | WorldPalRosterItem;
+
+const workLabels: Record<string, string> = {
+  Kindling: "生火", Watering: "浇水", Planting: "播种", GenerateElectricity: "发电", Handcraft: "手工作业",
+  Gathering: "采集", Lumbering: "伐木", Mining: "采矿", Medicine: "制药", Cooling: "冷却", Transport: "搬运", Farming: "牧场",
+};
+
+const locationLabels: Record<string, string> = {
+  party: "玩家随身队伍", storage: "帕鲁终端", base_worker: "据点打工", base: "据点打工", unassigned: "野外 / 未归属",
+};
+
+export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, closeRef, ariaLabel = "帕鲁详情", notice }: {
+  data: PalData;
+  onClose: () => void;
+  onFindSameSpecies?: (data: PalData) => void;
+  panelRef?: Ref<HTMLElement>;
+  closeRef?: Ref<HTMLButtonElement>;
+  ariaLabel?: string;
+  notice?: ReactNode;
+}) {
+  const pal = resolvePal(data);
+  const [selectedPassive, setSelectedPassive] = useState<WorldPalSkill | null>(null);
+  const passiveTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const passiveCloseRef = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => { if (selectedPassive) window.requestAnimationFrame(() => passiveCloseRef.current?.focus()); }, [selectedPassive]);
+  function closePassive() {
+    setSelectedPassive(null);
+    window.requestAnimationFrame(() => passiveTriggerRef.current?.focus());
+  }
+  const ownerName = data.ownerName || ("owner" in data ? data.owner?.name : null);
+  const baseName = data.baseName || ("base" in data ? data.base?.name : null);
+  const location = "locationType" in data
+    ? ({ player: "玩家持有", party: "玩家随身队伍", storage: "帕鲁终端", base: "据点打工", unassigned: "野外 / 未归属" }[data.locationType])
+    : locationLabels[data.assignment] || data.assignment || "野外 / 未归属";
+  const dimensions = [
+    ["生命 IV", data.aptitude.ivs.hp, 100], ["攻击 IV", data.aptitude.ivs.attack, 100], ["防御 IV", data.aptitude.ivs.defense, 100],
+    ["综合 IV", data.aptitude.ivs.average, 100], ["星级", data.rank, 4], ["稀有度", data.aptitude.speciesRarity, 20],
+  ] as const;
+  const radarPoints = dimensions.map(([, value, max], index) => {
+    const angle = -Math.PI / 2 + index * Math.PI / 3;
+    const ratio = value === null || value === undefined ? .08 : Math.max(.08, Math.min(1, value / max));
+    return `${140 + Math.cos(angle) * 82 * ratio},${130 + Math.sin(angle) * 82 * ratio}`;
+  }).join(" ");
+  const sameSpecies = () => onFindSameSpecies?.(data);
+
+  return <aside ref={panelRef} className="pal-detail-modal" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+    <header className="pal-detail-header">
+      <div className="pal-detail-identity">
+        <span className="pal-detail-icon"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>
+        <div><div className="pal-detail-title"><h2>{pal.speciesName}</h2>{data.nickname && <span className="pal-detail-nickname">“{data.nickname}”</span>}{data.isBoss && <span className="pal-detail-badge boss"><Flame size={14} />ALPHA 巨型头目</span>}{data.isLucky && <span className="pal-detail-badge lucky"><Sparkles size={14} />稀有闪光</span>}</div>
+          <p><span>编号: <code>{data.characterId}</code></span><i>·</i><span>性别: <b className={pal.gender || "unknown"}>{pal.gender === "male" ? "♂ 雄性" : pal.gender === "female" ? "♀ 雌性" : "无性别"}</b></span><i>·</i><span>等级: <strong>Lv.{data.level ?? "—"}</strong></span><i>·</i><span>阶级: <em>★ x{data.rank ?? 0}</em></span></p>
+        </div>
+      </div>
+      <div className="pal-detail-header-actions">{onFindSameSpecies && <button className="pal-detail-same compact" type="button" onClick={sameSpecies}><Search size={15} /><span>查找同种帕鲁</span></button>}<button ref={closeRef} className="pal-detail-close" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={20} /></button></div>
+    </header>
+
+    <div className="pal-detail-body">
+      {notice}
+      <section className="pal-six-dimension">
+        <header><span><Gauge size={16} /></span><div><h3>帕鲁六维基础与强化数值</h3><p>当前存档可确认的个体资质与成长指标</p></div></header>
+        <div className="pal-radar-layout"><svg viewBox="0 0 280 260" aria-label="帕鲁六维雷达图">
+          {[.2,.4,.6,.8,1].map((scale) => <polygon key={scale} className="pal-radar-grid" points={dimensions.map((_, index) => { const angle=-Math.PI/2+index*Math.PI/3; return `${140+Math.cos(angle)*82*scale},${130+Math.sin(angle)*82*scale}`; }).join(" ")} />)}
+          {dimensions.map((dimension,index) => { const angle=-Math.PI/2+index*Math.PI/3; const x=140+Math.cos(angle)*82; const y=130+Math.sin(angle)*82; const lx=140+Math.cos(angle)*108; const ly=130+Math.sin(angle)*108; return <g key={dimension[0]}><line x1="140" y1="130" x2={x} y2={y} /><text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle">{dimension[0]}</text></g>; })}
+          <polygon className="pal-radar-value" points={radarPoints} />
+        </svg><div className="pal-dimension-list">{dimensions.map(([label,value]) => <div key={label}><span>{label}</span><strong>{value ?? "不可用"}</strong></div>)}</div></div>
+      </section>
+
+      <div className="pal-vitals">
+        <Vital label="SAN 理智值" value={data.care.sanity === null ? "数据不可用" : `${data.care.sanity}%`} percent={data.care.sanity} tone="san" />
+        <Vital label="饱食与负荷储备" value={data.care.hunger === null ? data.care.hungerRaw === null ? "数据不可用" : `原始值 ${data.care.hungerRaw}` : `${data.care.hunger}%`} percent={data.care.hunger} tone="hunger" />
+      </div>
+
+      <SkillSection title={`配备主动战斗技能 (${data.skills.equipped.length}/3)`} icon={<Swords size={15} />} className="active" skills={data.skills.equipped} />
+
+      <section className="pal-detail-section passive"><h3><Sparkles size={15} />被动特性词条 ({data.skills.passive.length}/4)</h3>{data.skills.passive.length ? <div className="pal-passive-grid">{data.skills.passive.map((skill) => <button type="button" key={skill.id} className={skill.rank !== null && skill.rank >= 3 ? "god-tier" : ""} onClick={(event) => { passiveTriggerRef.current = event.currentTarget; setSelectedPassive(skill); }}><span><strong>{skill.name || skill.sourceName || skill.id}</strong>{skill.rank !== null && <em>Tier {skill.rank}</em>}</span><p>{skill.description || "该词条暂无中文说明。"}</p><small><span>{skill.rank !== null && skill.rank >= 3 ? <><Award size={12} />高阶特性</> : "被动特性"}</span><b>查看加成详解<ChevronRight size={13} /></b></small></button>)}</div> : <p className="pal-detail-empty">无任何被动特性词条</p>}</section>
+
+      <section className="pal-detail-section work"><h3><Briefcase size={15} />工作适应性技能</h3>{data.aptitude.workSuitabilities.length ? <div>{data.aptitude.workSuitabilities.map((work) => <span key={work.type}>{workLabels[work.type] || work.type}<strong>Lv.{work.level}</strong></span>)}</div> : <p className="pal-detail-empty">{data.aptitude.metadataKnown ? "无工作技能（战斗与骑乘专用型）" : "工作适应性资料未收录"}</p>}</section>
+
+      <section className="pal-detail-location"><div><span><User size={15} />所属训练家:</span><strong>{ownerName || "野生 / 未登记"}</strong></div><div><span><MapPin size={15} />存放位置:</span><strong>{baseName ? `${location} (${baseName})` : location}</strong></div></section>
+    </div>
+
+    <footer className="pal-detail-footer">{onFindSameSpecies ? <button className="pal-detail-same" type="button" onClick={sameSpecies}><Search size={16} />查找同种帕鲁 ({pal.speciesName})</button> : <span />}<button type="button" onClick={onClose}>关闭详情</button></footer>
+    {selectedPassive && <div className="pal-passive-dialog-layer"><button type="button" tabIndex={-1} aria-label="关闭被动词条详情遮罩" onClick={closePassive} /><section role="dialog" aria-modal="true" aria-label="被动词条详情"><header><div><small>被动特性词条</small><h3>{selectedPassive.name || selectedPassive.sourceName || selectedPassive.id}</h3></div><button ref={passiveCloseRef} type="button" aria-label="关闭被动词条详情" onClick={closePassive}><X size={18} /></button></header><p>{selectedPassive.description || "该词条暂无中文说明。"}</p><dl><div><dt>内部 ID</dt><dd>{selectedPassive.id}</dd></div><div><dt>阶级</dt><dd>{selectedPassive.rank ?? "不可用"}</dd></div></dl></section></div>}
+  </aside>;
+}
+
+function Vital({ label, value, percent, tone }: { label: string; value: string; percent: number | null; tone: "san" | "hunger" }) {
+  return <section><div><span><Zap size={15} />{label}</span><strong>{value}</strong></div><div className="pal-vital-track"><i className={tone} style={{ width: `${percent === null ? 0 : Math.max(0, Math.min(100, percent))}%` }} /></div></section>;
+}
+
+function SkillSection({ title, icon, className, skills }: { title: string; icon: ReactNode; className: string; skills: WorldPalSkill[] }) {
+  if (!skills.length) return null;
+  return <section className={`pal-detail-section ${className}`}><h3>{icon}{title}</h3><div className="pal-active-grid">{skills.map((skill) => <article key={skill.id}><div><strong>{skill.name || skill.sourceName || skill.id}</strong>{skill.power !== null && <em>威力 {skill.power}</em>}</div><small><span>冷却: {skill.cooldown === null ? "不可用" : `${skill.cooldown}s`}</span><b>主动技</b></small></article>)}</div></section>;
+}

@@ -41,9 +41,9 @@ test("UX-11：无可用快照时五个工作区都明确说明影响", async ({ 
   }
   await tabs.getByRole("tab", { name: "公会与据点" }).click();
   await expect(page.getByRole("heading", { name: "全服公会组织" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "据点分布与工作帕鲁" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "据点分布与打工帕鲁" })).toBeVisible();
   await expect(page.locator(".world-community-panel").filter({ hasText: "全服公会组织" })).toContainText("当前没有可用世界快照");
-  await expect(page.locator(".world-community-panel").filter({ hasText: "据点分布与工作帕鲁" })).toContainText("当前没有可用世界快照");
+  await expect(page.locator(".world-community-panel").filter({ hasText: "据点分布与打工帕鲁" })).toContainText("当前没有可用世界快照");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 

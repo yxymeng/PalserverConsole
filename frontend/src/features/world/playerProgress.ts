@@ -26,7 +26,15 @@ export const PLAYER_PROGRESS_GROUPS: Array<{
 ];
 
 export function playerProgressOf(row: { progress: WorldPlayerProgress }): WorldPlayerProgress {
-  return row.progress;
+  const progress = row.progress;
+  if (progress.values.oilRigClears !== undefined) return progress;
+  const unavailable = progress.unavailable.filter((field) => field !== "oilRigClears");
+  return {
+    ...progress,
+    state: progress.state === "partial" && unavailable.length === 0 ? "complete" : progress.state,
+    values: { ...progress.values, oilRigClears: 0 },
+    unavailable,
+  };
 }
 
 export function playerProgressCoverage(progress: WorldPlayerProgress): string {

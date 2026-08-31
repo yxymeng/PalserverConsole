@@ -603,6 +603,11 @@ def query_cache(
                 name_field="guildName",
                 table="guilds",
             )
+            for public_row in public_rows:
+                _add_base_card_fields(connection, public_row)
+        elif resource == "guilds":
+            for public_row in public_rows:
+                _add_guild_card_fields(connection, public_row)
         return public_rows, total
     finally:
         connection.close()
@@ -1184,19 +1189,13 @@ def _guild_detail(connection: sqlite3.Connection, guild_id: str) -> dict[str, ob
     if row is None:
         return None
     result = _public_row(dict(row))
-    members = _rows(
-        connection,
-        "SELECT id, name, level, guild_id FROM players WHERE guild_id = ? "
-        "ORDER BY name COLLATE NOCASE",
-        (guild_id,),
-    )
+    members = _add_guild_card_fields(connection, result)
     bases = _rows(
         connection,
         "SELECT id, name, guild_id, worker_container_id, x, y, z FROM bases "
         "WHERE guild_id = ? ORDER BY name COLLATE NOCASE",
         (guild_id,),
     )
-    result["members"] = members
     result["bases"] = bases
     detail = _mapping(result.get("detail"))
     member_ids = [item for item in detail.get("memberIds", []) if isinstance(item, str)]
@@ -1245,23 +1244,55 @@ def _base_detail(connection: sqlite3.Connection, base_id: str) -> dict[str, obje
         if result["guild"]
         else "unavailable"
     )
-    worker_rows = connection.execute(
-        "SELECT * FROM pals WHERE base_id = ? AND assignment = 'base_worker' "
-        "ORDER BY rowid",
-        (base_id,),
-    ).fetchall()
-    result["workers"] = [_pal_public_row(dict(item)) for item in worker_rows]
-    result["workerCount"] = int(
-        connection.execute(
-            "SELECT COUNT(*) FROM pals WHERE base_id = ? AND assignment = 'base_worker'",
-            (base_id,),
-        ).fetchone()[0]
-    )
+    _add_base_card_fields(connection, result)
     result["careSummary"] = _pal_care_summary(
         connection, "WHERE base_id = ? AND assignment = 'base_worker'", (base_id,)
     )
     result["inventorySummary"] = _inventory_summary(connection, base_id=base_id)
     return result
+
+
+def _add_guild_card_fields(
+    connection: sqlite3.Connection, result: dict[str, object]
+) -> list[dict[str, object]]:
+    guild_id = str(result["id"])
+    admin_player_id = _mapping(result.get("detail")).get("adminPlayerId")
+    members = _rows(
+        connection,
+        "SELECT id, name, level, guild_id FROM players WHERE guild_id = ? "
+        "ORDER BY name COLLATE NOCASE",
+        (guild_id,),
+    )
+    for member in members:
+        member["role"] = "leader" if member.get("id") == admin_player_id else "member"
+    result["adminPlayerId"] = admin_player_id
+    result["adminPlayerName"] = next(
+        (member.get("name") for member in members if member.get("id") == admin_player_id), None
+    )
+    result["members"] = members
+    return members
+
+
+def _add_base_card_fields(connection: sqlite3.Connection, result: dict[str, object]) -> None:
+    base_id = str(result["id"])
+    workers = [
+        _pal_public_row(dict(item))
+        for item in connection.execute(
+            "SELECT * FROM pals WHERE base_id = ? AND assignment = 'base_worker' ORDER BY rowid",
+            (base_id,),
+        ).fetchall()
+    ]
+    worker_container_id = result.get("workerContainerId")
+    capacity = (
+        connection.execute(
+            "SELECT slot_count FROM containers WHERE id = ?", (worker_container_id,)
+        ).fetchone()
+        if worker_container_id
+        else None
+    )
+    result["workers"] = workers
+    result["workerCount"] = len(workers)
+    result["maxWorkerCount"] = int(capacity[0]) if capacity else None
 
 
 def _inventory_summary(

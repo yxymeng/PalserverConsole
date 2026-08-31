@@ -262,10 +262,14 @@ export type WorldPalRosterResponse = WorldSnapshotContext & {
 };
 export type WorldGuildListItem = {
   id: string; name: string; memberCount: number; baseCount: number;
+  adminPlayerId: string | null; adminPlayerName: string | null;
+  members: { id: string; name: string; level: number | null; role: "leader" | "member" }[];
 };
 export type WorldBaseListItem = {
   id: string; name: string; guildId: string | null; workerContainerId: string | null;
   x: number | null; y: number | null; z: number | null; guildName?: string;
+  workerCount: number; maxWorkerCount: number | null;
+  workers: WorldPalListItem[];
 };
 export type WorldInventoryListItem = {
   id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;

@@ -18,8 +18,17 @@ test("世界数据筛选与排序交给完整数据查询处理", () => {
   expect(source).toContain('const resources: CommunityResource[] = ["guilds", "bases"]');
   expect(source).toContain("await Promise.all(resources.map");
   expect(source).toContain('className="world-community-columns"');
+  expect(source).not.toContain("world-community-controls");
+  expect(source).not.toContain("world-community-detail-modal");
+  expect(source).not.toContain("world-community-card-open");
+  expect(source).not.toContain("function GuildDetail");
+  expect(source).not.toContain("function BaseDetail");
+  expect(source).toContain('className="world-community-card-content"');
+  expect(source).toContain("world-community-card-tags");
+  expect(source).toContain("guild.adminPlayerName");
+  expect(source).toContain("base?.workers.map");
   expect(source).toContain('"全服公会组织"');
-  expect(source).toContain('"据点分布与工作帕鲁"');
+  expect(source).toContain('"据点分布与打工帕鲁"');
   expect(source).toContain('label: "全服物资检索"');
   expect(source).toContain("InventoryWorkspace");
   expect(source).toContain("WorldOverviewLobby");
@@ -29,8 +38,7 @@ test("世界数据筛选与排序交给完整数据查询处理", () => {
   expect(source).toContain("formatWorldCalendar(status?.gameTimeTicks)");
   expect(source).toContain("不会用当前分页结果推算");
   expect(source).toContain("CommunityCard");
-  expect(source).toContain("查看公会资产与成员");
-  expect(source).toContain("查看据点资产与工作帕鲁");
+  expect(source).toContain("WorldPagination");
   expect(source).not.toContain('label: "未知物品"');
   expect(source).not.toContain('label: "未归属帕鲁"');
   expect(source).not.toContain('workspace="inventories"');
@@ -60,19 +68,16 @@ test("仓库默认使用持有库存并按存放分布两级展开", () => {
   expect(source).not.toContain("<small>位置</small>");
 });
 
-test("据点与公会详情复用照护和仓库关联语义", () => {
+test("公会与据点只保留 Gemini 卡片结构与分页", () => {
   const pagePath = fileURLToPath(new URL("./WorldDataPage.tsx", import.meta.url));
-  const inventoryPath = fileURLToPath(new URL("./InventoryWorkspace.tsx", import.meta.url));
   const pageSource = readFileSync(pagePath, "utf8");
-  const inventorySource = readFileSync(inventoryPath, "utf8");
 
-  expect(pageSource).toContain("与帕鲁图鉴花名册“需要关注”使用同一存档快照规则");
-  expect(pageSource).toContain('scope="guild"');
-  expect(pageSource).toContain("关联资料不可用");
-  expect(pageSource).toContain("未创建猜测关系");
-  expect(pageSource).toContain("Guild ID");
-  expect(pageSource).toContain("Base ID");
-  expect(inventorySource).toContain('query.set("guildId", context.guildId)');
+  expect(pageSource).toContain("全服公会组织");
+  expect(pageSource).toContain("据点分布与打工帕鲁");
+  expect(pageSource).toContain("<WorldPagination");
+  expect(pageSource).not.toContain("function GuildDetail");
+  expect(pageSource).not.toContain("function BaseDetail");
+  expect(pageSource).not.toContain("world-community-controls");
 });
 
 test("在线玩家未知结构不会被当成零人", () => {
