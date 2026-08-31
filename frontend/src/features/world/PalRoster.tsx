@@ -117,7 +117,7 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
         }
       }
       if (!isAbortError(caught) && sequence === requestSequence.current) {
-        setError(caught instanceof Error ? caught.message : "帕鲁名册读取失败");
+        setError(caught instanceof Error ? caught.message : "帕鲁图鉴花名册读取失败");
       }
     } finally {
       if (sequence === requestSequence.current) {
@@ -226,13 +226,13 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
   const hasAptitudeFilters = Object.entries(appliedAptitude).some(([key, value]) => ["workSuitabilities", "passiveSkills"].includes(key) ? (value as string[]).length > 0 : key !== "minWorkLevel" && Boolean(value));
   const hasFilters = Boolean(appliedSearch) || marker !== "all" || care !== "all" || location !== "all" || sort !== "balanced" || hasAptitudeFilters;
   const canLoadMore = items.length < total;
-  return <section className="pal-roster" aria-label="帕鲁名册">
-    <header className="world-module-heading pal-roster-heading"><div><p className="world-module-kicker">个体与照护</p><h2>帕鲁名册</h2><p>按稳定快照分批读取；照护信息来自存档快照，不是实时监控。</p></div><span className="world-module-total">{total ? `已载入 ${items.length} / ${total} 只` : "等待快照"}</span></header>
+  return <section className="pal-roster" aria-label="帕鲁图鉴花名册">
+    <header className="world-module-heading pal-roster-heading"><div><h2>帕鲁图鉴花名册</h2><p>搜索、筛选并查看每只帕鲁的资质、工作适应性、技能、照护与归属；数据来自只读存档快照。</p></div><span className="world-module-total">{total ? `已载入 ${items.length} / ${total} 只` : "等待快照"}</span></header>
     {context?.label && <p className="world-navigation-context" role="status">当前来自总览：{context.label}</p>}
     {careSummary && <PalCareSummary summary={careSummary} />}
     {metadata?.status === "unavailable" && <p className="pal-metadata-warning" role="status"><AlertCircle size={17} aria-hidden="true" /><span>固定版本元数据当前不可用；名册仍保持只读可浏览，稀有度和工作适应性显示为“资料未收录”。</span><code>{metadata.errorCode || "WORLD_METADATA_UNAVAILABLE"}</code></p>}
     <form className="pal-roster-toolbar" onSubmit={submitSearch}>
-      <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索帕鲁名册" placeholder="名称、Character ID 或内部 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
+      <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索帕鲁图鉴花名册" placeholder="搜索帕鲁名称、Character ID 或内部 ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
       <button className="primary-button world-search-button" type="submit">应用筛选</button>
       <div className="pal-roster-markers" aria-label="个体标记与照护筛选">
         <button type="button" className={marker === "all" ? "active" : ""} aria-pressed={marker === "all"} onClick={() => setMarker("all")}>全部</button>
@@ -240,7 +240,7 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
         <button type="button" className={marker === "boss" ? "active" : ""} aria-pressed={marker === "boss"} onClick={() => setMarker("boss")}><Crown size={15} />头目</button>
         <button type="button" className={care === "attention" ? "active" : ""} aria-pressed={care === "attention"} onClick={() => setCare((value) => value === "attention" ? "all" : "attention")}><HeartPulse size={15} />需要关注</button>
       </div>
-      <label className="world-control"><span>排序</span><select aria-label="帕鲁名册排序" value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="balanced">均衡</option><option value="name">名称</option><option value="level">等级</option><option value="rarity">物种稀有度</option><option value="averageIv">平均个体值</option><option value="workSuitability">工作适应性</option></select></label>
+      <label className="world-control"><span>排序</span><select aria-label="帕鲁图鉴花名册排序" value={sort} onChange={(event) => setSort(event.target.value as Sort)}><option value="balanced">均衡</option><option value="name">名称</option><option value="level">等级</option><option value="rarity">物种稀有度</option><option value="averageIv">平均个体值</option><option value="workSuitability">工作适应性</option></select></label>
       {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除已应用筛选</button>}
       {isMobile ? <button ref={mobileAptitudeTriggerRef} className="pal-aptitude-trigger" type="button" onClick={() => setMobileAptitudeFiltersOpen(true)}><span>资质、工作与被动技能</span><small>多项工作和被动技能均须全部具备</small><ChevronDown size={16} aria-hidden="true" /></button> : <details ref={aptitudeFiltersRef} className="pal-aptitude-filters">
         <summary><span>资质、工作与被动技能</span><small>多项工作和被动技能均须全部具备</small><ChevronDown size={16} aria-hidden="true" /></summary>
@@ -258,8 +258,8 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
       {appliedAptitude.workSuitabilities.map((type) => <button type="button" key={type} onClick={() => removeWorkSuitability(type)}>{workSuitabilityLabels[type] || type} ≥ {appliedAptitude.minWorkLevel || "1"} 级<X size={13} /></button>)}
       {appliedAptitude.passiveSkills.map((id) => <button type="button" key={id} onClick={() => removePassiveSkill(id)}>{skillDisplayName(passiveSkillOptions.find((skill) => skill.id === id) || { id, name: null, description: null, sourceName: null, rank: null, element: null, power: null, cooldown: null, metadataKnown: false })}<X size={13} /></button>)}
     </div>}
-    {error && <section className="world-request-failure" role="alert"><AlertCircle size={18} aria-hidden="true" /><div><strong>帕鲁名册请求失败</strong><p>已保留当前结果；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void loadPage(1, false)}>重新尝试</button></section>}
-    <div className="pal-roster-table" aria-busy={loading} aria-live="polite">
+    {error && <section className="world-request-failure" role="alert"><AlertCircle size={18} aria-hidden="true" /><div><strong>帕鲁图鉴花名册请求失败</strong><p>已保留当前结果；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void loadPage(1, false)}>重新尝试</button></section>}
+    <div className="pal-roster-table pal-roster-cards" aria-busy={loading} aria-live="polite">
       <div className="pal-roster-head"><span>帕鲁</span><span>等级 / 星级</span><span>资质</span><span>工作适应性</span><span>被动技能</span><span>个体标记</span><span>照护状态</span><span>归属</span></div>
       {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "没有符合条件的帕鲁" : "当前没有可用世界快照"}</strong><p>{snapshotId ? "尝试清除已应用筛选，或使用其他名称和 ID 搜索。" : "完成只读解析后可浏览名册；错误状态会保留在快照条中。"}</p>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除已应用筛选</button>}</div>}
     </div>
@@ -413,7 +413,7 @@ function PalRosterDrawer({ state, onClose, onNavigate }: { state: DrawerState | 
   if (!state) return null;
   const data = state.detail || state.item;
   const pal = resolvePal(data);
-  return createPortal(<><button className="pal-roster-backdrop" type="button" tabIndex={-1} aria-label="关闭帕鲁详情遮罩" onClick={onClose} /><aside ref={drawerRef} className="pal-roster-drawer" role="dialog" aria-modal="true" aria-label="帕鲁详情"><header><div className="world-drawer-title"><span className="world-entity-avatar world-pal-avatar"><img src={pal.icon} alt="" /></span><div><h2>{pal.displayName}</h2><p>{pal.speciesName}</p></div></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={18} /></button></header>{state.loading ? <div className="pal-roster-drawer-state"><LoaderCircle className="spin" size={24} /><strong>正在读取帕鲁详情</strong><p>名册结果仍保留，可随时关闭。</p></div> : state.error ? <div className="pal-roster-drawer-state error" role="alert"><AlertCircle size={24} /><strong>详情读取失败</strong><p>已保留名册结果。请关闭后重试，或检查当前快照状态。</p><code>{state.error}</code></div> : <PalRosterDetail data={data} pal={pal} onNavigate={onNavigate} />}</aside></>, document.body);
+  return createPortal(<><button className="pal-roster-backdrop" type="button" tabIndex={-1} aria-label="关闭帕鲁详情遮罩" onClick={onClose} /><aside ref={drawerRef} className="pal-roster-drawer" role="dialog" aria-modal="true" aria-label="帕鲁详情"><header><div className="world-drawer-title"><span className="world-entity-avatar world-pal-avatar"><img src={pal.icon} alt="" /></span><div><h2>{pal.displayName}</h2><p>帕鲁图鉴花名册 · {pal.speciesName}</p></div></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={18} /></button></header>{state.loading ? <div className="pal-roster-drawer-state"><LoaderCircle className="spin" size={24} /><strong>正在读取帕鲁详情</strong><p>花名册结果仍保留，可随时关闭。</p></div> : state.error ? <div className="pal-roster-drawer-state error" role="alert"><AlertCircle size={24} /><strong>详情读取失败</strong><p>已保留花名册结果。请关闭后重试，或检查当前快照状态。</p><code>{state.error}</code></div> : <PalRosterDetail data={data} pal={pal} onNavigate={onNavigate} />}</aside></>, document.body);
 }
 
 function PalRosterDetail({ data, pal, onNavigate }: { data: WorldPalDetail | WorldPalRosterItem; pal: ReturnType<typeof resolvePal>; onNavigate: (resource: "players" | "bases", id: string) => void }) {

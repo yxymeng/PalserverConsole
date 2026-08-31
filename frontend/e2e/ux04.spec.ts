@@ -62,7 +62,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
       const parseStatus = parsing ? "parsing" : incompatible ? "incompatible" : failed ? "failed" : "ready";
       const errorCode = incompatible ? "CACHE_SCHEMA_INCOMPATIBLE" : failed ? "SNAPSHOT_PARSE_FAILED" : null;
       return route.fulfill({ json: {
-      contract: worldContract, source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: incompatible || failed, errorCode, error: errorCode, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42,
+      contract: worldContract, source: "save-snapshot", observedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, stale: incompatible || failed, errorCode, error: errorCode, snapshotId: activeSnapshotId, parsing, parseDurationMs: 42, gameTimeTicks: 122_688_000_000_000,
       sourceObservedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: parsing ? null : 1_786_000_042, parseStatus,
       reparseGeneration: incompatible ? 0 : reparseRequests,
       dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
@@ -133,26 +133,29 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.getByRole("button", { name: "世界", exact: true }).click();
 
   const tabs = page.getByRole("tablist", { name: "世界资产工作区" });
-  await expect(tabs.getByRole("tab")).toHaveCount(6);
-  await expect(tabs).toContainText("总览");
-  await expect(tabs).toContainText("玩家");
-  await expect(tabs).toContainText("帕鲁名册");
-  await expect(tabs).toContainText("仓库");
-  await expect(tabs).toContainText("公会");
-  await expect(tabs).toContainText("据点");
+  await expect(tabs.getByRole("tab")).toHaveCount(5);
+  await expect(tabs).toContainText("世界资产总览");
+  await expect(tabs).toContainText("训练家档案");
+  await expect(tabs).toContainText("帕鲁图鉴花名册");
+  await expect(tabs).toContainText("公会与据点");
+  await expect(tabs).toContainText("全服物资检索");
   await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
-  await expect(page.locator(".world-overview-assets")).toContainText("2 种帕鲁");
+  await expect(page.locator(".world-overview-assets")).toContainText("覆盖 2 种帕鲁");
   await expect(page.locator(".world-overview-assets")).toContainText("玩家、据点与公会合计 26 件");
-  await expect(page.getByRole("button", { name: /^玩家 在线 \/ 全部玩家/ })).toContainText("0 / 1");
-  await expect(page.locator(".world-overview-assets button").filter({ hasText: "仓库物品" })).toContainText("2种");
+  await expect(page.locator(".world-overview-assets button").filter({ hasText: "登记训练家" })).toContainText("当前在线 0 名");
+  await expect(page.locator(".world-overview-assets button").filter({ hasText: "全服物资" })).toContainText("2种");
+  await expect(page.locator(".world-overview-assets button").filter({ hasText: "游戏历法" })).toContainText("Day 142");
+  await expect(page.locator(".world-overview-progress-note")).toContainText("不会用当前分页结果推算");
   await expect(page.locator(".world-overview-actions")).not.toContainText("未知物品");
   await expect(page.locator(".world-overview-actions")).not.toContainText("未归属帕鲁");
   await page.waitForTimeout(500);
   await page.screenshot({ path: `../.impeccable/review/${testInfo.project.name}.png`, fullPage: true });
-  await expect(page.locator(".world-snapshot-bar")).toContainText("存档记录");
-  await expect(page.locator(".world-snapshot-bar")).toContainText("解析完成");
-  await expect(page.locator(".world-snapshot-bar")).toContainText("不会修改真实 .sav");
-  await tabs.getByRole("tab", { name: "仓库" }).click();
+  await page.locator(".world-snapshot-status summary").click();
+  await expect(page.locator(".world-snapshot-popover")).toContainText("存档记录");
+  await expect(page.locator(".world-snapshot-popover")).toContainText("解析完成");
+  await expect(page.locator(".world-snapshot-popover")).toContainText("不会修改真实 .sav");
+  await page.getByRole("button", { name: "关闭快照状态" }).click();
+  await tabs.getByRole("tab", { name: "全服物资检索" }).click();
   await expect(page.locator(".inventory-workspace")).toContainText("世界宝箱和其他地图容器不计入仓库");
   await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("scope") === "inventory")).toBeTruthy();
   await expect(page.getByLabel("仓库范围").getByRole("button", { name: "全部持有" })).toHaveAttribute("aria-pressed", "true");
@@ -187,15 +190,17 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect.poll(() => inventoryUrls.some((url) => url.searchParams.get("scope") === "player")).toBeTruthy();
   await expect(page.locator(".inventory-item-summary")).toHaveCount(1);
   await expect(page.locator(".inventory-item-summary")).toContainText("3");
-  await tabs.getByRole("tab", { name: "玩家" }).click();
-  await expect(page.locator(".world-player-avatar")).toHaveText("A");
+  await tabs.getByRole("tab", { name: "训练家档案" }).click();
+  await expect(page.locator(".world-player-card-avatar")).toHaveText("A");
   await expect(page.locator(".world-list-panel")).toContainText("测试工会");
-  await expect(page.locator(".world-list-panel")).toContainText("发现 12 种 · 捕获 3,456 只");
+  await expect(page.locator(".world-list-panel")).toContainText("累计捕获 3,456 只");
   await expect(page.locator(".world-list-panel")).toContainText("完整数据");
+  await page.screenshot({ path: `../.impeccable/review/${testInfo.project.name}-players.png`, fullPage: true });
 
-  await page.getByRole("button", { name: "Alice" }).click();
+  const playerCard = page.locator(".world-player-card").filter({ hasText: "Alice" });
+  await playerCard.getByRole("button", { name: "查看完整训练家档案" }).click();
   const drawer = page.getByLabel("世界实体详情");
-  await expect(page.locator('.world-table-row[data-selected="true"]')).toContainText("Alice");
+  await expect(page.locator('.world-player-card[data-selected="true"]')).toContainText("Alice");
   if (testInfo.project.name === "mobile") {
     await expect(drawer).toHaveAttribute("role", "dialog");
     await expect(drawer).toHaveAttribute("aria-modal", "true");
@@ -224,7 +229,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
   await expect(inventoryUrls.at(-1)?.searchParams.has("ownerId")).toBeFalsy();
   await expect(page.locator(".inventory-context")).toHaveCount(0);
-  await tabs.getByRole("tab", { name: "帕鲁" }).click();
+  await tabs.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
 
   await expect(page.locator(".pal-roster")).toContainText("FuturePal");
   await expect(page.locator(".pal-roster")).toContainText("据点工作");
@@ -260,7 +265,7 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   const requestCount = rosterUrls.length;
   await page.getByLabel("已应用筛选").getByRole("button", { name: "传说" }).click();
   await expect.poll(() => rosterUrls.slice(requestCount).some((url) => !url.searchParams.has("passiveSkill"))).toBeTruthy();
-  await page.getByLabel("帕鲁名册排序").selectOption("name");
+  await page.getByLabel("帕鲁图鉴花名册排序").selectOption("name");
   await expect(page.locator(".pal-roster-row").first()).toContainText("阿帕");
   await page.getByRole("button", { name: "小羊" }).click();
   const palDrawer = page.getByRole("dialog", { name: "帕鲁详情" });
@@ -294,8 +299,20 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await page.getByRole("button", { name: "需要关注" }).click();
   await expect(page.locator(".pal-roster-row")).toHaveCount(1);
 
-  await page.getByRole("tab", { name: "公会" }).click();
-  await page.getByRole("button", { name: "测试工会" }).click();
+  await page.getByRole("tab", { name: "公会与据点" }).click();
+  const guildPanel = page.locator(".world-community-panel").filter({ hasText: "全服公会组织" });
+  const basePanel = page.locator(".world-community-panel").filter({ hasText: "据点分布与工作帕鲁" });
+  await expect(guildPanel).toContainText("测试工会");
+  await expect(guildPanel).toContainText("登记训练家");
+  await expect(basePanel).toContainText("据点一号");
+  await expect(basePanel).toContainText("工作容器");
+  await expect.poll(() => {
+    const guildRequest = worldListUrls.findLast((url) => url.pathname === "/api/world/guilds");
+    const baseRequest = worldListUrls.findLast((url) => url.pathname === "/api/world/bases");
+    return guildRequest?.searchParams.get("snapshotId") === baseRequest?.searchParams.get("snapshotId") ? baseRequest?.searchParams.get("snapshotId") : null;
+  }).toBe("world");
+  await page.screenshot({ path: `../.impeccable/review/${testInfo.project.name}-community.png`, fullPage: true });
+  await page.getByRole("button", { name: "查看公会资产与成员" }).click();
   await expect(drawer).toContainText("公会资产规模");
   await expect(drawer).toContainText("物品总量");
   await expect(drawer).toContainText("12");
@@ -312,13 +329,16 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect(inventoryUrls.at(-1)?.searchParams.has("guildId")).toBeFalsy();
   await expect(page.locator(".inventory-context")).toHaveCount(0);
 
-  await page.getByRole("tab", { name: "据点" }).click();
-  await page.getByRole("button", { name: "据点一号" }).click();
+  await page.getByRole("tab", { name: "公会与据点" }).click();
+  await basePanel.getByRole("button", { name: "调整筛选" }).click();
+  await expect(basePanel.locator(".world-community-card")).toContainText("工作容器");
+  await expect(basePanel.locator(".world-community-card")).toContainText("1 / 2 / 3");
+  await page.getByRole("button", { name: "查看据点资产与工作帕鲁" }).click();
   await expect(drawer).toContainText("坐标");
   await expect(drawer).toContainText("Base ID");
   await expect(drawer).toContainText("1 / 2 / 3");
   await expect(drawer).toContainText("1 只需要关注");
-  await expect(drawer).toContainText("与帕鲁名册“需要关注”使用同一存档快照规则");
+  await expect(drawer).toContainText("与帕鲁图鉴花名册“需要关注”使用同一存档快照规则");
   await expect(drawer).toContainText("工作帕鲁");
   await expect(drawer).toContainText("据点库存");
   await drawer.getByRole("button", { name: "在仓库中查看" }).click();
@@ -327,11 +347,12 @@ test("UX-04：四类实体统一列表详情模式并支持关联跳转", async 
   await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
   await expect(inventoryUrls.at(-1)?.searchParams.has("baseId")).toBeFalsy();
   await expect(page.locator(".inventory-context")).toHaveCount(0);
-  await page.getByRole("tab", { name: "据点" }).click();
-  await page.getByRole("button", { name: "据点一号" }).click();
+  await page.getByRole("tab", { name: "公会与据点" }).click();
+  await basePanel.getByRole("button", { name: "调整筛选" }).click();
+  await page.getByRole("button", { name: "查看据点资产与工作帕鲁" }).click();
   await drawer.getByRole("button", { name: "关闭详情" }).click();
   await expect(page.locator(".world-entity-drawer:not(.empty)")).toBeHidden();
-  await expect(page.getByRole("button", { name: "据点一号" })).toBeFocused();
+  await expect(page.getByRole("button", { name: "查看据点资产与工作帕鲁" })).toBeFocused();
   await page.getByLabel("状态筛选").selectOption("guilded");
   await page.getByLabel("排序方式", { exact: true }).selectOption("id");
   await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("status") === "guilded" && url.searchParams.get("sort") === "id" && url.searchParams.get("snapshotId") === "world")).toBeTruthy();
@@ -400,7 +421,7 @@ test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async 
 
   await page.goto("/");
   await page.getByRole("button", { name: "世界", exact: true }).click();
-  await page.getByRole("tab", { name: "仓库" }).click();
+  await page.getByRole("tab", { name: "全服物资检索" }).click();
   const itemA = page.locator(".inventory-item-summary").filter({ hasText: "物品 A" });
   const itemB = page.locator(".inventory-item-summary").filter({ hasText: "物品 B" });
   await itemA.click();

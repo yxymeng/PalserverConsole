@@ -42,6 +42,45 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "Microsoft YaHei UI", sans-serif;
 }
 
+:root[data-theme="island"] {
+  color-scheme: light;
+  --background: #f4f9ff;
+  --foreground: #172033;
+  --surface: #ffffff;
+  --surface-subtle: #f2f8ff;
+  --surface-muted: #eaf4fb;
+  --surface-hover: #dff1fb;
+  --border: #d5e7f2;
+  --border-strong: #a9cfe3;
+  --muted: #475569;
+  --muted-strong: #334155;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --primary-foreground: #ffffff;
+  --primary-surface: #eaf3ff;
+  --electric: #f59e0b;
+  --electric-hover: #d97706;
+  --electric-surface: #fff7dd;
+  --success: #047857;
+  --success-surface: #ecfdf5;
+  --warning: #b45309;
+  --warning-surface: #fff7e6;
+  --danger: #be123c;
+  --danger-hover: #be123c;
+  --danger-surface: #fff1f2;
+  --sidebar: #f7fbff;
+  --sidebar-foreground: #172033;
+  --sidebar-muted: #64748b;
+  --sidebar-selected: #e9f4ff;
+  --sidebar-border: #d5e7f2;
+  --topbar: rgb(255 255 255 / 94%);
+  --focus-ring: rgb(37 99 235 / 24%);
+  --panel-glow: 0 12px 28px -26px rgb(14 116 144 / 42%);
+  --grid-line: transparent;
+  --operation-island: #0e7490;
+  --operation-island-shadow: rgb(14 116 144 / 22%);
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   --background: #1e2222;

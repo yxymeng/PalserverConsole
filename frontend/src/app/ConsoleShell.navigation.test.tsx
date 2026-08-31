@@ -30,7 +30,7 @@ test("UX-01：桌面与手机一级导航都只保留首页、世界、配置和
       shell={shell}
       onAuthChanged={() => undefined}
       theme="light"
-      onThemeToggle={() => undefined}
+      onThemeChange={() => undefined}
     />,
   );
   const navigations = markup.match(/<nav[^>]*aria-label="主导航"[^>]*>[\s\S]*?<\/nav>/g) || [];

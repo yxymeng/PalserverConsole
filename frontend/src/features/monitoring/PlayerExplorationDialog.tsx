@@ -1,11 +1,21 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
 import {
+  BookOpenCheck,
+  Box,
+  BrainCircuit,
   Compass,
   Crown,
   Flame,
+  Globe,
+  Landmark,
   MapPinned,
+  PawPrint,
   RefreshCw,
+  ScrollText,
   ShieldCheck,
+  Sparkles,
+  Swords,
+  Trophy,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -18,6 +28,7 @@ import {
   PLAYER_PROGRESS_LABELS,
   playerProgressCoverage,
   playerProgressGameTotal,
+  playerProgressPercent,
   playerProgressTotal,
   playerProgressUnavailable,
   playerProgressValue,
@@ -38,14 +49,25 @@ const PRIMARY_METRICS: Array<{
   tone: "sky" | "emerald" | "amber" | "rose";
   icon: LucideIcon;
 }> = [
-  { field: "exploredAreas", label: "地图区域", suffix: "个", tone: "sky", icon: Compass },
-  { field: "fastTravel", label: "大鹫传送点", suffix: "处", tone: "emerald", icon: MapPinned },
-  { field: "towerBosses", label: "高塔领袖挑战", suffix: "项", tone: "amber", icon: Crown },
-  { field: "oilRigClears", label: "海上油田攻破", suffix: "次", tone: "rose", icon: Flame },
+  { field: "exploredAreas", label: "全图探索度", suffix: "%", tone: "sky", icon: Globe },
+  { field: "fastTravel", label: "巨鹫之像", suffix: "处", tone: "emerald", icon: MapPinned },
+  { field: "towerBosses", label: "高塔领袖讨伐", suffix: "项", tone: "amber", icon: Crown },
+  { field: "oilRigClears", label: "海上油田要塞", suffix: "次", tone: "rose", icon: Flame },
 ];
 
 const PRIMARY_FIELDS = new Set<WorldPlayerProgressField>(PRIMARY_METRICS.map(({ field }) => field));
 const DETAIL_FIELDS = PLAYER_PROGRESS_GROUPS.flatMap(({ fields }) => fields).filter((field) => !PRIMARY_FIELDS.has(field));
+const DETAIL_PRESENTATION: Partial<Record<WorldPlayerProgressField, { icon: LucideIcon; tone: string; suffix: string }>> = {
+  discoveredPalSpecies: { icon: PawPrint, tone: "sky", suffix: "种" },
+  capturedPals: { icon: Box, tone: "emerald", suffix: "只" },
+  relics: { icon: Sparkles, tone: "teal", suffix: "座" },
+  memos: { icon: ScrollText, tone: "sky", suffix: "份" },
+  fieldBosses: { icon: Swords, tone: "rose", suffix: "项" },
+  dungeonClears: { icon: Trophy, tone: "amber", suffix: "次" },
+  technologyPoints: { icon: BrainCircuit, tone: "violet", suffix: "点" },
+  ancientTechnologyPoints: { icon: Landmark, tone: "violet", suffix: "点" },
+  recipes: { icon: BookOpenCheck, tone: "teal", suffix: "项" },
+};
 
 export function PlayerExplorationDialog({ state, onClose, onRetry }: { state: PlayerExplorationState | null; onClose: () => void; onRetry: () => void }) {
   const open = state !== null;
@@ -67,7 +89,7 @@ export function PlayerExplorationDialog({ state, onClose, onRetry }: { state: Pl
                   {detail?.level !== null && detail?.level !== undefined && <span className="psc-exploration-level">Lv.{detail.level}</span>}
                   {progress && <span className="psc-exploration-coverage" data-state={progress.state}>{playerProgressCoverage(progress)}</span>}
                 </div>
-                <p>{detail ? `存档记录：${recordedAt(detail.lastRecordedAt)}` : "正在读取只读存档快照"}</p>
+                <p>{detail ? <><span>Player ID：{detail.id}</span><span>存档记录：{recordedAt(detail.lastRecordedAt)}</span></> : "正在读取只读存档快照"}</p>
               </div>
             </div>
             <DialogPrimitive.Close className="psc-exploration-close" aria-label="关闭探索进度"><X aria-hidden="true" /></DialogPrimitive.Close>
@@ -82,21 +104,35 @@ export function PlayerExplorationDialog({ state, onClose, onRetry }: { state: Pl
                   const value = playerProgressValue(progress, field);
                   const total = playerProgressTotal(progress, field);
                   const numericValue = progress.values[field];
+                  const percentage = playerProgressPercent(progress, field);
                   const oilRigLocations = field === "oilRigClears" ? playerProgressGameTotal(progress, "oilRigLocations") : null;
-                  return <article key={field} data-tone={tone}><div><span>{label}</span><Icon aria-hidden="true" /></div><strong>{value ?? "不可用"}{total !== null ? <small>/ {total}</small> : value !== null ? <small>{suffix}</small> : null}</strong>{field === "oilRigClears" && oilRigLocations !== null ? <p>{value === null ? "累计通关次数未记录" : "累计通关次数"} · 游戏共 {oilRigLocations} 处油田</p> : numericValue !== undefined && total !== null ? <progress max={total} value={Math.min(numericValue, total)} aria-label={`${label} ${numericValue} / ${total}`} /> : <p>{PLAYER_PROGRESS_LABELS[field]}</p>}</article>;
+                  const primaryValue = field === "exploredAreas" ? percentageText(percentage) : value;
+                  return <article key={field} data-tone={tone}>
+                    <div><span>{label}</span><span className="psc-exploration-metric-icon"><Icon aria-hidden="true" /></span></div>
+                    <strong>{primaryValue ?? "不可用"}{field !== "exploredAreas" && total !== null ? <small>/ {total}</small> : field !== "exploredAreas" && value !== null ? <small>{suffix}</small> : null}</strong>
+                    {field === "exploredAreas" && percentage !== null ? <><p>已探索 {value} / {total} 个区域</p><progress max={100} value={percentage} aria-label={`全图探索度 ${percentageText(percentage)}`} /></>
+                      : field === "oilRigClears" && oilRigLocations !== null ? <p>{value === null ? "累计通关次数未记录" : "累计通关次数"} · 游戏共 {oilRigLocations} 处油田</p>
+                        : numericValue !== undefined && total !== null ? <progress max={total} value={Math.min(numericValue, total)} aria-label={`${label} ${numericValue} / ${total}`} />
+                          : <p>{PLAYER_PROGRESS_LABELS[field]}</p>}
+                  </article>;
                 })}
               </section>
 
               <section className="psc-exploration-details" aria-labelledby="exploration-details-title">
                 <h3 id="exploration-details-title"><ShieldCheck aria-hidden="true" />核心冒险与收集指标</h3>
-                <dl className="psc-exploration-detail-grid">
-                  {DETAIL_FIELDS.filter((field) => progress.values[field] !== undefined).map((field) => (
-                    <div key={field}>
-                      <dt>{PLAYER_PROGRESS_LABELS[field]}</dt>
-                      <dd>{playerProgressValue(progress, field)}</dd>
-                    </div>
-                  ))}
-                </dl>
+                <div className="psc-exploration-detail-grid">
+                  {DETAIL_FIELDS.filter((field) => progress.values[field] !== undefined).map((field) => {
+                    const presentation = DETAIL_PRESENTATION[field] ?? { icon: ShieldCheck, tone: "sky", suffix: "" };
+                    const Icon = presentation.icon;
+                    const value = playerProgressValue(progress, field);
+                    const total = playerProgressTotal(progress, field);
+                    return <div key={field} data-tone={presentation.tone}>
+                      <span className="psc-exploration-detail-icon"><Icon aria-hidden="true" /></span>
+                      <span className="psc-exploration-detail-label">{PLAYER_PROGRESS_LABELS[field]}</span>
+                      <span className="psc-exploration-detail-value">{value}{total !== null && <small>/ {total}</small>}<small>{presentation.suffix}</small></span>
+                    </div>;
+                  })}
+                </div>
               </section>
 
               {progress.state !== "complete" && <div className="psc-exploration-coverage-note"><strong>{playerProgressCoverage(progress)}</strong><p>{progress.state === "partial" ? `未显示不可确认的字段：${playerProgressUnavailable(progress).join("、")}。` : "当前玩家存档没有可确认的探索进度字段。"}</p></div>}
@@ -121,4 +157,8 @@ function recordedAt(value: string | null): string {
   if (!value) return "时间不可用";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
+}
+
+function percentageText(value: number | null): string | null {
+  return value === null ? null : `${Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1)}%`;
 }

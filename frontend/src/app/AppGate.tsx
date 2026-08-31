@@ -11,13 +11,13 @@ import { ThemeToggle } from "./ThemeToggle";
 
 const THEME_STORAGE_KEY = "palserver-console-theme";
 const LEGACY_PALETTE_STORAGE_KEY = "palserver-console-palette";
-const THEME_COLORS: Record<Theme, string> = { light: "#fafaf8", dark: "#1e2222" };
+const THEME_COLORS: Record<Theme, string> = { light: "#fafaf8", island: "#f4f9ff", dark: "#1e2222" };
 
 function initialTheme(): Theme {
   if (typeof window === "undefined") return "light";
   try {
     const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return saved === "dark" || saved === "light" ? saved : "light";
+    return saved === "dark" || saved === "island" || saved === "light" ? saved : "light";
   } catch {
     return "light";
   }
@@ -76,30 +76,28 @@ export function AppGate() {
       ?.setAttribute("content", THEME_COLORS[theme]);
   }, [theme]);
 
-  const toggleTheme = useCallback(() => {
-    setTheme((current) => current === "light" ? "dark" : "light");
-  }, []);
+  const selectTheme = useCallback((nextTheme: Theme) => setTheme(nextTheme), []);
 
   if (loadError) {
-    return <ConnectionError message={loadError} onRetry={() => void load()} theme={theme} onThemeToggle={toggleTheme} />;
+    return <ConnectionError message={loadError} onRetry={() => void load()} theme={theme} onThemeChange={selectTheme} />;
   }
   if (!auth) {
-    return <LoadingScreen theme={theme} onThemeToggle={toggleTheme} />;
+    return <LoadingScreen theme={theme} onThemeChange={selectTheme} />;
   }
   if (!auth.authenticated) {
-    return <LoginScreen warning={auth.lanWarning} onSuccess={() => void load()} theme={theme} onThemeToggle={toggleTheme} />;
+    return <LoginScreen warning={auth.lanWarning} onSuccess={() => void load()} theme={theme} onThemeChange={selectTheme} />;
   }
-  return <ConsoleShell auth={auth} shell={shell} onAuthChanged={() => void load()} theme={theme} onThemeToggle={toggleTheme} />;
+  return <ConsoleShell auth={auth} shell={shell} onAuthChanged={() => void load()} theme={theme} onThemeChange={selectTheme} />;
 }
 
-function LoadingScreen({ theme, onThemeToggle }: { theme: Theme; onThemeToggle: () => void }) {
-  return <AppShellSkeleton theme={theme} onThemeToggle={onThemeToggle} />;
+function LoadingScreen({ theme, onThemeChange }: { theme: Theme; onThemeChange: (theme: Theme) => void }) {
+  return <AppShellSkeleton theme={theme} onThemeChange={onThemeChange} />;
 }
 
-function ConnectionError({ message, onRetry, theme, onThemeToggle }: { message: string; onRetry: () => void; theme: Theme; onThemeToggle: () => void }) {
+function ConnectionError({ message, onRetry, theme, onThemeChange }: { message: string; onRetry: () => void; theme: Theme; onThemeChange: (theme: Theme) => void }) {
   return (
     <main className="centered-page">
-      <ThemeToggle theme={theme} onToggle={onThemeToggle} className="screen-theme-toggle" />
+      <ThemeToggle theme={theme} onChange={onThemeChange} className="screen-theme-toggle" />
       <div className="brand-mark danger"><AlertTriangle size={24} /></div>
       <h1>无法连接控制台</h1>
       <p className="error-detail">{message}</p>
@@ -110,7 +108,7 @@ function ConnectionError({ message, onRetry, theme, onThemeToggle }: { message: 
   );
 }
 
-function LoginScreen({ warning, onSuccess, theme, onThemeToggle }: { warning: string | null; onSuccess: () => void; theme: Theme; onThemeToggle: () => void }) {
+function LoginScreen({ warning, onSuccess, theme, onThemeChange }: { warning: string | null; onSuccess: () => void; theme: Theme; onThemeChange: (theme: Theme) => void }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -134,7 +132,7 @@ function LoginScreen({ warning, onSuccess, theme, onThemeToggle }: { warning: st
 
   return (
     <main className="login-page">
-      <ThemeToggle theme={theme} onToggle={onThemeToggle} className="screen-theme-toggle" />
+      <ThemeToggle theme={theme} onChange={onThemeChange} className="screen-theme-toggle" />
       <section className="login-panel">
         <div className="brand-row">
           <BrandMark />

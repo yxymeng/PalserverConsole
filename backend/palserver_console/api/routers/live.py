@@ -6,6 +6,8 @@ from typing import cast
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
+from ...bans import BanListError, read_banned_player_ids
+from ...config import ProfileError
 from ...dependencies import AppDependencies
 from ...monitoring import SourceError
 from ..schemas import LiveActionRequest
@@ -50,6 +52,25 @@ def _live_action(
 
 def router(deps: AppDependencies) -> APIRouter:
     api = APIRouter()
+
+    @api.get("/api/live/bans", tags=["live"], response_model=None)
+    def live_bans(request: Request) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        try:
+            player_ids = read_banned_player_ids(deps.profiles.profile().install_path)
+        except ProfileError as error:
+            return error_response(409, error.code, str(error))
+        except BanListError as error:
+            return error_response(503, error.code, str(error))
+        return {
+            "items": [{"userId": player_id} for player_id in player_ids],
+            "source": "palserver-banlist",
+            "observedAt": int(time.time()),
+            "stale": False,
+            "errorCode": None,
+        }
 
     @api.get("/api/live/{kind}", tags=["live"], response_model=None)
     def live_data(kind: str, request: Request) -> dict[str, object] | JSONResponse:

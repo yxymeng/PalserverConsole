@@ -1,9 +1,38 @@
-import type { LiveSnapshot, LiveValue, ProcessMetrics, WorldStatus } from "../../api/contracts";
+import type { AuditItem, LiveSnapshot, LiveValue, ProcessMetrics, WorldStatus } from "../../api/contracts";
 import type { LiveConnectionStatus } from "../../hooks/useLiveEvents";
 import { playerText } from "../../utils/format";
 
 export type PlayerDataState = "loading" | "error" | "empty" | "ready";
 export type PlayerPingTone = "good" | "medium" | "high" | "unavailable";
+
+const GAME_ACTIVITY_TYPES = new Set(["player.joined", "player.left", "chat.message"]);
+
+export function isGameActivity(item: AuditItem): boolean {
+  return GAME_ACTIVITY_TYPES.has(item.eventType);
+}
+
+export function gameActivityPresentation(item: AuditItem): { title: string; detail: string } {
+  const detail = item.detail;
+  if (item.eventType === "chat.message") {
+    const name = text(detail.name, "未知训练家");
+    return { title: `${name} 发言`, detail: text(detail.message, "消息内容不可用") };
+  }
+  const player = detail.player && typeof detail.player === "object" ? detail.player as Record<string, unknown> : undefined;
+  const name = playerText(player || {}, ["name", "playerName", "accountName"], "")
+    || text(detail.subject, "") || text(detail.playerId, "未知训练家");
+  return {
+    title: item.eventType === "player.joined" ? `${name} 进入了服务器` : `${name} 离开了服务器`,
+    detail: item.source === "player-diff" ? "来自在线训练家状态变化" : "来自 PalServer 日志",
+  };
+}
+
+export function gameActivityTime(createdAt: number, now = Date.now() / 1_000): string {
+  const seconds = Math.max(0, Math.floor(now - createdAt));
+  if (seconds < 60) return "刚刚";
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} 分钟前`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3_600)} 小时前`;
+  return `${Math.floor(seconds / 86_400)} 天前`;
+}
 
 export function worldPlayerId(player: Record<string, unknown>): string {
   return playerText(player, ["playerId", "playerUid"], "");
@@ -97,4 +126,8 @@ function playerNumber(player: Record<string, unknown>, keys: string[]): number |
     if (Number.isFinite(value)) return value;
   }
   return null;
+}
+
+function text(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
 }

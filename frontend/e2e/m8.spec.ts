@@ -103,17 +103,26 @@ test("M8 operation contract、错误码和移动端交互", async ({ page }, tes
     expect(characterBox.x + characterBox.width / 2).toBeLessThanOrEqual(heroBox.x + heroBox.width * .78);
   }
   await expect(hero.getByRole("heading", { name: "未命名的帕鲁世界" })).toBeVisible();
+  const topbarState = page.locator(".psc-server-status");
+  const heroState = hero.locator(".psc-home-state");
+  await expect(topbarState).toHaveText("已停止");
+  await expect(heroState).toHaveText("已停止");
+  const stateStyles = await Promise.all([topbarState, heroState].map((locator) => locator.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return [style.color, style.backgroundColor, style.borderColor, style.borderRadius];
+  })));
+  expect(stateStyles[0]).toEqual(stateStyles[1]);
   const liveStatus = page.getByLabel("实时服务器状态");
   await expect(page.getByLabel("PalServer 当前状态")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "服务器状态" })).toHaveCount(0);
   await expect(liveStatus).not.toContainText("服务器状态");
-  await expect(liveStatus).toContainText("在线训练家");
-  const hostStatus = page.getByLabel("CPU 与内存状态");
-  await expect(hostStatus).toContainText("CPU");
-  await expect(hostStatus).toContainText("内存");
-  const diskStatus = page.getByLabel("磁盘读写状态");
-  await expect(diskStatus).toContainText("磁盘读取");
-  await expect(diskStatus).toContainText("磁盘写入");
+  await expect(liveStatus).toContainText("世界累计游戏时间");
+  await expect(liveStatus).not.toContainText("在线训练家");
+  await expect(liveStatus).toContainText("内存占用负载");
+  await expect(liveStatus).toContainText("世界生态图鉴");
+  await expect(page.getByText("CPU", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("磁盘读取", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("磁盘写入", { exact: true })).toHaveCount(0);
 
   const startButton = page.getByRole("button", { name: "启动" });
   if (testInfo.project.name === "mobile") await startButton.tap();

@@ -1,9 +1,9 @@
-import { Activity, Database, FileCog, LogOut, Wrench } from "lucide-react";
+import { Activity, Database, FileCog, LogOut, Megaphone, Wrench } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 
 import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { requestJson } from "../api/client";
-import { Badge } from "../components/ui/badge";
+import { BroadcastDialog } from "../components/BroadcastDialog";
 import { BlurFade } from "../components/ui/blur-fade";
 import { Button } from "../components/ui/button";
 import { MaintenancePage } from "../features/maintenance/MaintenancePage";
@@ -60,13 +60,13 @@ export function ConsoleShell({
   shell,
   onAuthChanged,
   theme,
-  onThemeToggle,
+  onThemeChange,
 }: {
   auth: AuthStatus;
   shell: ShellStatus | null;
   onAuthChanged: () => void;
   theme: Theme;
-  onThemeToggle: () => void;
+  onThemeChange: (theme: Theme) => void;
 }) {
   const [active, setActive] = useState<PageKey>(initialPage);
   const [configWorkspace, setConfigWorkspace] = useState<"game" | "instance">("game");
@@ -84,7 +84,7 @@ export function ConsoleShell({
         onConfigWorkspaceChange={setConfigWorkspace}
         onAuthChanged={onAuthChanged}
         onShellStatusChange={setCurrentShell}
-        onThemeToggle={onThemeToggle}
+        onThemeChange={onThemeChange}
       />
     </div>
   );
@@ -100,7 +100,7 @@ function ConsoleLayout({
   onConfigWorkspaceChange,
   onAuthChanged,
   onShellStatusChange,
-  onThemeToggle,
+  onThemeChange,
 }: {
   active: PageKey;
   auth: AuthStatus;
@@ -111,8 +111,9 @@ function ConsoleLayout({
   onConfigWorkspaceChange: (workspace: "game" | "instance") => void;
   onAuthChanged: () => void;
   onShellStatusChange: (status: ShellStatus) => void;
-  onThemeToggle: () => void;
+  onThemeChange: (theme: Theme) => void;
 }) {
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const pageTitle = NAVIGATION.find((item) => item.key === active)?.label || "首页";
 
   function activate(page: PageKey) {
@@ -126,24 +127,27 @@ function ConsoleLayout({
         <div className="psc-topbar-inner">
           <div className="psc-desktop-brand" aria-label={text.product}>
             <BrandMark />
-            <span className="psc-brand-copy"><strong>{text.product}</strong><small>PalServer 值守台</small></span>
+            <span className="psc-brand-copy">
+              <strong>{text.product}</strong>
+              <span
+                className="psc-server-status"
+                data-state={shell?.serverState ?? "loading"}
+              >
+                <span className="status-dot" aria-hidden="true" />
+                {shell ? serverStateLabel(shell.serverState) : "读取中"}
+              </span>
+            </span>
           </div>
           <h1 className="psc-mobile-page-title">{pageTitle}</h1>
           <PrimaryNavigation className="psc-desktop-navigation" active={active} onActivate={activate} />
           <div className="psc-topbar-actions">
-              <Badge
-                className="psc-server-status"
-                data-state={shell?.serverState ?? "loading"}
-                variant="outline"
-              >
-              <span className="status-dot" aria-hidden="true" />
-              {shell ? serverStateLabel(shell.serverState) : "读取中"}
-            </Badge>
-            <ThemeToggle theme={theme} onToggle={onThemeToggle} />
+            <Button className="psc-topbar-control psc-broadcast-trigger" variant="outline" size="sm" type="button" aria-label="发送全服广播" title="发送全服广播" onClick={() => setBroadcastOpen(true)}><Megaphone data-icon="inline-start" aria-hidden="true" /><span>广播</span></Button>
+            <ThemeToggle theme={theme} onChange={onThemeChange} />
             {!auth.local && <LogoutButton csrfToken={auth.csrfToken} onDone={onAuthChanged} />}
           </div>
         </div>
       </header>
+      <BroadcastDialog auth={auth} open={broadcastOpen} onOpenChange={setBroadcastOpen} />
 
       <main className="psc-main" aria-label={`${pageTitle}页面`}>
         <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={0} blur="3px">

@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from palserver_console.bans import read_banned_player_ids
 from palserver_console.config import AppSettings
 from palserver_console.main import create_app
 from palserver_console.monitoring import (
@@ -582,3 +583,47 @@ def test_m3_api_exposes_full_ip_sse_and_never_returns_admin_password(tmp_path: P
 
         assert any(getattr(route, "path", None) == "/api/events" for route in app.routes)
         assert "event: snapshot" in next(monitor.stream())
+
+
+def test_ban_list_reads_palserver_file_and_unbans_selected_user(tmp_path: Path) -> None:
+    install_path = tmp_path / "PalServer"
+    executable = install_path / "PalServer.exe"
+    world_path = install_path / "Pal" / "Saved" / "SaveGames" / "0" / "world-1"
+    ban_list_path = install_path / "Pal" / "Saved" / "SaveGames" / "banlist.txt"
+    world_path.mkdir(parents=True)
+    executable.write_bytes(b"")
+    (world_path / "Level.sav").write_bytes(b"test")
+    ban_list_path.write_text(
+        "\ufeffsteam_111\n# comment\nsteam_222\nsteam_111\n", encoding="utf-8"
+    )
+    assert read_banned_player_ids(install_path) == ["steam_111", "steam_222"]
+
+    monitor, rest, _ = _monitor()
+    settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
+    app = create_app(settings, monitor=monitor)
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8223",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        deps = app.state.dependencies
+        deps.database.set_setting("server.executable", str(executable))
+        deps.database.save_server_profile(
+            str(executable), str(install_path), "world-1", str(world_path)
+        )
+        response = client.get("/api/live/bans")
+        assert response.status_code == 200
+        assert response.json()["items"] == [
+            {"userId": "steam_111"},
+            {"userId": "steam_222"},
+        ]
+        assert response.json()["source"] == "palserver-banlist"
+
+        auth = client.get("/api/auth/status").json()
+        unban = client.post(
+            "/api/live/players/steam_111/unban",
+            headers={"Origin": "http://127.0.0.1:8223", "X-CSRF-Token": auth["csrfToken"]},
+        )
+        assert unban.status_code == 200
+        assert rest.actions == [("unban", ("steam_111",))]

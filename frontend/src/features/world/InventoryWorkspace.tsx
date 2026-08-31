@@ -202,9 +202,9 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   const allUnknown = Boolean(result?.items.length) && result!.items.every((item) => !item.metadataKnown);
   const quantityLabel = ({ inventory: "持有总量", player: "玩家背包", base: "据点箱子", world: "世界容器总量", all: "全世界总量" } as const)[context.scope];
 
-  return <section className="inventory-workspace" aria-label="仓库">
+  return <section className="inventory-workspace" aria-label="全服物资检索">
     <header className="world-module-heading inventory-heading">
-      <div><p className="world-module-kicker">玩家持有资产</p><h2>仓库</h2><p>默认仅汇总玩家背包、据点箱子与公会箱子；世界宝箱和其他地图容器不计入仓库。</p></div>
+      <div><h2>全服物资检索</h2><p>默认汇总玩家背包、据点箱子与公会箱子；世界宝箱和其他地图容器不计入仓库。</p></div>
       <span className="world-module-total inventory-total">{result ? `共 ${result.total.toLocaleString()} 种物品` : "等待快照"}</span>
     </header>
     {context.label && <div className="inventory-context" role="status"><MapPin size={17} aria-hidden="true" /><span>当前仅显示：{context.label}</span><button className="world-clear-button" type="button" onClick={onClearContext}><X size={15} />返回全部仓库</button></div>}

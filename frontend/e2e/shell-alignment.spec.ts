@@ -76,11 +76,13 @@ test("桌面四个一级页面共用同一层品牌、导航与状态顶栏", as
   const initialTopbar = await topbar.boundingBox();
   if (!initialTopbar) throw new Error("桌面顶栏未渲染");
   const brandBox = await page.locator(".psc-desktop-brand").boundingBox();
-  const themeBox = await page.getByRole("button", { name: "切换到深色界面" }).boundingBox();
+  const broadcastBox = await page.getByRole("button", { name: "发送全服广播" }).boundingBox();
+  const themeBox = await page.getByRole("combobox", { name: "选择界面主题，当前极简" }).boundingBox();
   const heroBox = await page.locator(".psc-home-command").boundingBox();
-  if (!brandBox || !themeBox || !heroBox) throw new Error("无法校验壳层左右对齐");
+  if (!brandBox || !broadcastBox || !themeBox || !heroBox) throw new Error("无法校验壳层左右对齐");
   expect(Math.abs(heroBox.x - brandBox.x)).toBeLessThanOrEqual(2);
   expect(Math.abs(heroBox.x + heroBox.width - (themeBox.x + themeBox.width))).toBeLessThanOrEqual(2);
+  expect(broadcastBox.height).toBe(themeBox.height);
 
   for (const name of ["首页", "世界", "配置", "维护"]) {
     await navigation.getByRole("button", { name, exact: true }).click();
@@ -104,7 +106,8 @@ test("手机顶部只保留页面标题与状态操作，底部固定四项一�
 
   await page.goto("/");
   const navigation = page.locator(".psc-mobile-navigation");
-  await expect(page.locator(".psc-desktop-brand")).toBeHidden();
+  await expect(page.locator(".psc-desktop-brand")).toBeVisible();
+  await expect(page.locator(".psc-brand-copy > strong")).toBeHidden();
   await expect(page.locator(".psc-desktop-navigation")).toBeHidden();
   await expect(page.getByRole("heading", { name: "首页", exact: true })).toBeVisible();
   await expect(page.locator(".psc-server-status")).toBeVisible();

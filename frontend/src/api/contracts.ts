@@ -60,6 +60,14 @@ export type LiveSnapshot = {
   metrics: LiveValue<{ server?: Record<string, unknown>; process?: ProcessMetrics }>;
   settings: LiveValue<Record<string, unknown>>;
 };
+export type BannedPlayer = { userId: string };
+export type BanListResponse = {
+  items: BannedPlayer[];
+  source: string;
+  observedAt: number;
+  stale: boolean;
+  errorCode: string | null;
+};
 export type ProcessMetrics = {
   pids: number[];
   cpuPercent: number;
@@ -379,7 +387,7 @@ export type WorldEntityDetail = WorldSnapshotContext & (
   | WorldGuildDetail
   | WorldBaseDetail
 );
-export type Theme = "light" | "dark";
+export type Theme = "light" | "island" | "dark";
 
 export type BackupItem = { id: string; observedAt: number; sizeBytes: number; valid: boolean; missing: string[] };
 export type RestoreRecoveryJournal = {

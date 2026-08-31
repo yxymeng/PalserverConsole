@@ -32,7 +32,7 @@ export function PageSkeleton({ page, label }: { page: SkeletonPage; label: strin
   );
 }
 
-export function AppShellSkeleton({ theme, onThemeToggle }: { theme: Theme; onThemeToggle: () => void }) {
+export function AppShellSkeleton({ theme, onThemeChange }: { theme: Theme; onThemeChange: (theme: Theme) => void }) {
   return (
     <div className="psc-shell psc-shell-skeleton">
       <header className="psc-topbar">
@@ -47,7 +47,7 @@ export function AppShellSkeleton({ theme, onThemeToggle }: { theme: Theme; onThe
           </div>
           <div className="psc-topbar-actions">
             <span className="psc-skeleton-block psc-shell-skeleton-status" aria-hidden="true" />
-            <ThemeToggle theme={theme} onToggle={onThemeToggle} />
+            <ThemeToggle theme={theme} onChange={onThemeChange} />
           </div>
         </div>
       </header>

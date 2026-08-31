@@ -26,19 +26,24 @@ async function openWorldData(page: Page) {
   await page.getByRole("button", { name: "世界", exact: true }).click();
 }
 
-test("UX-11：无可用快照时六个工作区都明确说明影响", async ({ page }) => {
+test("UX-11：无可用快照时五个工作区都明确说明影响", async ({ page }) => {
   await routeShell(page);
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: { ...status, snapshotId: null, parseStatus: "unavailable", overview: null } }));
 
   await openWorldData(page);
-  await expect(page.getByRole("heading", { name: "存档快照不可用" })).toBeVisible();
+  await expect(page.locator(".world-snapshot-status summary")).toContainText("存档快照不可用");
   await expect(page.locator(".world-overview-empty")).toContainText("总览等待可用快照");
 
   const tabs = page.getByRole("tablist", { name: "世界资产工作区" });
-  for (const label of ["玩家", "帕鲁名册", "仓库", "据点", "公会"]) {
+  for (const label of ["训练家档案", "帕鲁图鉴花名册", "全服物资检索"]) {
     await tabs.getByRole("tab", { name: label }).click();
     await expect(page.locator(".world-workspace")).toContainText("当前没有可用世界快照");
   }
+  await tabs.getByRole("tab", { name: "公会与据点" }).click();
+  await expect(page.getByRole("heading", { name: "全服公会组织" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "据点分布与工作帕鲁" })).toBeVisible();
+  await expect(page.locator(".world-community-panel").filter({ hasText: "全服公会组织" })).toContainText("当前没有可用世界快照");
+  await expect(page.locator(".world-community-panel").filter({ hasText: "据点分布与工作帕鲁" })).toContainText("当前没有可用世界快照");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
@@ -66,11 +71,11 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }) => {
   await failure.getByRole("button", { name: "重新尝试" }).click();
   await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
 
-  await page.getByRole("tab", { name: "玩家" }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
   await expect(failure).toContainText("WORLD_PLAYER_LIST_UNAVAILABLE");
   failPlayerList = false;
   await failure.getByRole("button", { name: "重新尝试" }).click();
-  await expect(page.getByRole("button", { name: "状态测试玩家" })).toBeVisible();
+  await expect(page.locator(".world-player-card")).toContainText("状态测试玩家");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
@@ -80,29 +85,29 @@ test("UX-11：stale 或失败的在线玩家显示为不可用", async ({ page }
   await page.route("**/api/live/players", (route) => route.fulfill({ json: livePlayers }));
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
 
-  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
+  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ hasText: "登记训练家" });
   await openWorldData(page);
-  await expect(playerMetric()).toContainText("3 / 1");
+  await expect(playerMetric()).toContainText("当前在线 3 名");
 
   livePlayers = { ...livePlayers, stale: true };
   await page.reload();
   await openWorldData(page);
-  await expect(playerMetric()).toContainText("— / 1");
+  await expect(playerMetric()).toContainText("在线人数当前不可用");
 
   livePlayers = { ...livePlayers, stale: false, errorCode: "LIVE_PLAYERS_UNAVAILABLE" };
   await page.reload();
   await openWorldData(page);
-  await expect(playerMetric()).toContainText("— / 1");
+  await expect(playerMetric()).toContainText("在线人数当前不可用");
 
   livePlayers = { ...livePlayers, data: [], errorCode: null };
   await page.reload();
   await openWorldData(page);
-  await expect(playerMetric()).toContainText("0 / 1");
+  await expect(playerMetric()).toContainText("当前在线 0 名");
 
   livePlayers = { ...livePlayers, data: { raw: "name,playeruid,steamid" } };
   await page.reload();
   await openWorldData(page);
-  await expect(playerMetric()).toContainText("— / 1");
+  await expect(playerMetric()).toContainText("在线人数当前不可用");
 });
 
 test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }) => {
@@ -119,9 +124,9 @@ test("UX-11：总览保持打开时在线玩家持续刷新", async ({ page }) =
   }));
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: status }));
 
-  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ has: page.getByText("玩家", { exact: true }) }).locator(".world-overview-asset-value");
+  const playerMetric = () => page.locator(".world-overview-assets > button").filter({ hasText: "登记训练家" });
   await openWorldData(page);
-  await expect(playerMetric()).toContainText("1 / 1");
+  await expect(playerMetric()).toContainText("当前在线 1 名");
   playerCount = 2;
-  await expect(playerMetric()).toContainText("2 / 1", { timeout: 7_000 });
+  await expect(playerMetric()).toContainText("当前在线 2 名", { timeout: 7_000 });
 });

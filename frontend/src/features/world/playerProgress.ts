@@ -3,7 +3,7 @@ import type { WorldPlayerProgress, WorldPlayerProgressField, WorldPlayerProgress
 export const PLAYER_PROGRESS_LABELS: Record<WorldPlayerProgressField, string> = {
   discoveredPalSpecies: "已发现帕鲁种类",
   capturedPals: "累计捕获帕鲁数量",
-  fastTravel: "已解锁传送点",
+  fastTravel: "已解锁巨鹫之像",
   relics: "已收集翠叶鼠雕像",
   memos: "已收集手记",
   exploredAreas: "已探索区域",
@@ -62,6 +62,12 @@ export function playerProgressTotal(progress: WorldPlayerProgress, field: WorldP
 export function playerProgressGameTotal(progress: WorldPlayerProgress, field: WorldPlayerProgressTotalField): number | null {
   const total = progress.totals?.[field];
   return total !== undefined && total > 0 ? total : null;
+}
+
+export function playerProgressPercent(progress: WorldPlayerProgress, field: WorldPlayerProgressField): number | null {
+  const value = progress.values[field];
+  const total = playerProgressTotal(progress, field);
+  return value === undefined || total === null ? null : Math.round((value / total) * 1000) / 10;
 }
 
 function number(value: number): string {

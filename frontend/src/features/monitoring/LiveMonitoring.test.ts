@@ -2,6 +2,9 @@ import { expect, test } from "vitest";
 
 import type { LiveSnapshot, WorldStatus } from "../../api/contracts";
 import {
+  gameActivityPresentation,
+  gameActivityTime,
+  isGameActivity,
   liveTitleText,
   onlinePlayersSummary,
   playerDataState,
@@ -131,4 +134,15 @@ test("服务器帧率只显示 fps 数值与单位", () => {
   expect(serverFrameSummary({ serverfps: 59.1 })).toEqual({ value: "59.1 fps" });
   expect(serverFrameSummary({ ServerFPS: "60" })).toEqual({ value: "60 fps" });
   expect(serverFrameSummary({ serverfps: 0 })).toEqual({ value: "不可用" });
+});
+
+test("首页游戏内动态只呈现真实的进出与聊天事件", () => {
+  const base = { id: 1, peerIp: null, result: "success", createdAt: 100, source: "player-diff", parserVersion: null };
+  const joined = { ...base, eventType: "player.joined", detail: { player: { name: "Luna" } } };
+  const chat = { ...base, id: 2, eventType: "chat.message", source: "palserver-log", detail: { name: "Luna", message: "一起打塔吗？" } };
+  expect(isGameActivity(joined)).toBe(true);
+  expect(isGameActivity({ ...base, eventType: "server.operation", detail: {} })).toBe(false);
+  expect(gameActivityPresentation(joined)).toEqual({ title: "Luna 进入了服务器", detail: "来自在线训练家状态变化" });
+  expect(gameActivityPresentation(chat)).toEqual({ title: "Luna 发言", detail: "一起打塔吗？" });
+  expect(gameActivityTime(100, 220)).toBe("2 分钟前");
 });

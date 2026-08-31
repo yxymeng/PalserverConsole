@@ -1,4 +1,4 @@
-import { AlertTriangle, Wrench } from "lucide-react";
+import { AlertTriangle, Clock3, Wrench } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { AuthStatus, ConfigDocument, LiveSnapshot, OperationalHealth, ShellStatus } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
@@ -34,7 +34,7 @@ export function Overview({ shell, auth, onOpenMaintenance, onShellStatusChange }
       <HomeHero status={shell} config={config} snapshot={liveSnapshot}>
         <ServerControlPanel auth={auth} initialStatus={shell} onStatusChange={onShellStatusChange} />
       </HomeHero>
-      <LiveMonitoring auth={auth} embedded shell={shell} onSnapshot={setLiveSnapshot} />
+      <LiveMonitoring auth={auth} embedded onSnapshot={setLiveSnapshot} />
       <OperationalHealthNotice onOpenMaintenance={onOpenMaintenance} />
     </div>
   );
@@ -87,6 +87,7 @@ function HomeHero({ children, status, config, snapshot }: { children: ReactNode;
                 {status ? serverStateLabel(status.serverState) : "读取中"}
               </span>
               {version && <span className="psc-home-version">v{version.replace(/^v/i, "")}</span>}
+              <span className="psc-home-uptime"><Clock3 aria-hidden="true" />连续运行：<HomeUptime state={status?.serverState} startedAt={snapshot?.metrics.data.process?.startedAt} /></span>
             </div>
             <CardTitle role="heading" aria-level={2}>{serverName}</CardTitle>
             <CardDescription>{description}</CardDescription>
@@ -99,6 +100,25 @@ function HomeHero({ children, status, config, snapshot }: { children: ReactNode;
       </div>
     </Card>
   );
+}
+
+function HomeUptime({ state, startedAt }: { state?: ShellStatus["serverState"]; startedAt?: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (state !== "running") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [state]);
+
+  if (!state) return "读取中";
+  if (state !== "running") return "未运行";
+  if (!startedAt) return "不可用";
+  const seconds = Math.max(0, Math.floor(now / 1_000 - startedAt));
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor(seconds % 86_400 / 3_600);
+  const minutes = Math.floor(seconds % 3_600 / 60);
+  return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分`;
 }
 
 function configText(value: string | undefined): string {
