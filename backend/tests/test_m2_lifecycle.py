@@ -264,7 +264,7 @@ def test_shutdown_timeout_requires_confirmation_before_force_stop(tmp_path: Path
 
 
 @pytest.mark.parametrize("kind", ["stop", "restart"])
-def test_normal_stop_and_restart_never_apply_pending_config(
+def test_normal_stop_and_restart_apply_pending_config_before_return_or_start(
     tmp_path: Path, kind: Literal["stop", "restart"]
 ) -> None:
     database, executable = _configured_database(tmp_path)
@@ -273,77 +273,50 @@ def test_normal_stop_and_restart_never_apply_pending_config(
     service = ConfigService(
         database, tmp_path / "data", lambda: executable, lambda: process.running
     )
-    service.save_draft({"AutoSaveSpan": "900"})
+    service.save_ini({"AutoSaveSpan": "900"})
     config_path = (
         executable.parent / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
     )
-    source_before = config_path.read_text(encoding="utf-8")
-    pending_before = (tmp_path / "data" / "pending" / "PalWorldSettings.ini").read_text(
-        encoding="utf-8"
-    )
+    assert "AutoSaveSpan=900" not in config_path.read_text(encoding="utf-8")
     manager = LifecycleManager(
         database,
         process=process,
         rest_factory=lambda _: rest,
     )
-    manager.set_config_apply(service.apply)
+    manager.set_pending_config_apply(service.apply_pending)
 
     created = manager.begin(kind, f"normal-{kind}", countdown_seconds=0)
     result = _wait_for_terminal(database, cast(str, created["id"]))
     assert result["state"] == "succeeded"
     assert rest.calls == ["save", "shutdown"]
-    assert config_path.read_text(encoding="utf-8") == source_before
-    assert (tmp_path / "data" / "pending" / "PalWorldSettings.ini").read_text(
-        encoding="utf-8"
-    ) == pending_before
-    assert database.get_config_draft() is not None
+    assert "AutoSaveSpan=900" in config_path.read_text(encoding="utf-8")
+    assert database.get_config_draft() is None
+    if kind == "restart":
+        assert len(process.started) == 1
 
 
-def test_explicit_apply_and_restart_stops_before_apply_then_checks_health(tmp_path: Path) -> None:
-    database, _ = _configured_database(tmp_path)
-    process = FakeProcessController(exits=True)
-    rest = FakeRestController()
-    apply_calls: list[bool] = []
-    manager = LifecycleManager(database, process=process, rest_factory=lambda _: rest)
-
-    def apply_config() -> dict[str, object]:
-        apply_calls.append(process.running)
-        return {"message": "applied"}
-
-    manager.set_config_apply(apply_config)
-
-    created = manager.begin("apply_config_and_restart", "apply-and-restart", countdown_seconds=0)
-    result = _wait_for_terminal(database, cast(str, created["id"]))
-
-    assert result["state"] == "succeeded"
-    assert result["stage"] == "applied_restarted"
-    assert rest.calls == ["save", "shutdown"]
-    assert apply_calls == [False]
-    assert len(process.started) == 1
-
-
-def test_apply_failure_keeps_server_stopped_and_provides_recovery_action(tmp_path: Path) -> None:
+def test_restart_apply_failure_keeps_server_stopped(tmp_path: Path) -> None:
     database, _ = _configured_database(tmp_path)
     process = FakeProcessController(exits=True)
     rest = FakeRestController()
     manager = LifecycleManager(database, process=process, rest_factory=lambda _: rest)
 
     def fail_apply() -> dict[str, object]:
-        raise ConfigError("CONFIG_CONFLICT", "检测到配置冲突。")
+        assert process.running is False
+        raise ConfigError("CONFIG_VERIFY_FAILED", "回读校验失败。")
 
-    manager.set_config_apply(fail_apply)
-    created = manager.begin("apply_config_and_restart", "apply-fails", countdown_seconds=0)
+    manager.set_pending_config_apply(fail_apply)
+    created = manager.begin("restart", "apply-fails", countdown_seconds=0)
     result = _wait_for_terminal(database, cast(str, created["id"]))
 
     assert result["state"] == "failed"
-    assert result["error_code"] == "CONFIG_CONFLICT"
-    assert "PalServer 已停止且不会重启" in str(result["detail"])
-    assert "普通 start" in str(result["detail"])
+    assert result["error_code"] == "CONFIG_VERIFY_FAILED"
+    assert "PalServer 不会启动" in str(result["detail"])
     assert process.running is False
     assert process.started == []
 
 
-def test_apply_with_restart_api_creates_explicit_operation(tmp_path: Path) -> None:
+def test_running_config_save_then_ordinary_restart_applies_before_start(tmp_path: Path) -> None:
     database, executable = _configured_database(tmp_path)
     world = executable.parent / "Pal" / "Saved" / "SaveGames" / "0" / "configured-world"
     (world / "Players").mkdir(parents=True)
@@ -369,26 +342,30 @@ def test_apply_with_restart_api_creates_explicit_operation(tmp_path: Path) -> No
             "Origin": "http://127.0.0.1:8223",
             "X-CSRF-Token": auth["csrfToken"],
         }
-        draft = client.put(
-            "/api/config/draft",
+        saved = client.put(
+            "/api/config/ini",
             headers=headers,
             json={"fields": {"AutoSaveSpan": "900"}},
         )
-        assert draft.status_code == 200
+        assert saved.status_code == 200
+        assert saved.json()["pending"] is True
 
         response = client.post(
-            "/api/config/apply-with-restart",
+            "/api/server/operations/restart",
             headers={**headers, "Idempotency-Key": "explicit-config-restart"},
             json={"countdownSeconds": 5, "message": "apply test"},
         )
 
     assert response.status_code == 200
-    assert response.json()["kind"] == "apply_config_and_restart"
+    assert response.json()["kind"] == "restart"
     result = _wait_for_terminal(
         database, cast(str, response.json()["operationId"]), timeout_seconds=7.0
     )
     assert result["state"] == "succeeded"
-    assert result["stage"] == "applied_restarted"
+    config_path = (
+        executable.parent / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    )
+    assert "AutoSaveSpan=900" in config_path.read_text(encoding="utf-8")
     assert process.started
 
 
@@ -450,19 +427,18 @@ def test_active_restore_journal_blocks_start_reservation(tmp_path: Path) -> None
     assert database.operation_by_idempotency("blocked-by-restore") is None
 
 
-def test_config_apply_waits_for_lifecycle_effects(tmp_path: Path) -> None:
+def test_next_start_applies_pending_config_before_process_start(tmp_path: Path) -> None:
     database, executable = _configured_database(tmp_path)
-    entered_start = threading.Event()
-    release_start = threading.Event()
+    config_path = (
+        executable.parent / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    )
 
-    class BlockingStartProcess(FakeProcessController):
+    class VerifyingStartProcess(FakeProcessController):
         def start(self, path: Path, arguments: tuple[str, ...]) -> FakeHandle:
-            self.running = True
-            entered_start.set()
-            assert release_start.wait(timeout=2)
+            assert "AutoSaveSpan=900" in config_path.read_text(encoding="utf-8")
             return super().start(path, arguments)
 
-    process = BlockingStartProcess(running=False)
+    process = VerifyingStartProcess(running=True)
     manager = LifecycleManager(
         database, process=process, rest_factory=lambda _: FakeRestController()
     )
@@ -473,20 +449,17 @@ def test_config_apply_waits_for_lifecycle_effects(tmp_path: Path) -> None:
         lambda: process.running,
         control_lock=manager.control_lock,
     )
-    editor.save_draft({"AutoSaveSpan": "900"})
+    editor.save_ini({"AutoSaveSpan": "900"})
+    assert "AutoSaveSpan=900" not in config_path.read_text(encoding="utf-8")
+    process.running = False
+    manager.set_pending_config_apply(editor.apply_pending)
 
     operation = manager.begin("start", "start-before-config-apply")
-    assert entered_start.wait(timeout=1)
-    with ThreadPoolExecutor(max_workers=1) as executor:
-        pending_apply = executor.submit(editor.apply)
-        time.sleep(0.05)
-        assert not pending_apply.done()
-        release_start.set()
-        _wait_for_terminal(database, cast(str, operation["id"]))
-        with pytest.raises(ConfigError) as error:
-            pending_apply.result(timeout=1)
+    result = _wait_for_terminal(database, cast(str, operation["id"]))
 
-    assert error.value.code == "SERVER_RUNNING"
+    assert result["state"] == "succeeded"
+    assert len(process.started) == 1
+    assert database.get_config_draft() is None
 
 
 def test_operation_state_transitions_are_audited(tmp_path: Path) -> None:
@@ -724,7 +697,7 @@ def test_config_writes_fail_closed_when_bound_world_moves(tmp_path: Path) -> Non
     )
 
     with pytest.raises(ConfigError) as error:
-        editor.save_draft({"AutoSaveSpan": "900"})
+        editor.save_ini({"AutoSaveSpan": "900"})
 
     assert error.value.code == "WORLD_BINDING_INVALID"
 

@@ -17,7 +17,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 15
+CACHE_SCHEMA_VERSION = 16
 WORLD_QUERY_CONTRACT_VERSION = 1
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
@@ -242,6 +242,7 @@ def build_world_cache(
     source_observed_at: int,
     collected_at: int | None = None,
     parse_started_at: int | None = None,
+    base_worker_max: int | None = None,
 ) -> dict[str, int]:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if cache_path.exists():
@@ -308,6 +309,7 @@ def build_world_cache(
             "metadata_status": str(metadata_status["status"]),
             "metadata_schema": str(metadata_status["schema"]),
             "metadata_schema_version": str(metadata_status["schemaVersion"]),
+            "base_worker_max": str(base_worker_max) if base_worker_max is not None else "",
             "metadata_data_version": str(metadata_status["dataVersion"] or ""),
             "metadata_source_revision": str(metadata_status["sourceRevision"] or ""),
             "metadata_error_code": str(metadata_status["errorCode"] or ""),
@@ -1282,17 +1284,12 @@ def _add_base_card_fields(connection: sqlite3.Connection, result: dict[str, obje
             (base_id,),
         ).fetchall()
     ]
-    worker_container_id = result.get("workerContainerId")
-    capacity = (
-        connection.execute(
-            "SELECT slot_count FROM containers WHERE id = ?", (worker_container_id,)
-        ).fetchone()
-        if worker_container_id
-        else None
-    )
+    capacity = connection.execute(
+        "SELECT value FROM cache_info WHERE key = 'base_worker_max'"
+    ).fetchone()
     result["workers"] = workers
     result["workerCount"] = len(workers)
-    result["maxWorkerCount"] = int(capacity[0]) if capacity else None
+    result["maxWorkerCount"] = int(capacity[0]) if capacity and capacity[0] else None
 
 
 def _inventory_summary(

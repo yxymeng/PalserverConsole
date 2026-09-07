@@ -39,6 +39,10 @@ test("世界数据筛选与排序交给完整数据查询处理", () => {
   expect(source).toContain("不会用当前分页结果推算");
   expect(source).toContain("CommunityCard");
   expect(source).toContain("WorldPagination");
+  expect(source).not.toContain("从登记训练家、帕鲁生态、公会、据点、物资与游戏历法六个维度");
+  expect(source).not.toContain("油田未记录按 0 次展示");
+  expect(source).not.toContain('className="world-overview-heading"');
+  expect(source).not.toContain('className="world-player-archive-heading"');
   expect(source).not.toContain('label: "未知物品"');
   expect(source).not.toContain('label: "未归属帕鲁"');
   expect(source).not.toContain('workspace="inventories"');

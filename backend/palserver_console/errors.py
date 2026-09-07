@@ -32,7 +32,6 @@ ERRORS: dict[str, ErrorDefinition] = {
     "SNAPSHOT_PENDING": ErrorDefinition(503, True),
     "SNAPSHOT_PARSE_FAILED": ErrorDefinition(503, True),
     "PARSER_TIMEOUT": ErrorDefinition(504, True),
-    "CONFIG_CONFLICT": ErrorDefinition(409, False),
     "SERVER_RUNNING": ErrorDefinition(409, False),
     "BACKUP_PATH_INVALID": ErrorDefinition(400, False),
     "BACKUP_INVALID": ErrorDefinition(409, False),

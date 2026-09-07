@@ -495,5 +495,10 @@ export type ConfigDocument = {
   rawText: string;
   adminPasswordConfigured: boolean;
   worldOptionPresent?: boolean;
-  draft: (ConfigDocument & { state?: string; conflict?: Record<string, unknown> | null }) | null;
+  worldOptionPath?: string | null;
+  effectiveSource?: "ini" | "world-option";
+  worldOptionSchema?: string[];
+  worldOptionFields?: Record<string, string>;
+  worldOptionAdminPasswordConfigured?: boolean;
+  pendingApply?: { kind: "ini" | "world-option"; updatedAt: number } | null;
 };

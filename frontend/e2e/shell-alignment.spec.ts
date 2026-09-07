@@ -78,11 +78,15 @@ test("桌面四个一级页面共用同一层品牌、导航与状态顶栏", as
   const brandBox = await page.locator(".psc-desktop-brand").boundingBox();
   const broadcastBox = await page.getByRole("button", { name: "发送全服广播" }).boundingBox();
   const themeBox = await page.getByRole("combobox", { name: "选择界面主题，当前极简" }).boundingBox();
+  const navigationBox = await navigation.boundingBox();
+  const navigationButtonBox = await navigation.getByRole("button", { name: "首页", exact: true }).boundingBox();
   const heroBox = await page.locator(".psc-home-command").boundingBox();
-  if (!brandBox || !broadcastBox || !themeBox || !heroBox) throw new Error("无法校验壳层左右对齐");
+  if (!brandBox || !broadcastBox || !themeBox || !navigationBox || !navigationButtonBox || !heroBox) throw new Error("无法校验壳层左右对齐");
   expect(Math.abs(heroBox.x - brandBox.x)).toBeLessThanOrEqual(2);
   expect(Math.abs(heroBox.x + heroBox.width - (themeBox.x + themeBox.width))).toBeLessThanOrEqual(2);
   expect(broadcastBox.height).toBe(themeBox.height);
+  expect(navigationBox.height).toBe(52);
+  expect(navigationButtonBox.height).toBe(38);
 
   for (const name of ["首页", "世界", "配置", "维护"]) {
     await navigation.getByRole("button", { name, exact: true }).click();
@@ -114,11 +118,12 @@ test("手机顶部只保留页面标题与状态操作，底部固定四项一�
   await expect(page.getByRole("button", { name: "查看实例与控制台" })).toHaveCount(0);
   await expect(navigation).toHaveCSS("position", "fixed");
   await expect(navigation.getByRole("button")).toHaveCount(4);
+  expect((await navigation.boundingBox())?.height).toBeLessThanOrEqual(56);
 
   for (const name of ["首页", "世界", "配置", "维护"]) {
     const button = navigation.getByRole("button", { name, exact: true });
     await expect(button).toBeVisible();
-    expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(50);
+    expect((await button.boundingBox())?.height).toBeGreaterThanOrEqual(44);
   }
 
   await navigation.getByRole("button", { name: "配置", exact: true }).click();
@@ -131,13 +136,13 @@ test("手机顶部只保留页面标题与状态操作，底部固定四项一�
 test("按需页面在主框架内使用稳定骨架并原位替换", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "桌面加载布局回归");
   await page.setViewportSize({ width: 2048, height: 1000 });
-  let configDraftCalls = 0;
+  let configCurrentCalls = 0;
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
     if (!path.startsWith("/api/")) return route.continue();
     if (path === "/api/auth/status") return route.fulfill({ json: auth });
     if (path === "/api/shell/status") return route.fulfill({ json: shell });
-    if (path === "/api/config/draft") configDraftCalls += 1;
+    if (path === "/api/config/current") configCurrentCalls += 1;
     return route.fulfill({ status: 503, json: { errorCode: "TEST_OFFLINE", message: "loading fixture" } });
   });
 
@@ -165,9 +170,9 @@ test("按需页面在主框架内使用稳定骨架并原位替换", async ({ pa
   expect(Math.abs(pageBox.y - skeletonBox.y)).toBeLessThanOrEqual(2);
   const error = main.getByRole("alert");
   await expect(error).toContainText("世界法则读取失败");
-  const callsBeforeRetry = configDraftCalls;
+  const callsBeforeRetry = configCurrentCalls;
   await error.getByRole("button", { name: "重新读取世界法则" }).click();
-  await expect.poll(() => configDraftCalls).toBeGreaterThan(callsBeforeRetry);
+  await expect.poll(() => configCurrentCalls).toBeGreaterThan(callsBeforeRetry);
 });
 
 test("按需页面加载失败后在主框架内显示错误和重试", async ({ page }, testInfo) => {

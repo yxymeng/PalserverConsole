@@ -138,7 +138,7 @@ class DefaultDependencyFactory:
             control_lock=lifecycle.control_lock,
             admin_password_rotation_callback=auth.revoke_lan_sessions,
         )
-        lifecycle.set_config_apply(config.apply)
+        lifecycle.set_pending_config_apply(config.apply_pending)
         notifications = NotificationService(
             database,
             settings.instance_id,

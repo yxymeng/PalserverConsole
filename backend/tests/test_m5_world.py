@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import palserver_console.world.cache as world_cache
-from palserver_console.config import AppSettings, ProfileError, ServerProfileService
+from palserver_console.config import AppSettings, ProfileError, ServerProfile, ServerProfileService
 from palserver_console.main import create_app
 from palserver_console.metadata import ItemMetadata, WorldMetadataBundle, WorldMetadataError
 from palserver_console.persistence import Database
@@ -515,7 +515,12 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     )
     cache = tmp_path / "world-cache.sqlite"
     counts = build_world_cache(
-        cache, level, players, snapshot_id="fixture", source_observed_at=1
+        cache,
+        level,
+        players,
+        snapshot_id="fixture",
+        source_observed_at=1,
+        base_worker_max=25,
     )
 
     assert counts["bases"] == 2
@@ -526,7 +531,7 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     assert base_total == 2
     assert len(bases) == 1
     assert bases[0]["workerCount"] == len(cast(list[dict[str, object]], bases[0]["workers"]))
-    assert bases[0]["maxWorkerCount"] is not None
+    assert bases[0]["maxWorkerCount"] == 25
     assert work_total == 2
     assert {item["baseId"] for item in work_pals} == {
         str(uuid.UUID(int=101)),
@@ -2306,7 +2311,22 @@ def test_unfrozen_worker_uses_python_module_dispatch(
 ) -> None:
     database = Database(tmp_path / "data" / "app.db")
     database.migrate()
-    service = WorldSnapshotService(database, lambda: None, tmp_path / "data")
+    install_path = tmp_path / "PalServer"
+    ini = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    ini.parent.mkdir(parents=True)
+    ini.write_text("OptionSettings=(BaseCampWorkerMaxNum=25)", encoding="utf-8")
+    profile = ServerProfile(
+        executable_path=install_path / "PalServer.exe",
+        install_path=install_path,
+        world_id="fixture",
+        world_path=tmp_path / "world",
+    )
+    service = WorldSnapshotService(
+        database,
+        lambda: None,
+        tmp_path / "data",
+        profile_provider=lambda: profile,
+    )
     command: list[str] = []
 
     class SuccessfulWorker:
@@ -2324,6 +2344,7 @@ def test_unfrozen_worker_uses_python_module_dispatch(
 
     assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
     assert command[:3] == [sys.executable, "-m", "palserver_console.world.worker"]
+    assert command[-2:] == ["--base-worker-max", "25"]
 
 
 def test_world_stop_terminates_active_parser_worker(

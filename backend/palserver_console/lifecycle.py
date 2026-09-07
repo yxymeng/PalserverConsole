@@ -30,9 +30,7 @@ from .persistence import (
 )
 from .steam import validate_executable
 
-OperationKind = Literal[
-    "start", "save", "stop", "restart", "force_stop", "apply_config_and_restart"
-]
+OperationKind = Literal["start", "save", "stop", "restart", "force_stop"]
 FORCE_CONFIRMATION_TTL_SECONDS = 120
 PROFILE_ERROR_CODES = frozenset(
     {
@@ -233,7 +231,7 @@ class LifecycleManager:
         self.rest_factory = rest_factory or (
             lambda config: PalServerRestController(config.rest_url, config.admin_password)
         )
-        self._config_apply: Callable[[], dict[str, object]] | None = None
+        self._pending_config_apply: Callable[[], dict[str, object]] | None = None
         self.audit_callback = audit_callback
         self.profile_provider = profile_provider
         self.now = now
@@ -241,9 +239,9 @@ class LifecycleManager:
         self._lock = threading.Lock()
         self._cancellations: dict[str, threading.Event] = {}
 
-    def set_config_apply(self, apply: Callable[[], dict[str, object]]) -> None:
-        """Register the only callback allowed to write a pending INI draft."""
-        self._config_apply = apply
+    def set_pending_config_apply(self, apply: Callable[[], dict[str, object]]) -> None:
+        """Register the only callback allowed to apply a pending game configuration."""
+        self._pending_config_apply = apply
 
     def status(self) -> ServerStatus:
         try:
@@ -435,10 +433,6 @@ class LifecycleManager:
         elif kind == "force_stop":
             self._force_stop(operation_id, config)
             self._complete_force_parent(operation_id, succeeded=True)
-        elif kind == "apply_config_and_restart":
-            self._apply_config_and_restart(
-                operation_id, config, countdown_seconds, message, cancel
-            )
         else:
             self._stop_or_restart(
                 operation_id, config, kind == "restart", countdown_seconds, message, cancel
@@ -531,6 +525,7 @@ class LifecycleManager:
     def _start(self, operation_id: str, config: ServerConfiguration) -> None:
         if self.process.matching_pids(config.executable):
             raise LifecycleError("ALREADY_RUNNING", "该安装路径的 PalServer 已在运行。")
+        self._apply_pending_config(operation_id)
         self._transition(operation_id, "running", "starting")
         handle = self.process.start(config.executable, config.arguments)
         time.sleep(0.2)
@@ -555,39 +550,28 @@ class LifecycleManager:
     ) -> None:
         if not self._graceful_stop(operation_id, config, countdown_seconds, message, cancel):
             return
+        self._apply_pending_config(operation_id)
         if restart:
             self._restart(operation_id, config, error_code="RESTART_FAILED")
         self._transition(
             operation_id, "succeeded", "restarted" if restart else "stopped"
         )
 
-    def _apply_config_and_restart(
-        self,
-        operation_id: str,
-        config: ServerConfiguration,
-        countdown_seconds: int,
-        message: str,
-        cancel: threading.Event,
-    ) -> None:
-        if self._config_apply is None:
-            raise LifecycleError(
-                "CONFIG_APPLY_UNAVAILABLE", "配置应用器不可用，未执行停服或写入操作。"
-            )
-        if not self._graceful_stop(operation_id, config, countdown_seconds, message, cancel):
+    def _apply_pending_config(self, operation_id: str) -> None:
+        if self._pending_config_apply is None:
             return
-        self._transition(operation_id, "running", "applying_config")
         try:
-            self._config_apply()
+            result = self._pending_config_apply()
         except Exception as error:
             code = getattr(error, "code", "CONFIG_APPLY_FAILED")
             error_code = code if isinstance(code, str) else "CONFIG_APPLY_FAILED"
             raise LifecycleError(
                 error_code,
-                "配置应用失败，PalServer 已停止且不会重启。请检查草稿或备份后，"
-                f"使用普通 start 恢复服务。原因: {error}",
+                "待应用配置写入或回读校验失败，PalServer 不会启动。"
+                f"请检查配置备份后重试。原因: {error}",
             ) from error
-        self._restart(operation_id, config, error_code="HEALTH_CHECK_FAILED")
-        self._transition(operation_id, "succeeded", "applied_restarted")
+        if result.get("applied"):
+            self._transition(operation_id, "running", "config_applied")
 
     def _graceful_stop(
         self,
@@ -653,6 +637,7 @@ class LifecycleManager:
             raise LifecycleError(
                 "FORCE_STOP_FAILED", "PalServer process remained alive after kill()."
             )
+        self._apply_pending_config(operation_id)
         self._transition(operation_id, "succeeded", "force_stopped")
 
     def _require_running(self, config: ServerConfiguration) -> list[int]:

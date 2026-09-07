@@ -90,6 +90,30 @@ def read_admin_password(install_path: Path) -> str | None:
     return password or None
 
 
+def read_base_camp_worker_max(install_path: Path) -> int:
+    ini_path = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    try:
+        text = ini_path.read_text(encoding="utf-8-sig")
+    except OSError as error:
+        raise MonitoringConfigError(
+            "INI_UNAVAILABLE", f"PalWorldSettings.ini: {type(error).__name__}"
+        ) from error
+    value = _ini_value(text, "BaseCampWorkerMaxNum")
+    if value is None:
+        return 15
+    try:
+        limit = int(value)
+    except ValueError as error:
+        raise MonitoringConfigError(
+            "BASE_CAMP_WORKER_MAX_INVALID", "BaseCampWorkerMaxNum must be an integer."
+        ) from error
+    if not 1 <= limit <= 50:
+        raise MonitoringConfigError(
+            "BASE_CAMP_WORKER_MAX_INVALID", "BaseCampWorkerMaxNum must be between 1 and 50."
+        )
+    return limit
+
+
 def parse_connection_config(text: str) -> ServerConnectionConfig:
     password = _ini_value(text, "AdminPassword")
     if password is None:

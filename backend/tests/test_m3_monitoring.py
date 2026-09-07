@@ -25,6 +25,7 @@ from palserver_console.monitoring import (
     SourceError,
     _safe_error_text,
     parse_connection_config,
+    read_base_camp_worker_max,
 )
 
 
@@ -329,6 +330,14 @@ def test_connection_config_parses_ports_and_redacts_password() -> None:
     assert config.rcon_port == 25585
     assert "must-not-leak" not in repr(config)
     assert "must-not-leak" not in str(config.admin_password)
+
+
+def test_base_camp_worker_max_reads_configured_limit(tmp_path: Path) -> None:
+    ini = tmp_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    ini.parent.mkdir(parents=True)
+    ini.write_text("OptionSettings=(BaseCampWorkerMaxNum=25)", encoding="utf-8")
+
+    assert read_base_camp_worker_max(tmp_path) == 25
 
 
 def test_rest_error_redaction_consumes_complex_quoted_secret() -> None:
