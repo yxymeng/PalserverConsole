@@ -154,13 +154,22 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   await expect(operationIsland).toContainText("关闭服务器");
   await expect(operationIsland).toContainText("维护倒计时中，仍可取消。", { timeout: 2_500 });
   await expect(operationIsland.getByRole("progressbar")).toBeVisible();
-  await expect(operationIsland.locator(".operation-liquid-fill")).toBeVisible();
+  await expect(operationIsland.locator(".operation-flowmist canvas")).toBeVisible();
   await expect(operationIsland).toContainText(/剩余 \d+ 秒/);
   await expect(operationIsland.getByRole("button", { name: "取消" })).toBeVisible();
   await expect(operationIsland).not.toContainText("countdown");
   await page.screenshot({ path: testInfo.outputPath(`ux02-${testInfo.project.name}.png`) });
   await expect(operationIsland).toContainText("正在请求服务器关闭。", { timeout: 2_500 });
   await expect(operationIsland).toContainText("服务器已完全关闭。", { timeout: 2_500 });
+  const progress = operationIsland.getByRole("progressbar");
+  await expect(progress).toHaveAttribute("aria-valuenow", "100");
+  await expect(progress).toHaveAttribute("aria-valuetext", "已完成");
+  await expect(progress.locator("canvas")).toBeVisible();
+  expect(await progress.locator("canvas").evaluate((canvas: HTMLCanvasElement) => {
+    const gl = canvas.getContext("webgl");
+    return gl !== null && !gl.isContextLost() && gl.getError() === gl.NO_ERROR;
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`flowmist-${testInfo.project.name}.png`) });
   await expect(operationIsland).toBeHidden({ timeout: 5_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });

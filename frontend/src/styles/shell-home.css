@@ -156,13 +156,12 @@
 .operation-island-progress > div:first-child { display: grid; gap: 1px; }
 .operation-island-progress span { color: var(--muted); font-size: 11px; }
 .operation-island-progress strong { color: var(--foreground); font-size: 12px; }
-.operation-liquid-progress { position: relative; display: block; min-width: 0; height: 8px; overflow: hidden; border-radius: 999px; background: var(--surface-muted); }
-.operation-liquid-fill { position: relative; display: block; min-width: 8px; height: 100%; overflow: hidden; border-radius: inherit; background: var(--primary); }
-.operation-island[data-tone="success"] .operation-liquid-fill { background: var(--success); }
-.operation-island[data-tone="danger"] .operation-liquid-fill { background: var(--danger); }
-.operation-island[data-tone="neutral"] .operation-liquid-fill { background: var(--muted); }
-.operation-liquid-surface { position: absolute; inset: 0; background: linear-gradient(90deg, rgb(255 255 255 / 0%), rgb(255 255 255 / 24%), rgb(255 255 255 / 0%)); }
-
+.operation-island .operation-flowmist { height: 48px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 45%); }
+.operation-flowmist .flowmist-label, .operation-flowmist .flowmist-value { display: none; }
+.operation-flowmist .flowmist-fallback { background: var(--primary); }
+.operation-island[data-tone="success"] .flowmist-fallback { background: var(--success); }
+.operation-island[data-tone="danger"] .flowmist-fallback { background: var(--danger); }
+.operation-island[data-tone="neutral"] .flowmist-fallback { background: var(--muted); }
 .psc-home-command { overflow: hidden; }
 .psc-home-command-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 48%); min-height: 230px; }
 .psc-home-command-copy { position: relative; z-index: 3; display: grid; align-content: center; }
