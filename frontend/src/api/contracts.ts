@@ -268,7 +268,9 @@ export type WorldGuildListItem = {
 export type WorldBaseListItem = {
   id: string; name: string; guildId: string | null; workerContainerId: string | null;
   x: number | null; y: number | null; z: number | null; guildName?: string;
-  workerCount: number; maxWorkerCount: number | null;
+  workerCount: number;
+  /** Saved worker-container SlotNum; null when unavailable, not the configured ceiling. */
+  maxWorkerCount: number | null;
   workers: WorldPalListItem[];
 };
 export type WorldInventoryListItem = {

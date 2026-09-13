@@ -36,7 +36,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--collected-at", type=int)
     parser.add_argument("--parse-started-at", type=int)
     parser.add_argument("--ooz-dll", type=Path)
-    parser.add_argument("--base-worker-max", type=int)
     arguments = parser.parse_args(argv)
     started = time.perf_counter()
     parse_started_at = arguments.parse_started_at or int(time.time())
@@ -64,7 +63,6 @@ def main(argv: list[str] | None = None) -> int:
             source_observed_at=arguments.source_observed_at,
             collected_at=arguments.collected_at,
             parse_started_at=parse_started_at,
-            base_worker_max=arguments.base_worker_max,
         )
         parsed_at = int(time.time())
         duration_ms = round((time.perf_counter() - started) * 1000)

@@ -230,6 +230,7 @@ def _synthetic_properties() -> tuple[dict[str, Any], list[dict[str, Any]]]:
             {
                 "key": {"ID": _property(container_id)},
                 "value": {
+                    "SlotNum": _property(30, "IntProperty"),
                     "Slots": _property(
                         {
                             "values": [
@@ -520,7 +521,6 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
         players,
         snapshot_id="fixture",
         source_observed_at=1,
-        base_worker_max=25,
     )
 
     assert counts["bases"] == 2
@@ -531,7 +531,7 @@ def test_cache_keeps_stable_bases_separate_and_paginates(tmp_path: Path) -> None
     assert base_total == 2
     assert len(bases) == 1
     assert bases[0]["workerCount"] == len(cast(list[dict[str, object]], bases[0]["workers"]))
-    assert bases[0]["maxWorkerCount"] == 25
+    assert bases[0]["maxWorkerCount"] == 30
     assert work_total == 2
     assert {item["baseId"] for item in work_pals} == {
         str(uuid.UUID(int=101)),
@@ -2344,7 +2344,7 @@ def test_unfrozen_worker_uses_python_module_dispatch(
 
     assert service._run_worker(tmp_path, tmp_path / "cache.tmp", "fixture", 1) == {"ok": True}
     assert command[:3] == [sys.executable, "-m", "palserver_console.world.worker"]
-    assert command[-2:] == ["--base-worker-max", "25"]
+    assert "--base-worker-max" not in command
 
 
 def test_world_stop_terminates_active_parser_worker(
@@ -3189,3 +3189,22 @@ def test_current_sanitized_save_uses_detailed_m5_decoder(tmp_path: Path) -> None
                 assert cached_care[instance_id][field] == pytest.approx(raw_value)
             else:
                 assert cached_care[instance_id][field] == raw_value
+
+
+@pytest.mark.parametrize("capacity", [0, 5, 30, 50, None, -1, 2.5, True])
+def test_base_capacity_uses_saved_slot_num_not_occupied_records(
+    tmp_path: Path, capacity: object
+) -> None:
+    level, players = _synthetic_properties()
+    containers = level["worldSaveData"]["value"]["CharacterContainerSaveData"]["value"]
+    # The synthetic save has one worker in each base; capacities can differ by base.
+    containers[0]["value"]["SlotNum"] = _property(capacity, "IntProperty")
+    containers[1]["value"]["SlotNum"] = _property(12, "IntProperty")
+    cache = tmp_path / "capacity.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="capacity", source_observed_at=1)
+    bases, _ = query_cache(cache, "bases", page=1, page_size=50)
+    by_id = {base["id"]: base for base in bases}
+    expected = capacity if type(capacity) is int and capacity >= 0 else None
+    assert by_id[str(uuid.UUID(int=101))]["maxWorkerCount"] == expected
+    assert by_id[str(uuid.UUID(int=101))]["workerCount"] == 1
+    assert by_id[str(uuid.UUID(int=102))]["maxWorkerCount"] == 12

@@ -22,7 +22,6 @@ from typing import Any
 from ..config import ProfileError, ServerProfile
 from ..metadata import WorldMetadataError, load_world_metadata
 from ..metadata.loader import METADATA_SCHEMA_NAME, METADATA_SCHEMA_VERSION
-from ..monitoring import MonitoringConfigError, read_base_camp_worker_max
 from ..persistence import Database
 from ..steam import is_reparse_point
 from .cache import (
@@ -1080,14 +1079,6 @@ class WorldSnapshotService:
         ooz_dll = self._find_ooz_dll()
         if ooz_dll:
             command.extend(["--ooz-dll", str(ooz_dll)])
-        if self.profile_provider:
-            with suppress(MonitoringConfigError, ProfileError):
-                command.extend(
-                    [
-                        "--base-worker-max",
-                        str(read_base_camp_worker_max(self.profile_provider().install_path)),
-                    ]
-                )
         if self._stop.is_set():
             raise WorldDataError("PARSER_STOPPED", "解析子进程已停止。")
         worker: subprocess.Popen[Any] | None = None

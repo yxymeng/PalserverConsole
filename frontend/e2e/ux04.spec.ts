@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 16, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
+const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 17, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
 
 const auth = { local: true, authenticated: true, adminPasswordConfigured: true, csrfToken: "ux04-csrf", lanWarning: null, port: 8223 };
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-1" };
@@ -463,4 +463,21 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await dialog.getByRole("button", { name: "查找同种帕鲁", exact: true }).click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("textbox", { name: "搜索帕鲁图鉴花名册" })).toHaveValue("棉悠悠");
+});
+
+
+test("据点容量：使用存档当前槽位而非配置最高值", async ({ page }) => {
+  await setupWorld(page);
+  const workers = Array.from({ length: 26 }, (_, index) => ({ ...pal, id: `capacity-pal-${index}`, slotIndex: index }));
+  await page.route("**/api/world/bases?*", (route) => route.fulfill({ json: {
+    items: [{ ...base, name: "容量验证据点", workerCount: 26, maxWorkerCount: 30, workers }],
+    page: 1, pageSize: 50, total: 1, source: "save-snapshot", observedAt: 1,
+    snapshotId: "world", stale: false, errorCode: null,
+  } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点" }).click();
+  const card = page.locator(".world-community-card").filter({ hasText: "容量验证据点" });
+  await expect(card.locator("header")).toContainText("26 / 30 打工帕鲁");
+  await expect(card.getByTitle("存档中的打工帕鲁数量 / 当前可用槽位；容量由游戏按据点等级与配置决定")).toBeVisible();
 });

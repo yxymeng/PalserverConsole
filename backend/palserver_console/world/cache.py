@@ -17,7 +17,7 @@ from ..steam import is_reparse_point
 from .pal_care_species import max_full_stomach
 
 CACHE_SCHEMA_NAME = "world-asset-cache"
-CACHE_SCHEMA_VERSION = 16
+CACHE_SCHEMA_VERSION = 17
 WORLD_QUERY_CONTRACT_VERSION = 1
 ZERO_UUID = "00000000-0000-0000-0000-000000000000"
 _WORK_SUITABILITY_TYPES = WORK_SUITABILITY_TYPES
@@ -242,7 +242,6 @@ def build_world_cache(
     source_observed_at: int,
     collected_at: int | None = None,
     parse_started_at: int | None = None,
-    base_worker_max: int | None = None,
 ) -> dict[str, int]:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     if cache_path.exists():
@@ -263,7 +262,17 @@ def build_world_cache(
     game_time_ticks = _game_time_ticks(world)
 
     group_rows, player_group = _groups(groups)
-    base_rows, worker_container_to_base = _bases(base_camps)
+    # SlotNum is the saved capacity after game progression/configuration rules;
+    # Slots contains occupied records and is not a capacity.
+    worker_capacities = {
+        container_id: _nonnegative_integer(
+            _mapping(entry.get("value")).get("SlotNum")
+        )
+        for entry in character_containers
+        if isinstance(entry, Mapping)
+        and (container_id := _container_id(_mapping(entry.get("key")))) is not None
+    }
+    base_rows, worker_container_to_base = _bases(base_camps, worker_capacities)
     character_container_rows, instance_locations = _character_containers(
         character_containers, worker_container_to_base, player_profiles
     )
@@ -309,7 +318,6 @@ def build_world_cache(
             "metadata_status": str(metadata_status["status"]),
             "metadata_schema": str(metadata_status["schema"]),
             "metadata_schema_version": str(metadata_status["schemaVersion"]),
-            "base_worker_max": str(base_worker_max) if base_worker_max is not None else "",
             "metadata_data_version": str(metadata_status["dataVersion"] or ""),
             "metadata_source_revision": str(metadata_status["sourceRevision"] or ""),
             "metadata_error_code": str(metadata_status["errorCode"] or ""),
@@ -1284,12 +1292,11 @@ def _add_base_card_fields(connection: sqlite3.Connection, result: dict[str, obje
             (base_id,),
         ).fetchall()
     ]
-    capacity = connection.execute(
-        "SELECT value FROM cache_info WHERE key = 'base_worker_max'"
-    ).fetchone()
     result["workers"] = workers
     result["workerCount"] = len(workers)
-    result["maxWorkerCount"] = int(capacity[0]) if capacity and capacity[0] else None
+    result["maxWorkerCount"] = _nonnegative_integer(
+        _mapping(result.get("detail")).get("workerCapacity")
+    )
 
 
 def _inventory_summary(
@@ -1562,7 +1569,9 @@ def _groups(entries: list[Any]) -> tuple[list[tuple[Any, ...]], dict[str, str]]:
     return rows, player_group
 
 
-def _bases(entries: list[Any]) -> tuple[list[tuple[Any, ...]], dict[str, str]]:
+def _bases(
+    entries: list[Any], worker_capacities: Mapping[str, int | None]
+) -> tuple[list[tuple[Any, ...]], dict[str, str]]:
     rows: list[tuple[Any, ...]] = []
     worker_to_base: dict[str, str] = {}
     for entry in entries:
@@ -1597,7 +1606,10 @@ def _bases(entries: list[Any]) -> tuple[list[tuple[Any, ...]], dict[str, str]]:
                 _number(translation.get("x")),
                 _number(translation.get("y")),
                 _number(translation.get("z")),
-                _json({"state": raw.get("state")}),
+                _json({
+                    "state": raw.get("state"),
+                    "workerCapacity": worker_capacities.get(worker_id or ""),
+                }),
             )
         )
     return rows, worker_to_base
