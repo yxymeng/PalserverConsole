@@ -30,3 +30,23 @@ test("详情保留缺失个体值及原始饱食值的语义", () => {
   expect(html).not.toContain("<dd>0</dd>");
   expect(render({ ...data, care: { ...data.care, hungerRaw: null } })).not.toContain("原始值");
 });
+
+
+test("数值型零标记不渲染为 00，真实昵称保留", () => {
+  const data = { ...pal, isBoss: 0, isLucky: 0 } as unknown as WorldPalRosterItem;
+  const html = render(data).replace(/<[^>]*>/g, "");
+  expect(html).not.toContain("棉悠悠00");
+  expect(html).not.toContain("巨型头目");
+  expect(html).not.toContain("稀有闪光");
+  expect(render({ ...data, nickname: "00" })).toContain("“00”");
+});
+
+test("详情只保留一个查找入口并隐藏内部代码，显示已有工作翻译", () => {
+  const data = { ...pal, assignment: "player", aptitude: { ...pal.aptitude, workSuitabilities: [{ type: "MonsterFarm", level: 2 }, { type: "EmitFlame", level: 1 }, { type: "ProductMedicine", level: 1 }] }, skills: { ...pal.skills, passive: [{ id: "InternalPassiveCode", name: "电容", description: "雷属性攻击伤害增加{EffectValue1}%", sourceName: null, rank: 1, element: null, power: null, cooldown: null, metadataKnown: true }] } };
+  // Detail responses use assignment rather than the roster's locationType.
+  const detail = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "locationType")) as WorldPalRosterItem;
+  const html = renderToStaticMarkup(createElement(PalDetailModal, { data: detail, onClose: () => {}, onFindSameSpecies: () => {} }));
+  expect(html.match(/查找同种帕鲁/g)).toHaveLength(1);
+  for (const label of ["牧场", "生火", "制药", "玩家持有", "雷属性攻击伤害增加（数值未收录）"]) expect(html).toContain(label);
+  for (const code of ["编号:", "InternalPassiveCode", "MonsterFarm", "{EffectValue1}", "Tier"]) expect(html).not.toContain(code);
+});

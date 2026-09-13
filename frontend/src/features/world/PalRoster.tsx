@@ -9,6 +9,7 @@ import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { mergePalRosterPage } from "./palRosterState";
 import { careReasonLabels, careSummaryLabel } from "./palCare";
 import { PalDetailModal } from "./PalDetailModal";
+import { workSuitabilityLabels } from "./palWorkLabels";
 
 type Marker = "all" | "lucky" | "boss";
 type CareFilter = "all" | "attention";
@@ -24,11 +25,6 @@ type UpdateAptitude = <K extends keyof AptitudeFilters>(key: K, value: AptitudeF
 
 const PAGE_SIZE = 60;
 const EMPTY_APTITUDE_FILTERS: AptitudeFilters = { minLevel: "", minRank: "", minRarity: "", minHpIv: "", minAttackIv: "", minDefenseIv: "", minAverageIv: "", workSuitabilities: [], passiveSkills: [], minWorkLevel: "1" };
-const workSuitabilityLabels: Record<string, string> = {
-  EmitFlame: "生火", Watering: "浇水", Seeding: "播种", GenerateElectricity: "发电",
-  Handcraft: "手工作业", Collection: "采集", Deforest: "伐木", Mining: "采矿",
-  OilExtraction: "原油提炼", ProductMedicine: "制药", Cool: "冷却", Transport: "搬运", MonsterFarm: "牧场",
-};
 const locationLabels: Record<WorldPalRosterItem["locationType"], string> = {
   player: "玩家持有",
   party: "队伍携带",

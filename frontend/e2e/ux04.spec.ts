@@ -276,7 +276,7 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".pal-roster-row").first()).toContainText("阿帕");
   await page.getByRole("button", { name: "小羊" }).click();
   const palDrawer = page.getByRole("dialog", { name: "帕鲁详情" });
-  await expect(palDrawer).toContainText("编号:");
+  await expect(palDrawer).not.toContainText("编号:");
   await expect(palDrawer).toContainText("棉悠悠");
   await expect(palDrawer).toContainText("稀有闪光");
   await expect(palDrawer).toContainText("个体值（IV）");
@@ -441,6 +441,8 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "帕鲁详情", exact: true });
   await expect(dialog.getByRole("button", { name: "关闭帕鲁详情" })).toBeFocused();
+  await expect(dialog.getByRole("button", { name: "查找同种帕鲁", exact: true })).toHaveCount(1);
+  await expect(dialog).not.toContainText("编号:");
   await expect(dialog.locator(".pal-iv-summary")).toContainText("59.3");
   await expect(dialog.locator(".pal-vitals")).toContainText("50.2%");
   await expect(dialog).not.toContainText("207639");
@@ -457,4 +459,8 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
+  await trigger.click();
+  await dialog.getByRole("button", { name: "查找同种帕鲁", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("textbox", { name: "搜索帕鲁图鉴花名册" })).toHaveValue("棉悠悠");
 });
