@@ -4,6 +4,9 @@ import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import type { WorldPalDetail, WorldPalRosterItem, WorldPalSkill } from "../../api/contracts";
 import { resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 
+const detailNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
+const formatValue = (value: number | null | undefined) => value == null ? "不可用" : detailNumber.format(value);
+
 type PalData = WorldPalDetail | WorldPalRosterItem;
 
 const workLabels: Record<string, string> = {
@@ -38,15 +41,9 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
   const location = "locationType" in data
     ? ({ player: "玩家持有", party: "玩家随身队伍", storage: "帕鲁终端", base: "据点打工", unassigned: "野外 / 未归属" }[data.locationType])
     : locationLabels[data.assignment] || data.assignment || "野外 / 未归属";
-  const dimensions = [
-    ["生命 IV", data.aptitude.ivs.hp, 100], ["攻击 IV", data.aptitude.ivs.attack, 100], ["防御 IV", data.aptitude.ivs.defense, 100],
-    ["综合 IV", data.aptitude.ivs.average, 100], ["星级", data.rank, 4], ["稀有度", data.aptitude.speciesRarity, 20],
+  const ivs = [
+    ["生命 IV", data.aptitude.ivs.hp], ["攻击 IV", data.aptitude.ivs.attack], ["防御 IV", data.aptitude.ivs.defense],
   ] as const;
-  const radarPoints = dimensions.map(([, value, max], index) => {
-    const angle = -Math.PI / 2 + index * Math.PI / 3;
-    const ratio = value === null || value === undefined ? .08 : Math.max(.08, Math.min(1, value / max));
-    return `${140 + Math.cos(angle) * 82 * ratio},${130 + Math.sin(angle) * 82 * ratio}`;
-  }).join(" ");
   const sameSpecies = () => onFindSameSpecies?.(data);
 
   return <aside ref={panelRef} className="pal-detail-modal" role="dialog" aria-modal="true" aria-label={ariaLabel}>
@@ -54,7 +51,7 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
       <div className="pal-detail-identity">
         <span className="pal-detail-icon"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>
         <div><div className="pal-detail-title"><h2>{pal.speciesName}</h2>{data.nickname && <span className="pal-detail-nickname">“{data.nickname}”</span>}{data.isBoss && <span className="pal-detail-badge boss"><Flame size={14} />ALPHA 巨型头目</span>}{data.isLucky && <span className="pal-detail-badge lucky"><Sparkles size={14} />稀有闪光</span>}</div>
-          <p><span>编号: <code>{data.characterId}</code></span><i>·</i><span>性别: <b className={pal.gender || "unknown"}>{pal.gender === "male" ? "♂ 雄性" : pal.gender === "female" ? "♀ 雌性" : "无性别"}</b></span><i>·</i><span>等级: <strong>Lv.{data.level ?? "—"}</strong></span><i>·</i><span>阶级: <em>★ x{data.rank ?? 0}</em></span></p>
+          <p><span>编号: <code>{data.characterId}</code></span><i>·</i><span>性别: <b className={pal.gender || "unknown"}>{pal.gender === "male" ? "♂ 雄性" : pal.gender === "female" ? "♀ 雌性" : "无性别"}</b></span><i>·</i><span>等级: <strong>Lv.{data.level ?? "—"}</strong></span><i>·</i><span>星级: <em>{data.rank == null ? "不可用" : `★ x${data.rank}`}</em></span><i>·</i><span>物种稀有度: <strong>{formatValue(data.aptitude.speciesRarity)}</strong></span></p>
         </div>
       </div>
       <div className="pal-detail-header-actions">{onFindSameSpecies && <button className="pal-detail-same compact" type="button" onClick={sameSpecies}><Search size={15} /><span>查找同种帕鲁</span></button>}<button ref={closeRef} className="pal-detail-close" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={20} /></button></div>
@@ -62,18 +59,15 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
 
     <div className="pal-detail-body">
       {notice}
-      <section className="pal-six-dimension">
-        <header><span><Gauge size={16} /></span><div><h3>帕鲁六维基础与强化数值</h3><p>当前存档可确认的个体资质与成长指标</p></div></header>
-        <div className="pal-radar-layout"><svg viewBox="0 0 280 260" aria-label="帕鲁六维雷达图">
-          {[.2,.4,.6,.8,1].map((scale) => <polygon key={scale} className="pal-radar-grid" points={dimensions.map((_, index) => { const angle=-Math.PI/2+index*Math.PI/3; return `${140+Math.cos(angle)*82*scale},${130+Math.sin(angle)*82*scale}`; }).join(" ")} />)}
-          {dimensions.map((dimension,index) => { const angle=-Math.PI/2+index*Math.PI/3; const x=140+Math.cos(angle)*82; const y=130+Math.sin(angle)*82; const lx=140+Math.cos(angle)*108; const ly=130+Math.sin(angle)*108; return <g key={dimension[0]}><line x1="140" y1="130" x2={x} y2={y} /><text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle">{dimension[0]}</text></g>; })}
-          <polygon className="pal-radar-value" points={radarPoints} />
-        </svg><div className="pal-dimension-list">{dimensions.map(([label,value]) => <div key={label}><span>{label}</span><strong>{value ?? "不可用"}</strong></div>)}</div></div>
+      <section className="pal-iv-section" aria-label="个体值（IV）">
+        <header><span><Gauge size={16} /></span><div><h3>个体值（IV）</h3><p>存档快照中的个体资质，不代表当前战斗属性</p></div></header>
+        <dl className="pal-iv-list">{ivs.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{formatValue(value)}</dd></div>)}</dl>
+        <p className="pal-iv-summary"><span>平均 IV <strong>{formatValue(data.aptitude.ivs.average)}</strong></span><span>生命、攻击、防御三项的平均值</span></p>
       </section>
 
       <div className="pal-vitals">
-        <Vital label="SAN 理智值" value={data.care.sanity === null ? "数据不可用" : `${data.care.sanity}%`} percent={data.care.sanity} tone="san" />
-        <Vital label="饱食与负荷储备" value={data.care.hunger === null ? data.care.hungerRaw === null ? "数据不可用" : `原始值 ${data.care.hungerRaw}` : `${data.care.hunger}%`} percent={data.care.hunger} tone="hunger" />
+        <Vital label="SAN 理智值" value={data.care.sanity === null ? "数据不可用" : `${formatValue(data.care.sanity)}%`} percent={data.care.sanity} tone="san" />
+        <Vital label="饱食度" value={data.care.hunger === null ? data.care.hungerRaw === null ? "数据不可用" : `原始值 ${formatValue(data.care.hungerRaw)}` : `${formatValue(data.care.hunger)}%`} percent={data.care.hunger} tone="hunger" />
       </div>
 
       <SkillSection title={`配备主动战斗技能 (${data.skills.equipped.length}/3)`} icon={<Swords size={15} />} className="active" skills={data.skills.equipped} />
@@ -96,5 +90,5 @@ function Vital({ label, value, percent, tone }: { label: string; value: string; 
 
 function SkillSection({ title, icon, className, skills }: { title: string; icon: ReactNode; className: string; skills: WorldPalSkill[] }) {
   if (!skills.length) return null;
-  return <section className={`pal-detail-section ${className}`}><h3>{icon}{title}</h3><div className="pal-active-grid">{skills.map((skill) => <article key={skill.id}><div><strong>{skill.name || skill.sourceName || skill.id}</strong>{skill.power !== null && <em>威力 {skill.power}</em>}</div><small><span>冷却: {skill.cooldown === null ? "不可用" : `${skill.cooldown}s`}</span><b>主动技</b></small></article>)}</div></section>;
+  return <section className={`pal-detail-section ${className}`}><h3>{icon}{title}</h3><div className="pal-active-grid">{skills.map((skill) => <article key={skill.id}><div><strong>{skill.name || skill.sourceName || skill.id}</strong>{skill.power !== null && <em>威力 {formatValue(skill.power)}</em>}</div><small><span>冷却: {skill.cooldown === null ? "不可用" : `${formatValue(skill.cooldown)}s`}</span><b>主动技</b></small></article>)}</div></section>;
 }

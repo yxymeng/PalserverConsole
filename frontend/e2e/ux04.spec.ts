@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const worldContract = { queryVersion: 1, cacheSchema: "world-asset-cache", cacheSchemaVersion: 16, metadataSchema: "palserver-console-world-metadata", metadataSchemaVersion: 1, metadataDataVersion: "2026.08.25.3" };
 
@@ -6,9 +6,9 @@ const auth = { local: true, authenticated: true, adminPasswordConfigured: true, 
 const shell = { observedAt: 1_786_000_000, module: "M2", serverState: "stopped", configured: true, pids: [], executablePath: "C:\\PalServer\\PalServer.exe", instanceId: "world-1" };
 const playerProgress = { state: "complete", values: { discoveredPalSpecies: 12, capturedPals: 3456, fastTravelPoints: 18, exploredAreas: 7, fieldBosses: 4, towerBosses: 2, dungeonClears: 9, oilRigClears: 3, technologyPoints: 14, ancientTechnologyPoints: 5, recipes: 62 }, unavailable: [] };
 const player = { id: "player-1", instanceId: "instance-player-1", name: "Alice", level: 20, guildId: "guild-1", guildName: "测试工会", lastRecordedAt: "2026-08-25T12:00:00+00:00", progress: playerProgress };
-const care = { currentHp: 0, hunger: 12, hungerRaw: null, hungerStatus: null, sanity: 40, physicalHealth: null, disease: "EPalStatus::Cold", activity: "EPalActivity::Working", diseaseRecorded: true, activityRecorded: true, reasons: ["zero_hp", "disease", "hunger_low", "san_low"], unavailable: [], severity: "critical", attention: true };
+const care = { currentHp: 0, hunger: 50.20763942173549, hungerRaw: null, hungerStatus: null, sanity: 40, physicalHealth: null, disease: "EPalStatus::Cold", activity: "EPalActivity::Working", diseaseRecorded: true, activityRecorded: true, reasons: ["zero_hp", "disease", "hunger_low", "san_low"], unavailable: [], severity: "critical", attention: true };
 const unavailableCare = { currentHp: null, hunger: null, hungerRaw: null, hungerStatus: null, sanity: null, physicalHealth: null, disease: null, activity: null, diseaseRecorded: false, activityRecorded: false, reasons: [], unavailable: ["currentHp", "hunger", "sanity", "disease", "activity"], severity: "unavailable", attention: false };
-const aptitude = { speciesRarity: 1, ivs: { hp: 90, attack: 80, defense: 70, average: 80 }, workSuitabilities: [{ type: "Handcraft", level: 1 }, { type: "Transport", level: 1 }], metadataKnown: true, metadataLabel: null };
+const aptitude = { speciesRarity: 1, ivs: { hp: 60, attack: 58, defense: 60, average: 59.333333333333336 }, workSuitabilities: [{ type: "Handcraft", level: 1 }, { type: "Transport", level: 1 }], metadataKnown: true, metadataLabel: null };
 const unknownAptitude = { speciesRarity: null, ivs: { hp: null, attack: null, defense: null, average: null }, workSuitabilities: [], metadataKnown: false, metadataLabel: "资料未收录" };
 const palSkills = {
   passive: [{ id: "Legend", name: "传说", description: "攻击 +20%，防御 +20%", sourceName: "Legend", rank: 4, element: null, power: null, cooldown: null, metadataKnown: true }],
@@ -24,7 +24,7 @@ const guild = { id: "guild-1", name: "测试工会", memberCount: 1, baseCount: 
 const base = { id: "base-1", name: "据点一号", guildId: "guild-1", guildName: "测试工会", workerContainerId: "container-1", x: 1, y: 2, z: 3, workerCount: 1, maxWorkerCount: 15, workers: [pal] };
 let reparseRequests = 0;
 
-test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", async ({ page }, testInfo) => {
+async function setupWorld(page: Page) {
   reparseRequests = 0;
   await page.addInitScript(() => window.localStorage.setItem("palserver-console-theme", "island"));
   const worldListUrls: URL[] = [];
@@ -131,6 +131,11 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
     return route.fulfill({ status: 404, json: { errorCode: "WORLD_ENTITY_NOT_FOUND", message: path } });
   });
 
+  return { worldListUrls, rosterUrls, inventoryUrls };
+}
+
+test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", async ({ page }, testInfo) => {
+  const { worldListUrls, rosterUrls, inventoryUrls } = await setupWorld(page);
   await page.goto("/");
   await page.getByRole("button", { name: "世界", exact: true }).click();
 
@@ -274,10 +279,17 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(palDrawer).toContainText("编号:");
   await expect(palDrawer).toContainText("棉悠悠");
   await expect(palDrawer).toContainText("稀有闪光");
-  await expect(palDrawer).toContainText("帕鲁六维基础与强化数值");
+  await expect(palDrawer).toContainText("个体值（IV）");
   await expect(palDrawer).toContainText("SAN 理智值");
-  await expect(palDrawer).toContainText("饱食与负荷储备");
-  await expect(palDrawer).toContainText("综合 IV");
+  await expect(palDrawer).toContainText("饱食度");
+  await expect(palDrawer).toContainText("平均 IV");
+  await expect(palDrawer.locator(".pal-iv-summary")).toContainText("59.3");
+  await expect(palDrawer.locator(".pal-vitals")).toContainText("50.2%");
+  await expect(palDrawer).not.toContainText("333333");
+  await expect(palDrawer).not.toContainText("207639");
+  await expect(palDrawer.getByLabel("帕鲁六维雷达图")).toHaveCount(0);
+  expect(await palDrawer.locator(".pal-iv-list > div, .pal-vitals > section").evaluateAll((cells) => cells.every((cell) => cell.scrollWidth <= cell.clientWidth))).toBe(true);
+
   await expect(palDrawer).toContainText("工作适应性技能");
   await expect(palDrawer).toContainText("被动特性词条");
   await expect(palDrawer).toContainText("配备主动战斗技能");
@@ -417,4 +429,32 @@ test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async 
   await page.waitForTimeout(50);
   await expect(page.locator(".inventory-location-details")).toContainText("最新据点位置");
   await expect(page.locator(".inventory-location-details")).not.toContainText("过期玩家位置");
+});
+
+
+test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, testInfo) => {
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  const trigger = page.getByRole("button", { name: "小羊 棉悠悠 雌性", exact: true });
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "帕鲁详情", exact: true });
+  await expect(dialog.getByRole("button", { name: "关闭帕鲁详情" })).toBeFocused();
+  await expect(dialog.locator(".pal-iv-summary")).toContainText("59.3");
+  await expect(dialog.locator(".pal-vitals")).toContainText("50.2%");
+  await expect(dialog).not.toContainText("207639");
+  await expect(dialog).not.toContainText("333333");
+  await expect(dialog.locator(".pal-iv-section")).not.toContainText("稀有度");
+  await expect(dialog.locator(".pal-iv-section")).not.toContainText("星级");
+  await expect(dialog.locator(".pal-detail-header")).toContainText("物种稀有度: 1");
+  expect(await dialog.locator(".pal-iv-list > div, .pal-vitals > section, .pal-detail-body").evaluateAll((cells) => cells.every((cell) => cell.scrollWidth <= cell.clientWidth))).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("pal-detail.png"), animations: "disabled" });
+  await dialog.locator(".pal-passive-grid button").first().click();
+  const passive = dialog.getByRole("dialog", { name: "被动词条详情" });
+  await expect(passive).toContainText("攻击 +20%，防御 +20%");
+  await passive.getByRole("button", { name: "关闭被动词条详情" }).click();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
 });
