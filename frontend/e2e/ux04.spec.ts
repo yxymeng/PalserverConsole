@@ -20,14 +20,25 @@ const noSkills = { passive: [], equipped: [], learned: [], partner: null };
 const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", gender: "Female", rank: 1, isLucky: true, aptitude, skills: palSkills, care };
 const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude: unknownAptitude, skills: noSkills, care: unavailableCare };
 const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude, skills: noSkills, care: unavailableCare };
-const guild = { id: "guild-1", name: "测试工会", memberCount: 1, baseCount: 1, adminPlayerId: "player-1", adminPlayerName: "Alice", members: [{ id: "player-1", name: "Alice", level: 20, role: "leader" }] };
 const base = { id: "base-1", name: "据点一号", guildId: "guild-1", guildName: "测试工会", workerContainerId: "container-1", x: 1, y: 2, z: 3, workerCount: 1, maxWorkerCount: 15, workers: [pal] };
+const communityMembers = [player, ...Array.from({ length: 63 }, (_, index) => ({ ...player, id: `player-${index + 2}`, instanceId: `instance-player-${index + 2}`, name: `成员 ${index + 2}`, level: index + 2 }))];
+const guild = { id: "guild-1", name: "测试工会", memberCount: 64, baseCount: 80, adminPlayerId: "player-1", adminPlayerName: "Alice", members: communityMembers.map((member, index) => ({ id: member.id, name: member.name, level: member.level, role: index ? "member" as const : "leader" as const })) };
+const communityGuilds = [guild, ...Array.from({ length: 63 }, (_, index) => ({ ...guild, id: `guild-${index + 2}`, name: `公会 ${index + 2}`, memberCount: 0, baseCount: 0, adminPlayerId: null, adminPlayerName: null, members: [] }))];
+const communityBases = [base, ...Array.from({ length: 79 }, (_, index) => {
+  const number = index + 2;
+  const workerCount = number === 2 ? 64 : 40;
+  const name = number === 2 ? "大名单据点" : `四十只据点 ${number}`;
+  return { ...base, id: `base-${number}`, name, workerContainerId: `container-${number}`, x: number, y: number + 1, z: number + 2, workerCount, maxWorkerCount: workerCount, workers: Array.from({ length: workerCount }, (_, workerIndex) => ({ ...pal, id: `pal-${number}-${workerIndex + 1}`, nickname: `打工帕鲁${number}-${workerIndex + 1}`, baseId: `base-${number}`, baseName: name, containerId: `container-${number}`, slotIndex: workerIndex })) };
+})];
+const communityWorkers = communityBases.flatMap((item) => item.workers);
+const guildDetailBases = communityBases.map(({ id, name, guildId, workerContainerId, x, y, z }) => ({ id, name, guildId, workerContainerId, x, y, z }));
 let reparseRequests = 0;
 
 async function setupWorld(page: Page) {
   reparseRequests = 0;
   await page.addInitScript(() => window.localStorage.setItem("palserver-console-theme", "island"));
   const worldListUrls: URL[] = [];
+  const worldDetailUrls: URL[] = [];
   const rosterUrls: URL[] = [];
   const inventoryUrls: URL[] = [];
   let reparseStatusReads = 0;
@@ -67,8 +78,8 @@ async function setupWorld(page: Page) {
       sourceObservedAt: activeSnapshotId === "world-new" ? 1_786_000_100 : 1_786_000_000, collectedAt: 1_786_000_000, parsedAt: parsing ? null : 1_786_000_042, parseStatus,
       reparseGeneration: incompatible ? 0 : reparseRequests,
       dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
-      counts: { players: 1, pals: 3, guilds: 1, bases: 1, inventory_items: 1, work_pals: 1 },
-      overview: { assets: { players: 1, pals: 3, palSpecies: 2, itemTypes: 2, itemQuantity: 26, bases: 1, guilds: 1 }, actions: { attentionPals: 1, luckyPals: 1, bossPals: 0, unassignedPals: 2, unknownItems: 1, unknownPalMetadata: 1, careUnavailable: 2 } },
+      counts: { players: 1, pals: 3, guilds: 64, bases: 80, inventory_items: 1, work_pals: 1 },
+      overview: { assets: { players: 1, pals: 3, palSpecies: 2, itemTypes: 2, itemQuantity: 26, bases: 80, guilds: 64 }, actions: { attentionPals: 1, luckyPals: 1, bossPals: 0, unassignedPals: 2, unknownItems: 1, unknownPalMetadata: 1, careUnavailable: 2 } },
     } });
     }
     if (path === "/api/world/reparse") {
@@ -115,27 +126,49 @@ async function setupWorld(page: Page) {
       const total = selectedType ? locations.length : groups.reduce((sum, group) => sum + group.locationCount, 0);
       return route.fulfill({ json: { itemId: "Wood", groups, locations, page: 1, pageSize: selectedType ? 100 : 1, total, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } } } });
     }
-    const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": [guild], "/api/world/bases": [base] };
+    const lists: Record<string, object[]> = { "/api/world/players": [player], "/api/world/pals": [pal, unknownPal, sortPal], "/api/world/guilds": communityGuilds, "/api/world/bases": communityBases };
     if (path in lists) {
-      worldListUrls.push(new URL(route.request().url()));
-      const page = Number(new URL(route.request().url()).searchParams.get("page") || 1);
-      return route.fulfill({ json: { items: lists[path], page, pageSize: 50, total: path === "/api/world/guilds" ? 51 : lists[path].length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null } });
+      const requestUrl = new URL(route.request().url());
+      worldListUrls.push(requestUrl);
+      const page = Number(requestUrl.searchParams.get("page") || 1);
+      const search = requestUrl.searchParams.get("search")?.trim().toLocaleLowerCase() || "";
+      const matching = search ? lists[path].filter((item) => JSON.stringify(item).toLocaleLowerCase().includes(search)) : lists[path];
+      return route.fulfill({ json: { items: matching.slice((page - 1) * 50, page * 50), page, pageSize: 50, total: matching.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null } });
     }
     const details: Record<string, object> = {
-      "/api/world/players/player-1": { ...player, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
+      "/api/world/players/player-1": { ...player, snapshotId: activeSnapshotId, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
       "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } },
-      "/api/world/guilds/guild-1": { ...guild, members: [player], bases: [base], pals: [pal], assetSummary: { memberCount: 1, baseCount: 1, palCount: 1, inventory: { itemTypeCount: 2, totalQuantity: 12, locationCount: 3 } }, missingMemberIds: ["missing-player"], missingBaseIds: [] },
-      "/api/world/bases/base-1": { ...base, guild, guildAssociation: "linked", workers: [pal], workerCount: 1, careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 }, inventorySummary: { itemTypeCount: 2, totalQuantity: 9, locationCount: 2 } },
+      "/api/world/guilds/guild-1": { ...guild, snapshotId: activeSnapshotId, members: communityMembers, bases: guildDetailBases, pals: communityWorkers, assetSummary: { memberCount: 64, baseCount: 80, palCount: communityWorkers.length, inventory: { itemTypeCount: 2, totalQuantity: 12, locationCount: 3 } }, missingMemberIds: [], missingBaseIds: [] },
+      "/api/world/bases/base-1": { ...base, snapshotId: activeSnapshotId, guild, guildAssociation: "linked", workers: [pal], workerCount: 1, careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 }, inventorySummary: { itemTypeCount: 2, totalQuantity: 9, locationCount: 2 } },
     };
-    if (path in details) return route.fulfill({ json: details[path] });
+    if (path in details) {
+      worldDetailUrls.push(new URL(route.request().url()));
+      return route.fulfill({ json: details[path] });
+    }
+    const communityBase = communityBases.find((item) => path === `/api/world/bases/${item.id}`);
+    if (communityBase) {
+      worldDetailUrls.push(new URL(route.request().url()));
+      return route.fulfill({ json: { ...communityBase, snapshotId: activeSnapshotId, guild, guildAssociation: "linked", workers: communityBase.workers, workerCount: communityBase.workerCount, careSummary: { total: communityBase.workerCount, critical: 0, warning: 0, attention: 0, unavailable: 0 }, inventorySummary: { itemTypeCount: 0, totalQuantity: 0, locationCount: 0 } } });
+    }
+    const communityPal = communityWorkers.find((item) => path === `/api/world/pals/${item.id}`);
+    if (communityPal) {
+      const workerBase = communityBases.find((item) => item.id === communityPal.baseId) || base;
+      worldDetailUrls.push(new URL(route.request().url()));
+      return route.fulfill({ json: { ...communityPal, snapshotId: activeSnapshotId, owner: player, base: workerBase, container: { id: workerBase.workerContainerId, kind: "base_workers", slotCount: workerBase.maxWorkerCount }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
+    }
+    const communityMember = communityMembers.find((item) => path === `/api/world/players/${item.id}`);
+    if (communityMember) {
+      worldDetailUrls.push(new URL(route.request().url()));
+      return route.fulfill({ json: { ...communityMember, snapshotId: activeSnapshotId, guild, pals: [], partyPals: [], storagePals: [], inventory: [] } });
+    }
     return route.fulfill({ status: 404, json: { errorCode: "WORLD_ENTITY_NOT_FOUND", message: path } });
   });
 
-  return { worldListUrls, rosterUrls, inventoryUrls };
+  return { worldListUrls, worldDetailUrls, rosterUrls, inventoryUrls, getReparseStatusReads: () => reparseStatusReads };
 }
 
 test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", async ({ page }, testInfo) => {
-  const { worldListUrls, rosterUrls, inventoryUrls } = await setupWorld(page);
+  const { worldListUrls, worldDetailUrls, rosterUrls, inventoryUrls, getReparseStatusReads } = await setupWorld(page);
   await page.goto("/");
   await page.getByRole("button", { name: "世界", exact: true }).click();
 
@@ -146,7 +179,7 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(tabs).toContainText("帕鲁图鉴花名册");
   await expect(tabs).toContainText("公会与据点");
   await expect(tabs).toContainText("全服物资检索");
-  await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
+  await expect(page.getByRole("tabpanel", { name: "世界资产总览" }).getByRole("heading", { name: "资产规模" })).toBeVisible();
   await expect(page.locator(".world-overview-assets")).toContainText("覆盖 2 种帕鲁");
   await expect(page.locator(".world-overview-assets")).toContainText("玩家、据点与公会合计 26 件");
   await expect(page.locator(".world-overview-assets button").filter({ hasText: "登记训练家" })).toContainText("当前在线 0 名");
@@ -225,9 +258,10 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(drawer.getByText("Player ID")).toBeVisible();
   await expect(drawer).toContainText("拥有帕鲁");
   await drawer.locator(".world-relation-section").filter({ hasText: "拥有帕鲁" }).getByRole("button", { name: /小羊/ }).click();
-  await expect(drawer).toContainText("编号:");
-  await expect(drawer).toContainText("所属训练家:");
-  await drawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  const linkedPalDrawer = page.locator(".pal-detail-modal");
+  await expect(linkedPalDrawer).toContainText("个体值（IV）");
+  await expect(linkedPalDrawer).toContainText("所属训练家:");
+  await linkedPalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
   await expect(drawer).toContainText("队伍帕鲁");
   await drawer.getByRole("button", { name: "在仓库中查看" }).click();
   await expect(page.locator(".inventory-context")).toContainText("玩家库存：Alice");
@@ -321,39 +355,128 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".pal-roster-row")).toHaveCount(1);
 
   await page.getByRole("tab", { name: "公会与据点" }).click();
-  const guildPanel = page.locator(".world-community-panel").filter({ hasText: "全服公会组织" });
-  const basePanel = page.locator(".world-community-panel").filter({ hasText: "据点分布与打工帕鲁" });
-  await expect(guildPanel).toContainText("测试工会");
-  await expect(guildPanel).toContainText("会长 / 管理员: Alice");
-  await expect(guildPanel).toContainText("Alice (Lv.20)");
-  await expect(basePanel).toContainText("据点一号");
-  await expect(basePanel).toContainText("1 / 15 打工帕鲁");
+  const guildNav = page.locator(".world-community-guild-nav");
+  const baseWorkspace = page.locator(".world-community-base-workspace");
+  await expect(guildNav).toContainText("测试工会");
+  await expect(guildNav).toContainText("64 名成员 · 80 个据点");
+  await expect(baseWorkspace).toContainText("全部据点");
+  await expect(baseWorkspace).toContainText("据点一号");
+  await expect(baseWorkspace).toContainText("1 / 15 打工帕鲁");
+  if (testInfo.project.name === "mobile") await guildNav.locator("summary").click();
   await expect.poll(() => {
     const guildRequest = worldListUrls.findLast((url) => url.pathname === "/api/world/guilds");
     const baseRequest = worldListUrls.findLast((url) => url.pathname === "/api/world/bases");
     return guildRequest?.searchParams.get("snapshotId") === baseRequest?.searchParams.get("snapshotId") ? baseRequest?.searchParams.get("snapshotId") : null;
   }).toBe("world");
   await expect(page.locator(".world-community-controls")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /查看公会资产|查看据点资产/ })).toHaveCount(0);
-  await expect(guildPanel.locator(".audit-footer")).toContainText("第 1/2 页");
-  await guildPanel.getByTitle("下一页").click();
+  await guildNav.getByLabel("搜索公会").fill("公会 64");
+  await guildNav.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/guilds" && url.searchParams.get("search") === "公会 64")).toBeTruthy();
+  await expect(guildNav).toContainText("公会 64");
+  await guildNav.getByLabel("搜索公会").fill("");
+  await guildNav.getByRole("button", { name: "搜索", exact: true }).click();
+  await expect.poll(() => worldListUrls.findLast((url) => url.pathname === "/api/world/guilds")?.searchParams.has("search")).toBeFalsy();
+  await expect(guildNav.locator(".audit-footer")).toContainText("第 1/2 页");
+  await expect(baseWorkspace.locator(".audit-footer")).toContainText("共 80 条，第 1/2 页");
+  await baseWorkspace.locator(".audit-footer").getByTitle("下一页").click();
+  await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("page") === "2")).toBeTruthy();
+  await expect(baseWorkspace).toContainText("据点 80");
+  await baseWorkspace.locator(".audit-footer").getByTitle("上一页").click();
+  await guildNav.getByTitle("下一页").click();
   await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/guilds" && url.searchParams.get("page") === "2")).toBeTruthy();
-  await expect(guildPanel.locator(".audit-footer")).toContainText("第 2/2 页");
-  await page.screenshot({ path: `../.impeccable/review/${testInfo.project.name}-community.png`, fullPage: true });
-  await expect(basePanel.locator(".world-community-card")).toContainText("1 / 15 打工帕鲁");
-  await expect(basePanel.locator(".world-community-card")).toContainText("X: 1, Y: 2, Z: 3");
-  await basePanel.getByRole("button", { name: "小羊 (Lv.18)" }).click();
-  await expect(drawer).toContainText("SheepBall");
-  await drawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await expect(guildNav.locator(".audit-footer")).toContainText("第 2/2 页");
+  await guildNav.getByTitle("上一页").click();
+  await guildNav.getByRole("button", { name: /测试工会/ }).click();
+  await expect.poll(() => worldDetailUrls.some((url) => url.pathname === "/api/world/guilds/guild-1" && url.searchParams.get("snapshotId") === "world")).toBeTruthy();
+  await expect(baseWorkspace).toContainText("以下据点来自该公会详情返回的完整关联数据");
+  await expect.poll(() => worldDetailUrls.some((url) => url.pathname === "/api/world/bases/base-1" && url.searchParams.get("snapshotId") === "world")).toBeTruthy();
+  await expect(baseWorkspace).toContainText("测试工会");
+  await expect(baseWorkspace).toContainText("查看成员（64）");
+  await expect(baseWorkspace.locator(".world-community-local-pagination")).toContainText("完整关联据点共 80 条，显示 1-12 条，第 1/7 页");
+  await baseWorkspace.locator(".world-community-local-pagination").getByTitle("下一页").click();
+  await expect(baseWorkspace).toContainText("据点 13");
+  await baseWorkspace.locator(".world-community-local-pagination").getByTitle("上一页").click();
+  const baseCard = baseWorkspace.locator(".world-community-card").filter({ hasText: "据点一号" });
+  await expect(baseCard).toContainText("1 / 15 打工帕鲁");
+  await expect(baseCard).toContainText("X: 1, Y: 2, Z: 3");
+  await baseCard.getByRole("button", { name: "查看全部 1 只" }).click();
+  await expect(drawer).toContainText("完整打工帕鲁");
+  await expect(drawer).toContainText("完整打工帕鲁名单来自此据点详情");
+  if (testInfo.project.name === "mobile") {
+    await expect(drawer).toHaveCSS("top", "0px");
+    await expect(drawer).toHaveCSS("left", "0px");
+    await expect(drawer).toHaveCSS("border-radius", "0px");
+    await expect(drawer).toHaveCSS("transform", "none");
+    expect(await drawer.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+  }
+  await drawer.getByRole("button", { name: /小羊/ }).click();
+  const basePalDrawer = page.locator(".pal-detail-modal");
+  await expect(basePalDrawer).toContainText("棉悠悠");
+  await basePalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await expect(drawer).toContainText("完整打工帕鲁");
+  await drawer.getByRole("button", { name: "关闭详情" }).click();
+  const largeBaseCard = baseWorkspace.locator(".world-community-card").filter({ hasText: "大名单据点" });
+  await expect(largeBaseCard).toContainText("64 / 64 打工帕鲁");
+  await expect(largeBaseCard).toContainText("预览 5/64 只");
+  const fortyWorkerBaseCard = baseWorkspace.locator(".world-community-card").filter({ hasText: "四十只据点 3" });
+  await expect(fortyWorkerBaseCard).toContainText("40 / 40 打工帕鲁");
+  await expect(fortyWorkerBaseCard).toContainText("预览 5/40 只");
+  await page.screenshot({ path: testInfo.project.name === "mobile" ? "../.impeccable/review/community-mobile-390x844-island.png" : "../.impeccable/review/community-desktop-1440x960-island.png", fullPage: true, animations: "disabled" });
+  await largeBaseCard.getByRole("button", { name: "查看全部 64 只" }).click();
+  await expect(drawer).toContainText("完整打工帕鲁 64 / 64");
+  await drawer.locator(".world-community-detail-list .audit-footer").getByTitle("下一页").click();
+  await expect(drawer).toContainText("打工帕鲁2-13");
+  const savedDetailScrollTop = await drawer.evaluate((element) => {
+    element.scrollTop = 240;
+    return element.scrollTop;
+  });
+  expect(savedDetailScrollTop).toBeGreaterThan(0);
+  await drawer.getByRole("button", { name: /打工帕鲁2-13/ }).click();
+  await expect(basePalDrawer).toContainText("棉悠悠");
+  await basePalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await expect(drawer.locator(".world-community-detail-list .audit-footer")).toContainText("第 2/6 页");
+  await expect.poll(() => drawer.evaluate((element) => element.scrollTop)).toBe(savedDetailScrollTop);
+  const workerSearch = drawer.getByLabel("查找据点打工帕鲁");
+  await workerSearch.fill("打工帕鲁2-64");
+  await expect(drawer).toContainText("打工帕鲁2-64");
+  await drawer.getByRole("button", { name: /打工帕鲁2-64/ }).click();
+  await basePalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await expect(workerSearch).toHaveValue("打工帕鲁2-64");
+  await drawer.getByRole("button", { name: "关闭详情" }).click();
+  await baseWorkspace.getByRole("button", { name: "查看成员（64）" }).click();
+  await expect(drawer).toContainText("完整成员名单");
+  await expect(drawer).toContainText("64 / 64");
+  await drawer.locator(".world-community-detail-list .audit-footer").getByTitle("下一页").click();
+  await expect(drawer).toContainText("成员 13");
+  const memberSearch = drawer.getByLabel("查找公会成员");
+  await memberSearch.fill("成员 64");
+  await drawer.getByRole("button", { name: /成员 64/ }).click();
+  await expect(drawer).toContainText("成员 64");
+  await drawer.getByRole("button", { name: "返回上一详情" }).click();
+  await expect(memberSearch).toHaveValue("成员 64");
+  await drawer.getByRole("button", { name: "关闭详情" }).click();
   await page.getByRole("button", { name: "重新解析" }).click();
   await expect.poll(() => reparseRequests).toBe(1);
-  await expect.poll(() => reparseStatusReads).toBeGreaterThanOrEqual(3);
+  await expect.poll(getReparseStatusReads).toBeGreaterThanOrEqual(3);
   await expect.poll(() => worldListUrls.some((url) => url.pathname === "/api/world/bases" && url.searchParams.get("snapshotId") === "world-new")).toBeTruthy();
   await page.getByRole("button", { name: "重新解析" }).click();
   await expect.poll(() => reparseRequests).toBe(2);
   await expect(page.getByText(/SNAPSHOT_PARSE_FAILED/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
+});
+
+test("UX-04：765px 宽度仍可访问完整公会导航", async ({ page }) => {
+  await page.setViewportSize({ width: 765, height: 844 });
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点" }).click();
+  const guildNav = page.getByLabel("公会筛选导航");
+  await expect(guildNav.locator("summary")).toBeHidden();
+  await expect(guildNav.getByLabel("搜索公会")).toBeVisible();
+  await expect(guildNav.getByRole("button", { name: /测试工会/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
 test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async ({ page }) => {
@@ -479,5 +602,5 @@ test("据点容量：使用存档当前槽位而非配置最高值", async ({ pa
   await page.getByRole("tab", { name: "公会与据点" }).click();
   const card = page.locator(".world-community-card").filter({ hasText: "容量验证据点" });
   await expect(card.locator("header")).toContainText("26 / 30 打工帕鲁");
-  await expect(card.getByTitle("存档中的打工帕鲁数量 / 当前可用槽位；容量由游戏按据点等级与配置决定")).toBeVisible();
+  await expect(card.getByTitle("存档中的打工帕鲁数量；容量仅在同快照的据点详情提供时显示")).toBeVisible();
 });

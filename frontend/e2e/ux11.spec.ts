@@ -40,10 +40,10 @@ test("UX-11：无可用快照时五个工作区都明确说明影响", async ({ 
     await expect(page.locator(".world-workspace")).toContainText("当前没有可用世界快照");
   }
   await tabs.getByRole("tab", { name: "公会与据点" }).click();
-  await expect(page.getByRole("heading", { name: "全服公会组织" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "据点分布与打工帕鲁" })).toBeVisible();
-  await expect(page.locator(".world-community-panel").filter({ hasText: "全服公会组织" })).toContainText("当前没有可用世界快照");
-  await expect(page.locator(".world-community-panel").filter({ hasText: "据点分布与打工帕鲁" })).toContainText("当前没有可用世界快照");
+  await expect(page.getByLabel("公会筛选导航")).toContainText("当前没有可用世界快照");
+  await expect(page.getByRole("heading", { name: "全部据点" })).toBeVisible();
+  await expect(page.locator(".world-community-base-workspace")).toContainText("当前没有可用世界快照");
+  await expect(page.locator(".world-community-base-workspace")).not.toContainText("当前范围没有据点");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 
@@ -69,7 +69,7 @@ test("UX-11：请求失败保留英文标识并可重试", async ({ page }) => {
   await expect(failure).toContainText("WORLD_SNAPSHOT_UNAVAILABLE");
   failSnapshot = false;
   await failure.getByRole("button", { name: "重新尝试" }).click();
-  await expect(page.getByRole("heading", { name: "世界资产总览" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "资产规模" })).toBeVisible();
 
   await page.getByRole("tab", { name: "训练家档案" }).click();
   await expect(failure).toContainText("WORLD_PLAYER_LIST_UNAVAILABLE");
