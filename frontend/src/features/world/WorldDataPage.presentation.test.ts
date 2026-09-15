@@ -22,7 +22,9 @@ test("世界数据筛选与排序交给完整数据查询处理", () => {
   expect(source).not.toContain("world-community-card-open");
   expect(source).toContain("function CommunityWorkspace");
   expect(source).toContain("world-community-guild-nav");
-  expect(source).toContain('"未关联公会"');
+  expect(source).toContain('"全部公会"');
+  expect(source).not.toContain('"未关联公会"');
+  expect(source).not.toContain('"自由据点"');
   expect(source).toContain("guildDetail.pals.filter");
   expect(source).toContain("完整关联据点");
   expect(source).toContain("function CommunityBaseCard");

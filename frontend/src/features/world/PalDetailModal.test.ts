@@ -42,11 +42,20 @@ test("数值型零标记不渲染为 00，真实昵称保留", () => {
 });
 
 test("详情只保留一个查找入口并隐藏内部代码，显示已有工作翻译", () => {
-  const data = { ...pal, assignment: "player", aptitude: { ...pal.aptitude, workSuitabilities: [{ type: "MonsterFarm", level: 2 }, { type: "EmitFlame", level: 1 }, { type: "ProductMedicine", level: 1 }] }, skills: { ...pal.skills, passive: [{ id: "InternalPassiveCode", name: "电容", description: "雷属性攻击伤害增加{EffectValue1}%", sourceName: null, rank: 1, element: null, power: null, cooldown: null, metadataKnown: true }] } };
+  const data = { ...pal, ownerPlayerId: "player-1", ownerName: "Alice", assignment: "player", aptitude: { ...pal.aptitude, workSuitabilities: [{ type: "MonsterFarm", level: 2 }, { type: "EmitFlame", level: 1 }, { type: "ProductMedicine", level: 1 }] }, skills: { ...pal.skills, passive: [{ id: "InternalPassiveCode", name: "电容", description: "雷属性攻击伤害增加{EffectValue1}%", sourceName: null, rank: 1, element: null, power: null, cooldown: null, metadataKnown: true }] } };
   // Detail responses use assignment rather than the roster's locationType.
   const detail = Object.fromEntries(Object.entries(data).filter(([key]) => key !== "locationType")) as WorldPalRosterItem;
   const html = renderToStaticMarkup(createElement(PalDetailModal, { data: detail, onClose: () => {}, onFindSameSpecies: () => {} }));
   expect(html.match(/查找同种帕鲁/g)).toHaveLength(1);
-  for (const label of ["牧场", "生火", "制药", "玩家持有", "雷属性攻击伤害增加（数值未收录）"]) expect(html).toContain(label);
+  for (const label of ["牧场", "生火", "制药", "当前位置", "玩家持有 · Alice", "雷属性攻击伤害增加（数值未收录）"]) expect(html).toContain(label);
   for (const code of ["编号:", "InternalPassiveCode", "MonsterFarm", "{EffectValue1}", "Tier"]) expect(html).not.toContain(code);
+});
+
+test("详情将训练家或据点合并为唯一当前位置", () => {
+  expect(render({ ...pal, locationType: "party", ownerPlayerId: "player-1", ownerName: "Alice" })).toContain("随身队伍 · Alice");
+  expect(render({ ...pal, locationType: "storage", ownerPlayerId: "player-1", ownerName: "Alice" })).toContain("帕鲁终端 · Alice");
+  expect(render({ ...pal, locationType: "base", baseId: "base-1", baseName: "据点甲" })).toContain("据点工作 · 据点甲");
+  const unknown = render(pal);
+  expect(unknown).toContain("归属资料不可用");
+  for (const label of ["所属训练家", "存放位置", "野生 / 未登记"]) expect(unknown).not.toContain(label);
 });

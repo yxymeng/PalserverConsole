@@ -260,7 +260,8 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await drawer.locator(".world-relation-section").filter({ hasText: "拥有帕鲁" }).getByRole("button", { name: /小羊/ }).click();
   const linkedPalDrawer = page.locator(".pal-detail-modal");
   await expect(linkedPalDrawer).toContainText("个体值（IV）");
-  await expect(linkedPalDrawer).toContainText("所属训练家:");
+  await expect(linkedPalDrawer).toContainText("当前位置");
+  await expect(linkedPalDrawer).toContainText("据点工作 · 据点一号");
   await linkedPalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
   await expect(drawer).toContainText("队伍帕鲁");
   await drawer.getByRole("button", { name: "在仓库中查看" }).click();
@@ -279,12 +280,13 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
   await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("1 星");
   await expect(palRow.locator('[data-label="资质"]')).toContainText("稀有度 1");
-  await expect(palRow.locator('[data-label="工作适应性"]')).toContainText("手工作业 1");
+  await expect(palRow.locator('[data-label="工作适应性"]')).toContainText("手工作业Lv.1");
   await expect(palRow.locator('[data-label="个体标记"]')).toHaveText("闪光");
   await expect(palRow.locator('[data-label="归属"]')).toContainText("据点一号");
   await expect(palRow.locator('[data-label="照护状态"]')).toContainText("需立即处理");
   await expect(palRow).not.toContainText("base-1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
+  await page.screenshot({ path: testInfo.outputPath(`pal-roster-${testInfo.project.name}.png`), fullPage: true });
   await page.getByText("资质、工作与被动技能", { exact: true }).click();
   if (testInfo.project.name === "mobile") {
     const aptitudeDialog = page.getByRole("dialog", { name: "资质、工作与被动技能" });
@@ -329,7 +331,10 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(palDrawer).toContainText("配备主动战斗技能");
   await expect(palDrawer).toContainText("传说");
   await expect(palDrawer).toContainText("威力 40");
-  await expect(palDrawer).toContainText("所属训练家:");
+  await expect(palDrawer).toContainText("当前位置");
+  await expect(palDrawer).toContainText("据点工作 · 据点一号");
+  await expect(palDrawer).not.toContainText("所属训练家:");
+  await expect(palDrawer).not.toContainText("存放位置:");
   const closePalDrawer = palDrawer.getByRole("button", { name: "关闭帕鲁详情" });
   await expect(closePalDrawer).toBeFocused();
   const passiveTrigger = palDrawer.locator(".pal-passive-grid button").first();
@@ -362,7 +367,8 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(baseWorkspace).toContainText("全部据点");
   await expect(baseWorkspace).toContainText("据点一号");
   await expect(baseWorkspace).toContainText("1 / 15 打工帕鲁");
-  if (testInfo.project.name === "mobile") await guildNav.locator("summary").click();
+  await guildNav.locator("summary").click();
+  await expect(guildNav.getByRole("button", { name: /全部公会/ })).toBeVisible();
   await expect.poll(() => {
     const guildRequest = worldListUrls.findLast((url) => url.pathname === "/api/world/guilds");
     const baseRequest = worldListUrls.findLast((url) => url.pathname === "/api/world/bases");
@@ -466,14 +472,16 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });
 
-test("UX-04：765px 宽度仍可访问完整公会导航", async ({ page }) => {
+test("UX-04：765px 宽度仍可访问完整公会下拉菜单", async ({ page }) => {
   await page.setViewportSize({ width: 765, height: 844 });
   await setupWorld(page);
   await page.goto("/");
   await page.getByRole("button", { name: "世界", exact: true }).click();
   await page.getByRole("tab", { name: "公会与据点" }).click();
-  const guildNav = page.getByLabel("公会筛选导航");
-  await expect(guildNav.locator("summary")).toBeHidden();
+  const guildNav = page.getByLabel("公会选择器");
+  await expect(guildNav.locator("summary")).toBeVisible();
+  await expect(guildNav.getByLabel("搜索公会")).toBeHidden();
+  await guildNav.locator("summary").click();
   await expect(guildNav.getByLabel("搜索公会")).toBeVisible();
   await expect(guildNav.getByRole("button", { name: /测试工会/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();

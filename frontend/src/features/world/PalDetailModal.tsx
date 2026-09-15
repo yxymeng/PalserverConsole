@@ -1,4 +1,4 @@
-import { Award, Briefcase, ChevronRight, Flame, Gauge, Heart, MapPin, Search, Shield, Sparkles, Swords, User, X, Zap } from "lucide-react";
+import { Award, Briefcase, ChevronRight, Flame, Gauge, Heart, MapPin, Search, Shield, Sparkles, Swords, X, Zap } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 
 import type { WorldPalDetail, WorldPalRosterItem, WorldPalSkill } from "../../api/contracts";
@@ -14,10 +14,6 @@ const workLabels: Record<string, string> = {
   ...workSuitabilityLabels,
   Kindling: "生火", Watering: "浇水", Planting: "播种", GenerateElectricity: "发电", Handcraft: "手工作业",
   Gathering: "采集", Lumbering: "伐木", Mining: "采矿", Medicine: "制药", Cooling: "冷却", Transport: "搬运", Farming: "牧场",
-};
-
-const locationLabels: Record<string, string> = {
-  player: "玩家持有", party: "玩家随身队伍", storage: "帕鲁终端", base_worker: "据点打工", base: "据点打工", unassigned: "野外 / 未归属",
 };
 
 export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, closeRef, ariaLabel = "帕鲁详情", notice }: {
@@ -40,9 +36,17 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
   }
   const ownerName = data.ownerName || ("owner" in data ? data.owner?.name : null);
   const baseName = data.baseName || ("base" in data ? data.base?.name : null);
-  const location = "locationType" in data
-    ? ({ player: "玩家持有", party: "玩家随身队伍", storage: "帕鲁终端", base: "据点打工", unassigned: "野外 / 未归属" }[data.locationType])
-    : locationLabels[data.assignment] || "归属未识别";
+  const containerKind = "container" in data ? data.container?.kind : null;
+  const locationType = "locationType" in data ? data.locationType
+    : data.baseId || containerKind === "base_workers" ? "base"
+      : containerKind === "pal_party" ? "party"
+        : containerKind === "pal_storage" ? "storage"
+          : data.ownerPlayerId ? "player" : "unassigned";
+  const location = locationType === "base" ? `据点工作 · ${baseName || "据点资料不可用"}`
+    : locationType === "party" ? `随身队伍 · ${ownerName || "训练家资料不可用"}`
+      : locationType === "storage" ? `帕鲁终端 · ${ownerName || "训练家资料不可用"}`
+        : locationType === "player" ? `玩家持有 · ${ownerName || "训练家资料不可用"}`
+          : "归属资料不可用";
   const ivs = [
     ["生命 IV", data.aptitude.ivs.hp, Heart, "hp"],
     ["攻击 IV", data.aptitude.ivs.attack, Swords, "attack"],
@@ -83,7 +87,7 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
 
       <section className="pal-detail-section work"><h3><Briefcase size={15} />工作适应性技能</h3>{data.aptitude.workSuitabilities.length ? <div>{data.aptitude.workSuitabilities.map((work) => <span key={work.type}>{workLabels[work.type] || "工作类型未收录"}<strong>Lv.{work.level}</strong></span>)}</div> : <p className="pal-detail-empty">{data.aptitude.metadataKnown ? "无工作技能（战斗与骑乘专用型）" : "工作适应性资料未收录"}</p>}</section>
 
-      <section className="pal-detail-location"><div><span><User size={15} />所属训练家:</span><strong>{ownerName || "野生 / 未登记"}</strong></div><div><span><MapPin size={15} />存放位置:</span><strong>{baseName ? `${location} (${baseName})` : location}</strong></div></section>
+      <section className="pal-detail-location"><div><span><MapPin size={15} />当前位置</span><strong>{location}</strong></div></section>
     </div>
 
     {onFindSameSpecies && <footer className="pal-detail-footer"><button className="pal-detail-same" type="button" onClick={sameSpecies}><Search size={16} />查找同种帕鲁</button></footer>}

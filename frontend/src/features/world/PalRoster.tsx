@@ -1,4 +1,4 @@
-import { AlertCircle, ChevronDown, CircleAlert, Crown, HeartPulse, LoaderCircle, Search, Sparkles, Star, X } from "lucide-react";
+import { AlertCircle, ChevronDown, ChevronRight, CircleAlert, Crown, HeartPulse, LoaderCircle, Search, Sparkles, Star, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
@@ -316,30 +316,30 @@ function MobileAptitudeFilters({ open, filters, passiveSkillOptions, onUpdate, o
 function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (item: WorldPalRosterItem, trigger: HTMLButtonElement) => void }) {
   const pal = resolvePal(item);
   const location = item.locationType === "base" ? item.baseName || locationLabels.base : item.ownerName || locationLabels[item.locationType];
-  return <div className="pal-roster-row">
-    <button className="pal-roster-name" type="button" onClick={(event) => onOpen(item, event.currentTarget)}><span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"}><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span><span><strong>{pal.displayName}</strong><small>{pal.known ? pal.speciesName : pal.characterId}</small></span>{pal.gender && <span className={`world-pal-gender ${pal.gender}`} title={pal.gender === "male" ? "雄性" : "雌性"} aria-label={pal.gender === "male" ? "雄性" : "雌性"}>{pal.gender === "male" ? "♂" : "♀"}</span>}</button>
-    <span className="pal-roster-level" data-label="等级 / 星级"><strong>Lv. {item.level ?? "—"}</strong><small>{pal.rank && pal.rank > 0 ? <><Star size={13} fill="currentColor" />{pal.rank} 星</> : "0 星"}</small></span>
-    <PalAptitudeSummary aptitude={item.aptitude} />
-    <PalWorkSummary aptitude={item.aptitude} />
+  return <button className="pal-roster-row" type="button" aria-label={pal.displayName} onClick={(event) => onOpen(item, event.currentTarget)}>
+    <span className="pal-roster-top">
+      <span className="pal-roster-name"><span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"}><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span><span className="pal-roster-copy"><span><strong>{pal.displayName}</strong><span className="pal-roster-level" data-label="等级 / 星级">Lv.{item.level ?? "—"}<small><Star size={10} fill="currentColor" />{pal.rank ?? 0} 星</small></span></span><small>{pal.known ? pal.speciesName : pal.characterId}</small></span>{pal.gender && <span className={`world-pal-gender ${pal.gender}`} title={pal.gender === "male" ? "雄性" : "雌性"} aria-label={pal.gender === "male" ? "雄性" : "雌性"}>{pal.gender === "male" ? "♂" : "♀"}</span>}</span>
+      <PalRosterTraits item={item} />
+    </span>
     <PalPassiveSummary skills={item.skills} />
-    <PalRosterTraits item={item} />
-    <PalCareBadge care={item.care} />
-    <span className="pal-roster-location" data-label="归属"><strong>{locationLabels[item.locationType]}</strong><small>{location}</small></span>
-  </div>;
+    <PalWorkSummary aptitude={item.aptitude} />
+    <span className="pal-roster-extra"><PalAptitudeSummary aptitude={item.aptitude} /><PalCareBadge care={item.care} /></span>
+    <span className="pal-roster-location" data-label="归属"><span>{locationLabels[item.locationType]}：<strong>{location}</strong></span><span>查看详情 <ChevronRight size={14} aria-hidden="true" /></span></span>
+  </button>;
 }
 
 function PalAptitudeSummary({ aptitude }: { aptitude: WorldPalAptitude }) {
   if (!aptitude.metadataKnown && Object.values(aptitude.ivs).every((value) => value === null)) return <span className="pal-aptitude-summary unavailable" data-label="资质"><strong>资料未收录</strong><small>保留内部 ID</small></span>;
-  return <span className="pal-aptitude-summary" data-label="资质"><strong>稀有度 {aptitude.speciesRarity ?? "—"}</strong><small>个体值 {formatIv(aptitude.ivs.hp)} / {formatIv(aptitude.ivs.attack)} / {formatIv(aptitude.ivs.defense)} · 均值 {formatIv(aptitude.ivs.average)}</small></span>;
+  return <span className="pal-aptitude-summary" data-label="资质"><strong>稀有度 {aptitude.speciesRarity ?? "—"}</strong><small>IV {formatIv(aptitude.ivs.hp)} / {formatIv(aptitude.ivs.attack)} / {formatIv(aptitude.ivs.defense)} · 均值 {formatIv(aptitude.ivs.average)}</small></span>;
 }
 
 function PalWorkSummary({ aptitude }: { aptitude: WorldPalAptitude }) {
-  return <span className="pal-work-summary" data-label="工作适应性">{aptitude.workSuitabilities.length ? aptitude.workSuitabilities.slice(0, 3).map((work) => <em key={work.type}>{workSuitabilityLabels[work.type] || work.type} {work.level}</em>) : <small>{aptitude.metadataKnown ? "无工作适应性" : "资料未收录"}</small>}</span>;
+  return <span className="pal-work-summary" data-label="工作适应性">{aptitude.workSuitabilities.length ? aptitude.workSuitabilities.map((work) => <em key={work.type}>{workSuitabilityIcons[work.type] || "⚙️"}<span>{workSuitabilityLabels[work.type] || work.type}</span><strong>Lv.{work.level}</strong></em>) : <small>{aptitude.metadataKnown ? "无工作适应性" : "资料未收录"}</small>}</span>;
 }
 
 function PalPassiveSummary({ skills }: { skills?: WorldPalSkills }) {
   const passiveSkills = skills?.passive || [];
-  return <span className="pal-passive-summary" data-label="被动技能">{passiveSkills.length ? passiveSkills.slice(0, 2).map((skill) => <em key={skill.id}>{skillDisplayName(skill)}</em>) : <small>无被动技能</small>}</span>;
+  return <span className="pal-passive-summary" data-label="被动技能">{passiveSkills.length ? passiveSkills.map((skill) => { const name = skillDisplayName(skill); const tone = NEGATIVE_PASSIVES.has(name) || (skill.rank ?? 0) < 0 ? "negative" : name === "传说" || (skill.rank ?? 0) >= 3 ? "featured" : ""; return <em className={tone} key={skill.id}>{name}</em>; }) : <small>无被动技能</small>}</span>;
 }
 
 function PalCareSummary({ summary }: { summary: WorldPalRosterResponse["careSummary"] }) {
@@ -361,8 +361,11 @@ function PalCareBadge({ care }: { care: WorldPalCare }) {
 
 function PalRosterTraits({ item }: { item: WorldPalRosterItem }) {
   const traits = palTraitLabels(item).filter((label) => label === "闪光" || label === "头目");
-  return <span className="pal-roster-traits" data-label="个体标记">{traits.length ? traits.map((label) => <em key={label}>{label}</em>) : "普通"}</span>;
+  return <span className="pal-roster-traits" data-label="个体标记">{traits.map((label) => <em className={label === "头目" ? "boss" : "lucky"} key={label}>{label === "头目" ? <Crown size={12} /> : <Sparkles size={12} />}{label}</em>)}</span>;
 }
+
+const NEGATIVE_PASSIVES = new Set(["偷懒", "胆小", "笨手笨脚", "贪吃", "破坏狂", "娇生惯养", "弱不禁风"]);
+const workSuitabilityIcons: Record<string, string> = { EmitFlame: "🔥", Watering: "💧", Seeding: "🌱", GenerateElectricity: "⚡", Handcraft: "🔨", Collection: "🌾", Deforest: "🪓", Mining: "⛏️", OilExtraction: "🛢️", ProductMedicine: "🧪", Cool: "❄️", Transport: "📦", MonsterFarm: "🐑" };
 
 type DrawerState = { item: WorldPalRosterItem; detail: (WorldPalDetail & { snapshotId: string }) | null; loading: boolean; error: string };
 

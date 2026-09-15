@@ -1177,7 +1177,7 @@
 .pal-detail-section.work > div > span { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); font-size: 12px; font-weight: 800; }
 .pal-detail-section.work strong { color: var(--primary); font-size: 14px; }
 .pal-detail-empty { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--surface-subtle); font-size: 12px; }
-.pal-detail-location { display: grid; gap: 9px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-subtle); box-shadow: var(--shadow-sm); }
+.pal-detail-location { display: grid; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-subtle); box-shadow: var(--shadow-sm); }
 .pal-detail-location > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; }
 .pal-detail-location span { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-weight: 750; }
 .pal-detail-location svg { color: var(--primary); }
@@ -1196,13 +1196,20 @@
 .pal-passive-dialog-layer dd { margin: 3px 0 0; overflow-wrap: anywhere; font-weight: 750; }
 
 .world-community-browser { min-width: 0; }
-.world-community-layout { display: grid; grid-template-columns: minmax(240px, 280px) minmax(0, 1fr); align-items: start; gap: 24px; }
-.world-community-guild-nav { position: sticky; top: 104px; min-width: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
-.world-community-guild-nav details > summary { display: none; }
-.world-community-guild-nav-body { display: grid; gap: 12px; padding: 14px; }
-.world-community-scope-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+.world-community-layout { display: grid; align-items: start; gap: 16px; }
+.world-community-guild-nav { position: relative; z-index: 4; width: min(100%, 360px); min-width: 0; }
+.world-community-guild-nav details > summary { display: flex; min-height: 46px; align-items: center; gap: 9px; padding: 0 13px; border: 1px solid var(--border); border-radius: 9px; color: var(--foreground); background: var(--surface); cursor: pointer; list-style: none; }
+.world-community-guild-nav details > summary::-webkit-details-marker { display: none; }
+.world-community-guild-nav details > summary > span { display: grid; min-width: 0; flex: 1; }
+.world-community-guild-nav details > summary small { color: var(--muted); font-size: 10px; font-weight: 650; }
+.world-community-guild-nav details > summary span:not(small) { overflow: hidden; font-size: 13px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+.world-community-guild-nav details > summary > svg:last-child { color: var(--muted); transition: transform .16s ease; }
+.world-community-guild-nav details[open] > summary > svg:last-child { transform: rotate(90deg); }
+.world-community-guild-nav-body { position: absolute; top: calc(100% + 8px); left: 0; display: grid; width: min(420px, calc(100vw - 36px)); gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 16px 38px rgb(35 57 61 / 16%); }
+.world-community-scope-actions { display: grid; }
 .world-community-scope-actions button, .world-community-guild-list > button { min-width: 0; border: 1px solid var(--border); color: var(--foreground); background: var(--surface-subtle); font: inherit; text-align: left; cursor: pointer; }
-.world-community-scope-actions button { min-height: 42px; padding: 7px 9px; border-radius: 7px; font-size: 12px; font-weight: 700; text-align: center; }
+.world-community-scope-actions button { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 7px; font-size: 12px; font-weight: 700; }
+.world-community-scope-actions button small { color: var(--muted); font-size: 11px; font-weight: 500; }
 .world-community-scope-actions button.active, .world-community-guild-list > button.active { border-color: color-mix(in srgb, var(--primary) 55%, var(--border)); color: var(--primary); background: var(--primary-surface); }
 .world-community-guild-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; }
 .world-community-guild-search label, .world-community-detail-search { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: var(--muted); }
@@ -1280,14 +1287,42 @@
 .pal-care-summary > small { border-radius: 10px; }
 .pal-roster-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; overflow: visible; border: 0; background: transparent; }
 .pal-roster-cards .pal-roster-head { display: none; }
-.pal-roster-cards .pal-roster-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px 14px; min-height: 0; padding: 18px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); box-shadow: 0 7px 21px rgb(35 57 61 / 7%); }
-.pal-roster-cards .pal-roster-row:hover { border-color: color-mix(in srgb, var(--primary) 38%, var(--border)); background: var(--surface); box-shadow: 0 11px 28px rgb(35 57 61 / 10%); }
-.pal-roster-cards .pal-roster-name { grid-column: 1 / -1; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
-.pal-roster-cards .world-entity-avatar { width: 48px; height: 48px; border-radius: 14px; }
-.pal-roster-cards .pal-roster-row > span { display: grid; align-content: start; gap: 4px; }
-.pal-roster-cards .pal-roster-row > span::before { content: attr(data-label); color: var(--muted); font-size: 10px; font-weight: 650; }
-.pal-roster-cards .pal-work-summary, .pal-roster-cards .pal-passive-summary, .pal-roster-cards .pal-roster-traits { display: flex; align-content: start; }
-.pal-roster-cards .pal-work-summary::before, .pal-roster-cards .pal-passive-summary::before, .pal-roster-cards .pal-roster-traits::before { width: 100%; }
+.pal-roster-cards .pal-roster-row { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; min-width: 0; min-height: 0; align-content: start; align-items: stretch; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 16px; color: var(--foreground); background: var(--surface); box-shadow: 0 1px 2px rgb(35 57 61 / 7%); font: inherit; text-align: left; cursor: pointer; transition: transform .2s cubic-bezier(.4, 0, .2, 1), border-color .2s ease, box-shadow .2s ease; }
+.pal-roster-cards .pal-roster-row:hover { border-color: color-mix(in srgb, var(--primary) 38%, var(--border)); background: var(--surface); box-shadow: 0 11px 28px rgb(35 57 61 / 10%); transform: translateY(-4px); }
+.pal-roster-cards .pal-roster-row:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 30%, transparent); outline-offset: 2px; border-color: var(--primary); }
+.pal-roster-cards .pal-roster-row > span::before { content: none; }
+.pal-roster-cards .pal-roster-top { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.pal-roster-cards .pal-roster-name { display: flex; min-width: 0; flex: 1; align-items: center; gap: 12px; border: 0; padding: 0; cursor: inherit; }
+.pal-roster-cards .pal-roster-name:hover strong { color: inherit; text-decoration: none; }
+.pal-roster-cards .world-entity-avatar { width: 44px; height: 44px; flex: 0 0 44px; border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border)); border-radius: 16px; background: linear-gradient(45deg, color-mix(in srgb, var(--primary) 10%, var(--surface)), color-mix(in srgb, var(--success) 10%, var(--surface))); box-shadow: 0 1px 2px rgb(35 57 61 / 7%); transition: transform .2s ease; }
+.pal-roster-cards .pal-roster-row:hover .world-entity-avatar { transform: scale(1.1); }
+.pal-roster-copy { display: grid; min-width: 0; gap: 2px; }
+.pal-roster-copy > span { display: flex; min-width: 0; align-items: center; gap: 6px; }
+.pal-roster-copy > span > strong { overflow: hidden; font-size: 14px; font-weight: 900; text-overflow: ellipsis; white-space: nowrap; }
+.pal-roster-copy > small { overflow: hidden; color: var(--primary); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.pal-roster-cards .pal-roster-level { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding: 2px 6px; border: 1px solid color-mix(in srgb, var(--warning) 38%, var(--border)); border-radius: 4px; color: var(--warning); background: color-mix(in srgb, var(--warning-surface) 70%, var(--surface)); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 10px; font-weight: 800; line-height: 1.3; }
+.pal-roster-cards .pal-roster-level small { display: inline-flex; align-items: center; gap: 2px; color: inherit; font-size: inherit; }
+.pal-roster-cards .pal-roster-traits { display: flex; flex: 0 0 auto; flex-direction: column; align-items: flex-end; gap: 4px; }
+.pal-roster-cards .pal-roster-traits em { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 6px; font-size: 10px; font-style: normal; font-weight: 700; }
+.pal-roster-cards .pal-roster-traits .boss { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); color: var(--danger); background: var(--danger-surface); }
+.pal-roster-cards .pal-roster-traits .lucky { border-color: color-mix(in srgb, var(--warning) 38%, var(--border)); color: var(--warning); background: var(--warning-surface); }
+.pal-roster-cards .pal-passive-summary, .pal-roster-cards .pal-work-summary { display: flex; flex-wrap: wrap; align-content: start; gap: 4px; }
+.pal-roster-cards .pal-passive-summary em, .pal-roster-cards .pal-work-summary em { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px; color: var(--muted-strong); background: var(--surface-subtle); font-size: 10px; font-style: normal; font-weight: 600; line-height: 1.25; }
+.pal-roster-cards .pal-passive-summary em.featured { border-color: color-mix(in srgb, var(--warning) 42%, var(--border)); color: var(--warning); background: color-mix(in srgb, var(--warning-surface) 64%, var(--surface)); font-weight: 700; }
+.pal-roster-cards .pal-passive-summary em.negative { border-color: color-mix(in srgb, var(--danger) 34%, var(--border)); color: var(--danger); background: var(--danger-surface); }
+.pal-roster-cards .pal-work-summary em { color: var(--foreground); font-weight: 700; }
+.pal-roster-cards .pal-work-summary em strong { color: var(--primary); font-weight: 850; }
+.pal-roster-cards .pal-passive-summary small, .pal-roster-cards .pal-work-summary small { color: var(--muted); font-size: 11px; }
+.pal-roster-extra { display: flex; min-width: 0; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.pal-roster-cards .pal-aptitude-summary { display: grid; min-width: 0; gap: 2px; }
+.pal-roster-cards .pal-aptitude-summary strong { font-size: 11px; }
+.pal-roster-cards .pal-aptitude-summary small { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.pal-roster-cards .pal-care-badge { flex: 0 0 auto; padding: 3px 7px; border-radius: 6px; font-size: 10px; }
+.pal-roster-cards .pal-roster-location { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.pal-roster-cards .pal-roster-location > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pal-roster-cards .pal-roster-location strong { color: var(--foreground); font-size: inherit; }
+.pal-roster-cards .pal-roster-location > span:last-child { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 2px; color: var(--primary); font-weight: 700; transition: transform .2s ease; }
+.pal-roster-cards .pal-roster-row:hover .pal-roster-location > span:last-child { transform: translateX(4px); }
 .pal-roster-drawer { top: 5dvh; right: 50%; width: min(760px, calc(100vw - 36px)); height: 90dvh; border: 1px solid var(--border-strong); border-radius: 18px; box-shadow: 0 24px 70px rgb(16 27 29 / 28%); transform: translateX(50%); }
 .pal-roster-drawer header { border-radius: 18px 18px 0 0; }
 .pal-roster-drawer .world-entity-avatar { width: 50px; height: 50px; border-radius: 15px; }
@@ -1305,7 +1340,6 @@
 }
 
 @media (max-width: 1023px) {
-  .world-community-layout { grid-template-columns: 240px minmax(0, 1fr); gap: 18px; }
   .world-community-base-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
 }
 
@@ -1340,14 +1374,10 @@
   .pal-vitals, .pal-active-grid, .pal-passive-grid { grid-template-columns: 1fr; }
   .pal-detail-footer { padding: 12px 16px; }
   .pal-detail-footer .pal-detail-same { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .world-community-layout { grid-template-columns: 1fr; gap: 14px; }
-  .world-community-guild-nav { position: static; z-index: 1; }
-  .world-community-guild-nav details > summary { display: flex; min-height: 48px; align-items: center; gap: 8px; padding: 0 13px; color: var(--foreground); cursor: pointer; list-style: none; }
-  .world-community-guild-nav details > summary::-webkit-details-marker { display: none; }
-  .world-community-guild-nav details > summary span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 700; }
-  .world-community-guild-nav details > summary > svg:last-child { transition: transform .16s ease; }
-  .world-community-guild-nav details[open] > summary > svg:last-child { transform: rotate(90deg); }
-  .world-community-guild-nav-body { padding-top: 0; border-top: 1px solid var(--border); }
+  .world-community-layout { gap: 14px; }
+  .world-community-guild-nav { width: 100%; }
+  .world-community-guild-nav details > summary { min-height: 48px; }
+  .world-community-guild-nav-body { width: 100%; }
   .world-community-guild-list { max-height: min(42dvh, 320px); }
   .world-community-base-heading { flex-direction: column; gap: 11px; padding-bottom: 13px; }
   .world-community-base-heading .quiet-button { width: 100%; justify-content: center; }
@@ -1360,7 +1390,7 @@
   .world-entity-drawer.world-community-detail-modal { inset: 0; width: 100vw; max-height: 100dvh; border: 0; border-radius: 0; transform: none; }
   .world-community-detail-modal .section-heading { padding: 16px; border-radius: 0; }
   .world-community-detail-modal .world-detail-properties { padding: 13px; }
-  .pal-roster-cards .pal-roster-row { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 15px; }
+  .pal-roster-cards .pal-roster-row { padding: 16px; }
   .pal-roster-drawer { inset: 0; width: 100vw; height: 100dvh; border: 0; border-radius: 0; transform: none; }
   .pal-roster-drawer header { border-radius: 0; }
   .pal-roster-detail { padding: 13px; }
@@ -1371,6 +1401,7 @@
   .world-overview-assets button:last-child:nth-child(odd) { grid-column: auto; }
   .world-player-progress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .world-player-exploration > header { align-items: flex-start; flex-direction: column; }
-  .pal-roster-cards .pal-roster-row { grid-template-columns: 1fr; }
-  .pal-roster-cards .pal-roster-name { grid-column: 1; }
+  .pal-roster-cards .pal-roster-top { gap: 6px; }
+  .pal-roster-cards .pal-roster-name { gap: 10px; }
+  .pal-roster-extra { align-items: flex-start; flex-direction: column; }
 }

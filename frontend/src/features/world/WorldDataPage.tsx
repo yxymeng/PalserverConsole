@@ -28,7 +28,7 @@ type StatusFilter = "all" | "guilded" | "unguilded";
 type WorkspaceKey = "overview" | "players" | "pals" | "community" | "inventories";
 type CommunityResource = "guilds" | "bases";
 type EntityBrowserSnapshot = { result: WorldEntityListResponse | null; page: number; search: string; appliedSearch: string; sortKey: SortKey; statusFilter: StatusFilter };
-type CommunityScope = { kind: "all" | "unassigned" } | { kind: "guild"; guild: WorldGuildListItem };
+type CommunityScope = { kind: "all" } | { kind: "guild"; guild: WorldGuildListItem };
 type CommunityDetailView = { query: string; page: number };
 type CommunityBaseCardItem = WorldBaseListItem & { capacityState?: "loading" | "error" };
 
@@ -379,7 +379,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
           <WorldPagination result={result} page={page} totalPages={totalPages} onPage={setPage} />
         </section>
       </div>}</section>
-      <section id="world-workspace-community" role="tabpanel" aria-labelledby="world-workspace-tab-community" hidden={workspace !== "community"}><CommunityWorkspace guildResult={communityResults.guilds} baseResult={communityResults.bases} loading={showListLoading} snapshotId={snapshotId} onGuildSearch={(nextSearch) => { setResource("guilds"); setPage(1); setSearch(nextSearch); setAppliedSearch(nextSearch); setStatusFilter("all"); setSortKey("name"); }} onGuildPage={(nextPage) => changeCommunityPage("guilds", nextPage)} onBaseScope={(nextScope) => { setResource("bases"); setPage(1); setSearch(""); setAppliedSearch(""); setStatusFilter(nextScope === "unassigned" ? "unguilded" : "all"); setSortKey("name"); }} onBasePage={(nextPage) => changeCommunityPage("bases", nextPage)} onOpenDetail={(target, id, trigger) => void openDetail(target, id, false, trigger)} onOpenPal={(id, trigger) => void openDetail("pals", id, false, trigger)} /></section>
+      <section id="world-workspace-community" role="tabpanel" aria-labelledby="world-workspace-tab-community" hidden={workspace !== "community"}><CommunityWorkspace guildResult={communityResults.guilds} baseResult={communityResults.bases} loading={showListLoading} snapshotId={snapshotId} onGuildSearch={(nextSearch) => { setResource("guilds"); setPage(1); setSearch(nextSearch); setAppliedSearch(nextSearch); setStatusFilter("all"); setSortKey("name"); }} onGuildPage={(nextPage) => changeCommunityPage("guilds", nextPage)} onShowAllBases={() => { setResource("bases"); setPage(1); setSearch(""); setAppliedSearch(""); setStatusFilter("all"); setSortKey("name"); }} onBasePage={(nextPage) => changeCommunityPage("bases", nextPage)} onOpenDetail={(target, id, trigger) => void openDetail(target, id, false, trigger)} onOpenPal={(id, trigger) => void openDetail("pals", id, false, trigger)} /></section>
     </main>
     {selected && <EntityDetailLayer detail={selected} loading={detailLoading} canGoBack={detailHistory.length > 0} onClose={closeDetail} onNavigate={(target, id) => void openDetail(target, id, true)} onShowInventory={openInventory} />}
   </div>;
@@ -457,19 +457,18 @@ function PlayerProgressMetric({ progress, label, field, icon: Icon, detail }: { 
   return <span className="world-player-progress-item"><small>{label}<Icon size={13} /></small><strong>{value ?? "—"}{total !== null && <em> / {total.toLocaleString()}</em>}</strong><b>{detail || (value === null ? "数据不可用" : PLAYER_PROGRESS_LABELS[field])}</b></span>;
 }
 
-function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGuildSearch, onGuildPage, onBaseScope, onBasePage, onOpenDetail, onOpenPal }: {
+function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGuildSearch, onGuildPage, onShowAllBases, onBasePage, onOpenDetail, onOpenPal }: {
   guildResult: WorldEntityListResponse | null;
   baseResult: WorldEntityListResponse | null;
   loading: boolean;
   snapshotId: string | null | undefined;
   onGuildSearch: (value: string) => void;
   onGuildPage: (page: number) => void;
-  onBaseScope: (scope: "all" | "unassigned") => void;
+  onShowAllBases: () => void;
   onBasePage: (page: number) => void;
   onOpenDetail: (resource: "guilds" | "bases", id: string, trigger: HTMLButtonElement) => void;
   onOpenPal: (id: string, trigger: HTMLButtonElement) => void;
 }) {
-  const isMobile = useIsMobile();
   const [scope, setScope] = useState<CommunityScope>({ kind: "all" });
   const [guildSearch, setGuildSearch] = useState("");
   const [guildDetail, setGuildDetail] = useState<(WorldGuildDetail & WorldSnapshotContext) | null>(null);
@@ -479,6 +478,7 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
   const [baseCapacities, setBaseCapacities] = useState<Record<string, number | null>>({});
   const [baseCapacityErrors, setBaseCapacityErrors] = useState<Record<string, true>>({});
   const guildRequest = useRef(0);
+  const guildSelectorRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     guildRequest.current += 1;
@@ -543,7 +543,7 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
     };
   }, [pendingGuildBaseKey, selectedGuildDetailId, snapshotId]);
 
-  async function selectGuild(guild: WorldGuildListItem, trigger: HTMLButtonElement) {
+  async function selectGuild(guild: WorldGuildListItem) {
     const request = ++guildRequest.current;
     setScope({ kind: "guild", guild });
     setGuildDetail(null);
@@ -552,6 +552,7 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
     setNavigationOpen(false);
     setBaseCapacities({});
     setBaseCapacityErrors({});
+    window.requestAnimationFrame(() => guildSelectorRef.current?.focus());
     try {
       const suffix = snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : "";
       const detail = await requestJson<WorldGuildDetail & WorldSnapshotContext>(`/api/world/guilds/${encodeURIComponent(guild.id)}${suffix}`);
@@ -564,19 +565,19 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
     } finally {
       if (request === guildRequest.current) setGuildDetailLoading(false);
     }
-    trigger.focus();
   }
 
-  function selectScope(nextScope: "all" | "unassigned") {
+  function showAllBases() {
     guildRequest.current += 1;
-    setScope({ kind: nextScope });
+    setScope({ kind: "all" });
     setGuildDetail(null);
     setGuildDetailError("");
     setGuildDetailLoading(false);
     setNavigationOpen(false);
     setBaseCapacities({});
     setBaseCapacityErrors({});
-    onBaseScope(nextScope);
+    onShowAllBases();
+    window.requestAnimationFrame(() => guildSelectorRef.current?.focus());
   }
 
   function submitGuildSearch(event: FormEvent) {
@@ -584,29 +585,26 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
     onGuildSearch(guildSearch.trim());
   }
 
-  const baseTitle = scope.kind === "all" ? "全部据点" : scope.kind === "unassigned" ? "未关联公会的据点" : selectedGuild?.name || "公会据点";
+  const baseTitle = scope.kind === "all" ? "全部据点" : selectedGuild?.name || "公会据点";
   const baseDescription = scope.kind === "all"
-    ? "按服务端分页浏览当前快照中的所有据点；含关联资料暂不可用的据点。"
-    : scope.kind === "unassigned"
-      ? "仅显示没有 guildId 的自由据点；关联资料缺失的据点仍保留在全部据点中。"
-      : "以下据点来自该公会详情返回的完整关联数据，本地分页不会遗漏已解析据点。";
+    ? "按服务端分页浏览当前快照中的所有据点；公会关联资料不可用的据点也会保留。"
+    : "以下据点来自该公会详情返回的完整关联数据，本地分页不会遗漏已解析据点。";
 
   return <div className="world-community-browser">
     <div className="world-community-layout">
-      <aside className="world-community-guild-nav" aria-label="公会筛选导航">
-        <details open={isMobile ? navigationOpen : true} onToggle={(event) => setNavigationOpen((event.target as HTMLDetailsElement).open)}>
-          <summary><Users size={17} aria-hidden="true" /><span>{selectedGuild ? selectedGuild.name : scope.kind === "unassigned" ? "未关联公会" : "全部据点"}</span><ChevronRight size={16} aria-hidden="true" /></summary>
+      <aside className="world-community-guild-nav" aria-label="公会选择器">
+        <details open={navigationOpen} onToggle={(event) => setNavigationOpen((event.target as HTMLDetailsElement).open)}>
+          <summary ref={guildSelectorRef} aria-label={`选择公会，当前${selectedGuild?.name || "全部公会"}`}><Users size={17} aria-hidden="true" /><span><small>公会</small>{selectedGuild?.name || "全部公会"}</span><ChevronRight size={16} aria-hidden="true" /></summary>
           <div className="world-community-guild-nav-body">
             <div className="world-community-scope-actions">
-              <button className={scope.kind === "all" ? "active" : ""} type="button" onClick={() => selectScope("all")}>全部据点</button>
-              <button className={scope.kind === "unassigned" ? "active" : ""} type="button" onClick={() => selectScope("unassigned")}>未关联公会</button>
+              <button className={scope.kind === "all" ? "active" : ""} type="button" onClick={showAllBases}><span>全部公会</span><small>显示所有据点</small></button>
             </div>
             <form className="world-community-guild-search" onSubmit={submitGuildSearch}>
               <label><Search size={16} aria-hidden="true" /><input aria-label="搜索公会" value={guildSearch} onChange={(event) => setGuildSearch(event.target.value)} placeholder="搜索公会名称或稳定 ID" maxLength={100} /></label>
               <button className="primary-button" type="submit">搜索</button>
             </form>
             <div className="world-community-guild-list" aria-live="polite" aria-busy={loading}>
-              {loading ? Array.from({ length: 5 }, (_, index) => <span className="world-community-guild-skeleton skeleton" aria-hidden="true" key={index} />) : guilds.length ? guilds.map((guild) => <button className={selectedGuild?.id === guild.id ? "active" : ""} type="button" key={guild.id} onClick={(event) => void selectGuild(guild, event.currentTarget)}><span><strong title={guild.name}>{guild.name}</strong><small>{guild.memberCount.toLocaleString()} 名成员 · {guild.baseCount.toLocaleString()} 个据点</small></span><ChevronRight size={15} aria-hidden="true" /></button>) : <div className="world-community-guild-empty"><Users size={20} /><strong>{guildResult ? guildSearch.trim() ? "没有匹配的公会" : "当前快照没有公会" : snapshotId ? "正在读取公会列表" : "当前没有可用世界快照"}</strong><p>{guildSearch.trim() ? "修改搜索词后再试。" : "公会成员和关联据点会在这里按需查看。"}</p></div>}
+              {loading ? Array.from({ length: 5 }, (_, index) => <span className="world-community-guild-skeleton skeleton" aria-hidden="true" key={index} />) : guilds.length ? guilds.map((guild) => <button className={selectedGuild?.id === guild.id ? "active" : ""} type="button" key={guild.id} onClick={() => void selectGuild(guild)}><span><strong title={guild.name}>{guild.name}</strong><small>{guild.memberCount.toLocaleString()} 名成员 · {guild.baseCount.toLocaleString()} 个据点</small></span><ChevronRight size={15} aria-hidden="true" /></button>) : <div className="world-community-guild-empty"><Users size={20} /><strong>{guildResult ? guildSearch.trim() ? "没有匹配的公会" : "当前快照没有公会" : snapshotId ? "正在读取公会列表" : "当前没有可用世界快照"}</strong><p>{guildSearch.trim() ? "修改搜索词后再试。" : "公会成员和关联据点会在这里按需查看。"}</p></div>}
             </div>
             <WorldPagination result={guildResult} page={guildResult?.page || 1} totalPages={guildResult?.total ? Math.ceil(guildResult.total / guildResult.pageSize) : 1} onPage={onGuildPage} />
           </div>
@@ -614,8 +612,8 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
       </aside>
       <section className="world-community-base-workspace" aria-labelledby="world-community-bases-heading">
         <header className="world-community-base-heading"><div><span className="world-detail-type">据点</span><h2 id="world-community-bases-heading">{baseTitle}</h2><p>{baseDescription}</p></div>{guildDetail && <button className="quiet-button" type="button" onClick={(event) => onOpenDetail("guilds", guildDetail.id, event.currentTarget)}><Users size={16} />查看成员（{guildDetail.memberCount.toLocaleString()}）</button>}</header>
-        {selectedGuild && <section className="world-community-guild-summary" aria-label={`${selectedGuild.name}摘要`}><div><strong>{selectedGuild.name}</strong><span>{guildDetail ? `${guildDetail.members.length.toLocaleString()} 名已解析成员 · ${guildBases.length.toLocaleString()} 个已解析据点` : "正在确认完整关联范围"}</span></div>{guildDetail?.missingMemberIds.length ? <p>{guildDetail.missingMemberIds.length.toLocaleString()} 名成员资料暂不可用，不会按“无成员”显示。</p> : null}{guildDetail?.missingBaseIds.length ? <p>{guildDetail.missingBaseIds.length.toLocaleString()} 个关联据点资料暂不可用，不会混入自由据点。</p> : null}</section>}
-        {!snapshotId ? <section className="world-empty-state world-community-base-empty"><Database size={24} /><strong>当前没有可用世界快照</strong><p>无法判断当前范围是否有据点；完成一次只读解析后再试。</p></section> : guildDetailLoading ? <CommunityBaseGrid loading onOpenDetail={() => undefined} onOpenPal={() => undefined} /> : guildDetailError ? <section className="world-empty-state world-community-selection-error"><CircleAlert size={24} /><strong>无法安全读取该公会的完整关联据点</strong><p>当前不会改用已加载的 50 条据点做不完整筛选。</p><code>{guildDetailError}</code><button className="quiet-button" type="button" onClick={(event) => selectedGuild && void selectGuild(selectedGuild, event.currentTarget)}>重新尝试</button></section> : scope.kind === "guild" && !guildDetail ? <section className="world-empty-state"><RefreshCw className="spin" size={24} /><strong>正在读取公会完整关联数据</strong><p>成员与据点均绑定到当前存档快照。</p></section> : <>
+        {selectedGuild && <section className="world-community-guild-summary" aria-label={`${selectedGuild.name}摘要`}><div><strong>{selectedGuild.name}</strong><span>{guildDetail ? `${guildDetail.members.length.toLocaleString()} 名已解析成员 · ${guildBases.length.toLocaleString()} 个已解析据点` : "正在确认完整关联范围"}</span></div>{guildDetail?.missingMemberIds.length ? <p>{guildDetail.missingMemberIds.length.toLocaleString()} 名成员资料暂不可用，不会按“无成员”显示。</p> : null}{guildDetail?.missingBaseIds.length ? <p>{guildDetail.missingBaseIds.length.toLocaleString()} 个关联据点资料暂不可用，不会计入已解析据点。</p> : null}</section>}
+        {!snapshotId ? <section className="world-empty-state world-community-base-empty"><Database size={24} /><strong>当前没有可用世界快照</strong><p>无法判断当前范围是否有据点；完成一次只读解析后再试。</p></section> : guildDetailLoading ? <CommunityBaseGrid loading onOpenDetail={() => undefined} onOpenPal={() => undefined} /> : guildDetailError ? <section className="world-empty-state world-community-selection-error"><CircleAlert size={24} /><strong>无法安全读取该公会的完整关联据点</strong><p>当前不会改用已加载的 50 条据点做不完整筛选。</p><code>{guildDetailError}</code><button className="quiet-button" type="button" onClick={() => selectedGuild && void selectGuild(selectedGuild)}>重新尝试</button></section> : scope.kind === "guild" && !guildDetail ? <section className="world-empty-state"><RefreshCw className="spin" size={24} /><strong>正在读取公会完整关联数据</strong><p>成员与据点均绑定到当前存档快照。</p></section> : <>
           <CommunityBaseGrid bases={scope.kind === "guild" ? shownGuildBases : bases} loading={loading} onOpenDetail={onOpenDetail} onOpenPal={onOpenPal} />
           {scope.kind === "guild" ? <LocalPagination total={guildBases.length} page={selectedGuildBasePage} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={selectedGuildBaseTotalPages} onPage={setSelectedGuildBasePage} label="完整关联据点" /> : <WorldPagination result={baseResult} page={baseResult?.page || 1} totalPages={baseResult?.total ? Math.ceil(baseResult.total / baseResult.pageSize) : 1} onPage={onBasePage} />}
         </>}
@@ -631,7 +629,7 @@ function CommunityBaseGrid({ bases = [], loading = false, onOpenDetail, onOpenPa
 }
 
 function CommunityBaseCard({ base, onOpenDetail, onOpenPal }: { base: CommunityBaseCardItem; onOpenDetail: (resource: "bases", id: string, trigger: HTMLButtonElement) => void; onOpenPal: (id: string, trigger: HTMLButtonElement) => void }) {
-  const association = base.guildName || (base.guildId ? "公会资料不可用" : "自由据点");
+  const association = base.guildName || "公会关联资料不可用";
   const coordinates = [base.x, base.y, base.z].every((value) => typeof value === "number") ? `X: ${base.x}, Y: ${base.y}, Z: ${base.z}` : "坐标不可用";
   const workers = base.workers || [];
   const capacity = baseWorkerCapacity(base.maxWorkerCount);
@@ -788,7 +786,7 @@ function GuildCommunityDetail({ data, onNavigate, view, onViewChange }: { data: 
   const unavailableBases = data.missingBaseIds.length;
   return <>
     <PropertyGrid entries={[["成员", data.memberCount], ["已解析据点", data.assetSummary.baseCount], ["关联帕鲁", data.assetSummary.palCount], ["公会库存物品种类", data.assetSummary.inventory.itemTypeCount]]} />
-    <section className="world-relation-section world-community-detail-notice"><strong>成员与据点均来自当前公会详情的完整关联数据。</strong>{unavailableMembers || unavailableBases ? <p>{unavailableMembers ? `${unavailableMembers} 名成员资料不可用` : ""}{unavailableMembers && unavailableBases ? "；" : ""}{unavailableBases ? `${unavailableBases} 个关联据点资料不可用` : ""}，不会被当作零值或自由据点。</p> : <p>当前没有缺失的成员或据点关联资料。</p>}</section>
+    <section className="world-relation-section world-community-detail-notice"><strong>成员与据点均来自当前公会详情的完整关联数据。</strong>{unavailableMembers || unavailableBases ? <p>{unavailableMembers ? `${unavailableMembers} 名成员资料不可用` : ""}{unavailableMembers && unavailableBases ? "；" : ""}{unavailableBases ? `${unavailableBases} 个关联据点资料不可用` : ""}，不会被当作零值或已解析关联。</p> : <p>当前没有缺失的成员或据点关联资料。</p>}</section>
     <section className="world-relation-section world-community-detail-list"><header><h3>完整成员名单 <small>{members.length.toLocaleString()} / {data.memberCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找公会成员" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找成员名称或稳定 ID" maxLength={100} /></label></header>{shownMembers.length ? <div className="world-relation-list">{shownMembers.map((member) => <button className="world-relation-link" type="button" key={member.id} onClick={() => onNavigate("players", member.id)}><span className="world-relation-name">{member.name}{member.role === "leader" && <><Crown size={13} aria-label="会长" />会长</>}</span><small>{member.level === null ? "等级不可用" : `Lv.${member.level}`} · {member.id}</small></button>)}</div> : <p className="muted">没有符合条件的成员。</p>}<LocalPagination total={members.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整成员" /></section>
     <RelationList title="已解析关联据点" rows={data.bases} resource="bases" onNavigate={onNavigate} />
   </>;
@@ -799,12 +797,12 @@ function BaseCommunityDetail({ data, onNavigate, onShowInventory, view, onViewCh
   const totalPages = Math.max(1, Math.ceil(workers.length / COMMUNITY_DETAIL_PAGE_SIZE));
   const page = Math.min(view.page, totalPages);
   const shownWorkers = workers.slice((page - 1) * COMMUNITY_DETAIL_PAGE_SIZE, page * COMMUNITY_DETAIL_PAGE_SIZE);
-  const association = data.guildAssociation === "linked" ? data.guild?.name || "公会资料不可用" : data.guildAssociation === "unassigned" ? "自由据点" : "公会资料不可用";
+  const association = data.guild?.name || "公会关联资料不可用";
   const capacity = data.maxWorkerCount === null ? "不可用" : data.maxWorkerCount;
   return <>
     <PropertyGrid entries={[["关联公会", association], ["打工帕鲁", data.workerCount], ["当前可用槽位", capacity], ["需关注", data.careSummary.attention]]} />
     <section className="world-relation-section world-community-detail-notice"><strong>完整打工帕鲁名单来自此据点详情。</strong><p>其中危急 {data.careSummary.critical.toLocaleString()} 只、需关注 {data.careSummary.attention.toLocaleString()} 只；单只照护字段在帕鲁详情中查看。</p></section>
-    {data.guildAssociation === "linked" && data.guild ? <RelationButton title="所属公会" value={data.guild} resource="guilds" onNavigate={onNavigate} /> : <section className="world-relation-section"><h3>所属公会</h3><p className="muted">{data.guildAssociation === "unassigned" ? "该据点没有 guildId，属于自由据点。" : "据点保存了 guildId，但当前快照没有可用公会资料。"}</p></section>}
+    {data.guildAssociation === "linked" && data.guild ? <RelationButton title="所属公会" value={data.guild} resource="guilds" onNavigate={onNavigate} /> : <section className="world-relation-section"><h3>所属公会</h3><p className="muted">{data.guildAssociation === "unassigned" ? "该据点的公会关联未写入本次快照，无法确认所属公会。" : "据点保存了 guildId，但当前快照没有可用公会资料。"}</p></section>}
     <section className="world-relation-section world-community-detail-list"><header><h3>完整打工帕鲁 <small>{workers.length.toLocaleString()} / {data.workerCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找据点打工帕鲁" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找名称、物种或稳定 ID" maxLength={100} /></label></header>{shownWorkers.length ? <div className="world-relation-list">{shownWorkers.map((worker) => <button className="world-relation-link" type="button" key={worker.id} onClick={() => onNavigate("pals", worker.id)}><span className="world-relation-name"><PawPrint size={15} aria-hidden="true" />{worker.nickname || resolvePal(worker).name}<PalGenderIcon item={worker} /></span><small>{worker.level === null ? "等级不可用" : `Lv.${worker.level}`} · {worker.id}</small></button>)}</div> : <p className="muted">没有符合条件的打工帕鲁。</p>}<LocalPagination total={workers.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整打工帕鲁" /></section>
     <section className="world-relation-section"><h3>据点库存</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ scope: "base", baseId: data.id, label: `据点库存：${data.name}` })}><span className="world-relation-name"><PackageOpen size={16} aria-hidden="true" />在仓库中查看</span><small>{data.inventorySummary.itemTypeCount.toLocaleString()} 种物品 · {data.inventorySummary.totalQuantity.toLocaleString()} 件</small></button></section>
   </>;

@@ -40,7 +40,10 @@ test("UX-11：无可用快照时五个工作区都明确说明影响", async ({ 
     await expect(page.locator(".world-workspace")).toContainText("当前没有可用世界快照");
   }
   await tabs.getByRole("tab", { name: "公会与据点" }).click();
-  await expect(page.getByLabel("公会筛选导航")).toContainText("当前没有可用世界快照");
+  const guildSelector = page.getByLabel("公会选择器");
+  await expect(guildSelector.locator("summary")).toContainText("全部公会");
+  await guildSelector.locator("summary").click();
+  await expect(guildSelector).toContainText("当前没有可用世界快照");
   await expect(page.getByRole("heading", { name: "全部据点" })).toBeVisible();
   await expect(page.locator(".world-community-base-workspace")).toContainText("当前没有可用世界快照");
   await expect(page.locator(".world-community-base-workspace")).not.toContainText("当前范围没有据点");
