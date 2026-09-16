@@ -1,4 +1,5 @@
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog";
+import { MobileSheetHandle } from "../../components/ui/mobile-sheet-handle";
 import {
   BookOpenCheck,
   Box,
@@ -79,6 +80,7 @@ export function PlayerExplorationDialog({ state, onClose, onRetry }: { state: Pl
       <DialogPrimitive.Portal>
         <DialogPrimitive.Backdrop className="psc-exploration-backdrop" />
         <DialogPrimitive.Popup className="psc-exploration-dialog">
+          <MobileSheetHandle onDismiss={onClose} />
           <header className="psc-exploration-hero">
             <Compass className="psc-exploration-watermark" aria-hidden="true" />
             <div className="psc-exploration-profile">

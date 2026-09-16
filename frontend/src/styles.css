@@ -5,6 +5,7 @@
 @import "./styles/shell-home.css";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "./styles/mobile-sheet.css";
 
 @custom-variant dark (&:is(.dark *));
 

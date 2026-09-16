@@ -1,5 +1,6 @@
 import { AlertCircle, ChevronDown, ChevronRight, CircleAlert, Crown, HeartPulse, LoaderCircle, Search, Sparkles, Star, X } from "lucide-react";
 import { createPortal } from "react-dom";
+import { MobileSheetHandle } from "../../components/ui/mobile-sheet-handle";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldPalSkill, WorldPalSkills } from "../../api/contracts";
@@ -310,7 +311,7 @@ function MobileAptitudeFilters({ open, filters, passiveSkillOptions, onUpdate, o
     };
   }, [open]);
   if (!open) return null;
-  return createPortal(<><button className="pal-aptitude-backdrop" type="button" tabIndex={-1} aria-label="关闭高级筛选遮罩" onClick={onClose} /><aside ref={dialogRef} className="pal-aptitude-filters pal-aptitude-filter-layer" role="dialog" aria-modal="true" aria-label="资质、工作与被动技能"><header><div><h3>资质、工作与被动技能</h3><p>多项工作和被动技能均须全部具备。</p></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭高级筛选" onClick={onClose}><X size={18} /></button></header><form onSubmit={(event) => { event.preventDefault(); onApply(); }}><AptitudeFilterFields filters={filters} passiveSkillOptions={passiveSkillOptions} onUpdate={onUpdate} /></form></aside></>, document.body);
+  return createPortal(<><button className="pal-aptitude-backdrop" type="button" tabIndex={-1} aria-label="关闭高级筛选遮罩" onClick={onClose} /><aside ref={dialogRef} className="pal-aptitude-filters pal-aptitude-filter-layer" role="dialog" aria-modal="true" aria-label="资质、工作与被动技能"><MobileSheetHandle onDismiss={onClose} /><header><div><h3>资质、工作与被动技能</h3><p>多项工作和被动技能均须全部具备。</p></div><button ref={closeRef} className="icon-button bordered" type="button" aria-label="关闭高级筛选" onClick={onClose}><X size={18} /></button></header><form onSubmit={(event) => { event.preventDefault(); onApply(); }}><AptitudeFilterFields filters={filters} passiveSkillOptions={passiveSkillOptions} onUpdate={onUpdate} /></form></aside></>, document.body);
 }
 
 function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (item: WorldPalRosterItem, trigger: HTMLButtonElement) => void }) {

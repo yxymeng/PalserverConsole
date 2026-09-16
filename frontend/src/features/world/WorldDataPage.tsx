@@ -1,6 +1,7 @@
 import { ArrowLeft, Boxes, Building2, ChevronLeft, ChevronRight, CircleAlert, Compass, Crown, Database, FileText, Flame, Globe, HeartPulse, History, LayoutDashboard, MapPin, Package, PackageOpen, PawPrint, RefreshCw, Search, Sparkles, SlidersHorizontal, Trophy, Users, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
+import { MobileSheetHandle } from "../../components/ui/mobile-sheet-handle";
 
 import type { AuthStatus, LiveValue, WorldBaseDetail, WorldBaseListItem, WorldContainerReference, WorldEntityListItem, WorldEntityListResponse, WorldGuildDetail, WorldGuildListItem, WorldPalDetail, WorldPalListItem, WorldPlayerDetail, WorldPlayerListItem, WorldPlayerProgress, WorldPlayerProgressField, WorldReparseResponse, WorldSnapshotContext, WorldStatus } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
@@ -724,6 +725,7 @@ function EntityDrawer({ detail, loading, canGoBack, onClose, onNavigate, onShowI
   const communityView = communityViews?.[communityKey] || { query: "", page: 1 };
   const updateCommunityView = (patch: Partial<CommunityDetailView>) => onCommunityView?.(communityKey, patch);
   return <aside ref={drawerRef} className={`world-entity-drawer${resource === "players" ? " world-player-profile-modal" : ""}${resource === "guilds" || resource === "bases" ? " world-community-detail-modal" : ""}`} data-resource={resource} role="dialog" aria-modal={modal} aria-label="世界实体详情">
+    <MobileSheetHandle onDismiss={onClose} />
     <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{"level" in data && data.level !== null && <em className="world-player-profile-level">Lv.{data.level}</em>}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : "当前存档快照关联详情"}</p></div></div><button ref={closeButtonRef} className="icon-button bordered" type="button" title={canGoBack ? "返回上一详情" : "关闭详情"} aria-label={canGoBack ? "返回上一详情" : "关闭详情"} onClick={onClose}>{canGoBack ? <ArrowLeft size={18} /> : <X size={18} />}</button></header>
     <div className="world-detail-properties">
       {detail.resource === "players" && <PlayerDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}

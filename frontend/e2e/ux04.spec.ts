@@ -409,11 +409,15 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(drawer).toContainText("完整打工帕鲁");
   await expect(drawer).toContainText("完整打工帕鲁名单来自此据点详情");
   if (testInfo.project.name === "mobile") {
-    await expect(drawer).toHaveCSS("top", "0px");
+    await expect(drawer).toHaveAttribute("data-sheet-snap", "compact");
     await expect(drawer).toHaveCSS("left", "0px");
-    await expect(drawer).toHaveCSS("border-radius", "0px");
+    await expect(drawer).toHaveCSS("border-radius", "20px 20px 0px 0px");
     await expect(drawer).toHaveCSS("transform", "none");
-    expect(await drawer.boundingBox()).toMatchObject({ x: 0, y: 0, width: 390, height: 844 });
+    const sheetBox = (await drawer.boundingBox())!;
+    expect(sheetBox.x).toBe(0);
+    expect(sheetBox.width).toBe(390);
+    expect(sheetBox.y).toBeGreaterThan(0);
+    expect(sheetBox.y + sheetBox.height).toBeCloseTo(844, 0);
   }
   await drawer.getByRole("button", { name: /小羊/ }).click();
   const basePalDrawer = page.locator(".pal-detail-modal");
@@ -568,7 +572,7 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await page.goto("/");
   await page.getByRole("button", { name: "世界", exact: true }).click();
   await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
-  const trigger = page.getByRole("button", { name: "小羊 棉悠悠 雌性", exact: true });
+  const trigger = page.getByRole("button", { name: "小羊", exact: true });
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "帕鲁详情", exact: true });
   await expect(dialog.getByRole("button", { name: "关闭帕鲁详情" })).toBeFocused();
@@ -586,6 +590,10 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await dialog.locator(".pal-passive-grid button").first().click();
   const passive = dialog.getByRole("dialog", { name: "被动词条详情" });
   await expect(passive).toContainText("攻击 +20%，防御 +20%");
+  if (testInfo.project.name === "mobile") {
+    await expect(passive.getByRole("button", { name: "调整抽屉高度" })).toBeVisible();
+    await page.screenshot({ path: testInfo.outputPath("passive-sheet.png"), animations: "disabled" });
+  }
   await passive.getByRole("button", { name: "关闭被动词条详情" }).click();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();

@@ -81,6 +81,21 @@ test("首页控制模块刷新运行状态后，顶栏状态同步更新", async
   await expect(page.getByText("解除封禁 User ID", { exact: true })).toHaveCount(0);
   await expect(page.locator(".psc-player-broadcast")).toHaveCount(0);
 
+  if (testInfo.project.name === "mobile") {
+    for (const action of ["保存", "关闭", "重启"]) {
+      await page.getByRole("button", { name: action, exact: true }).click();
+      const confirmation = page.getByRole("alertdialog");
+      const box = (await confirmation.boundingBox())!;
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+      await expect(confirmation.getByRole("button", { name: "调整抽屉高度" })).toHaveCount(0);
+      await expect(confirmation.getByRole("button", { name: `确认${action}` })).toBeInViewport();
+      await confirmation.getByRole("button", { name: "取消" }).click();
+    }
+  }
+
   await page.getByRole("button", { name: "发送全服广播" }).click();
   const broadcastDialog = page.getByRole("dialog", { name: "全服广播系统" });
   await expect(broadcastDialog).toContainText("快捷预设模板");
@@ -88,11 +103,36 @@ test("首页控制模块刷新运行状态后，顶栏状态同步更新", async
   await broadcastDialog.getByRole("button", { name: "立即发送广播" }).click();
   await expect.poll(() => broadcastRequest).toEqual({ message: "今晚八点集合挑战高塔。", csrf: "status-csrf" });
   await expect(broadcastDialog).toContainText("广播已发送");
+  await expect(broadcastDialog).toHaveCSS("opacity", "1");
+  await broadcastDialog.evaluate(element => { element.scrollTop = 0; });
+  if ((page.viewportSize()?.width ?? 0) <= 767) {
+    const box = (await broadcastDialog.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await expect(broadcastDialog.getByRole("button", { name: "调整抽屉高度" })).toHaveCount(0);
+    await expect(broadcastDialog.getByRole("heading", { name: "全服广播系统" })).toBeInViewport();
+    await expect(broadcastDialog.getByRole("button", { name: "取消" })).toBeInViewport();
+  }
+  await page.screenshot({ path: test.info().outputPath("broadcast-sheet.png") });
   await broadcastDialog.getByRole("button", { name: "取消" }).click();
 
   await page.getByRole("button", { name: "封禁名单" }).click();
   const banSheet = page.getByRole("dialog", { name: "封禁名单" });
   await expect(banSheet).toContainText("steam_111");
+  if (testInfo.project.name === "mobile") {
+    await expect.poll(async () => {
+      const box = (await banSheet.boundingBox())!;
+      return box.x + box.width;
+    }).toBeLessThanOrEqual(page.viewportSize()!.width);
+    const box = (await banSheet.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height);
+    await expect(banSheet.getByRole("button", { name: "调整抽屉高度" })).toHaveCount(0);
+  }
   await banSheet.getByRole("button", { name: "解除封禁" }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "确认解除" }).click();
   await expect.poll(() => unbannedUserId).toBe("steam_111");
@@ -191,4 +231,12 @@ test("在线训练家的探索进度使用 Player ID 关联只读存档并展示
     await expect(dialog.locator(".psc-exploration-metrics article").first()).toHaveCSS("padding", "14px");
   }
   expect(new URL(playerListRequest).searchParams.get("snapshotId")).toBe("world-real");
+  if ((page.viewportSize()?.width ?? 0) <= 760) {
+    await expect(dialog.getByRole("button", { name: "调整抽屉高度" })).toBeVisible();
+    await dialog.locator(".psc-exploration-footer").scrollIntoViewIfNeeded();
+    await expect(dialog.locator(".psc-exploration-footer")).toBeInViewport();
+    await dialog.evaluate(element => { element.scrollTop = 0; });
+  }
+  await expect(dialog).toHaveCSS("opacity", "1");
+  await page.screenshot({ path: test.info().outputPath("exploration-sheet.png") });
 });

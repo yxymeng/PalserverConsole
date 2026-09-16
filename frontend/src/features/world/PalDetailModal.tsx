@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
 import type { WorldPalDetail, WorldPalRosterItem, WorldPalSkill } from "../../api/contracts";
 import { resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { workSuitabilityLabels } from "./palWorkLabels";
+import { MobileSheetHandle } from "../../components/ui/mobile-sheet-handle";
 
 const detailNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 1 });
 const formatValue = (value: number | null | undefined) => value == null ? "不可用" : detailNumber.format(value);
@@ -55,6 +56,7 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
   const sameSpecies = () => onFindSameSpecies?.(data);
 
   return <aside ref={panelRef} className="pal-detail-modal" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+    <MobileSheetHandle onDismiss={onClose} />
     <header className="pal-detail-header">
       <div className="pal-detail-identity">
         <span className="pal-detail-icon"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>
@@ -91,7 +93,7 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
     </div>
 
     {onFindSameSpecies && <footer className="pal-detail-footer"><button className="pal-detail-same" type="button" onClick={sameSpecies}><Search size={16} />查找同种帕鲁</button></footer>}
-    {selectedPassive && <div className="pal-passive-dialog-layer"><button type="button" tabIndex={-1} aria-label="关闭被动词条详情遮罩" onClick={closePassive} /><section role="dialog" aria-modal="true" aria-label="被动词条详情"><header><div><small>被动特性词条</small><h3>{selectedPassive.name || selectedPassive.sourceName || "词条名称未收录"}</h3></div><button ref={passiveCloseRef} type="button" aria-label="关闭被动词条详情" onClick={closePassive}><X size={18} /></button></header><p>{skillDescription(selectedPassive)}</p><dl><div><dt>阶级</dt><dd>{selectedPassive.rank ?? "不可用"}</dd></div></dl></section></div>}
+    {selectedPassive && <div className="pal-passive-dialog-layer"><button type="button" tabIndex={-1} aria-label="关闭被动词条详情遮罩" onClick={closePassive} /><section role="dialog" aria-modal="true" aria-label="被动词条详情" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); closePassive(); } if (event.key === "Tab") { const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button")).filter((button) => button.offsetHeight > 0); const target = event.shiftKey ? buttons.at(-1) : buttons[0]; if (document.activeElement === (event.shiftKey ? buttons[0] : buttons.at(-1))) { event.preventDefault(); target?.focus(); } event.stopPropagation(); } }}><MobileSheetHandle onDismiss={closePassive} /><header><div><small>被动特性词条</small><h3>{selectedPassive.name || selectedPassive.sourceName || "词条名称未收录"}</h3></div><button ref={passiveCloseRef} type="button" aria-label="关闭被动词条详情" onClick={closePassive}><X size={18} /></button></header><p>{skillDescription(selectedPassive)}</p><dl><div><dt>阶级</dt><dd>{selectedPassive.rank ?? "不可用"}</dd></div></dl></section></div>}
   </aside>;
 }
 

@@ -481,6 +481,9 @@
 }
 
 @media (max-width: 767px) {
+  [data-slot="alert-dialog-content"],
+  [data-slot="dialog-content"] { top: 50dvh; max-height: calc(100dvh - 24px); }
+  [data-slot="alert-dialog-content"] { overflow-y: auto; overscroll-behavior: contain; }
   .psc-topbar-inner { display: flex; min-height: 66px; gap: 10px; padding: 10px 14px; }
   .psc-desktop-navigation { display: none; }
   .psc-desktop-brand { flex: 0 0 auto; }
@@ -506,14 +509,14 @@
   .psc-player-table-wrap { display: none; }
   .psc-player-list { display: grid; grid-template-columns: 1fr; gap: 10px; margin-top: 16px; }
   .psc-player-card { padding: 14px; }
-  .psc-broadcast-dialog { top: auto; bottom: 0; width: 100%; max-width: none; max-height: calc(100svh - 12px); overflow-y: auto; border-width: 1px 0 0; border-radius: 20px 20px 0 0; transform: none; }
+  .psc-broadcast-dialog { top: auto; right: 0; bottom: 0; left: 0; grid-template-rows: auto minmax(0, 1fr); width: 100%; max-width: none; height: min(720px, calc(100dvh - 12px)); max-height: calc(100dvh - 12px); overflow: hidden; border-width: 1px 0 0; border-radius: 20px 20px 0 0; transform: none; translate: none; }
   .psc-broadcast-dialog[data-starting-style],
   .psc-broadcast-dialog[data-ending-style] { transform: translateY(18px); }
   .psc-broadcast-header { padding-left: 16px; }
-  .psc-broadcast-form { padding: 16px; }
-  .psc-broadcast-footer { margin: 0 -16px -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .psc-broadcast-form { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 16px; }
+  .psc-broadcast-footer { position: sticky; z-index: 1; bottom: -16px; margin: 0 -16px -16px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
   .psc-broadcast-footer [data-slot="button"] { width: 100%; }
-  .psc-confirm-dialog [data-slot="alert-dialog-footer"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .psc-confirm-dialog [data-slot="alert-dialog-footer"] { position: sticky; z-index: 1; bottom: -16px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
   .backup-retention-form [data-slot="select-trigger"] { width: 100%; }
   .operation-island { top: 10px; width: calc(100vw - 20px); gap: 10px; padding: 12px; border-radius: 23px; }
   .operation-island-main { grid-template-columns: auto minmax(0, 1fr); }
