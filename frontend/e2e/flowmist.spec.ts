@@ -28,16 +28,34 @@ test("FlowMist operation states, themes and fallback", async ({ page }, testInfo
     const gl = canvas.getContext("webgl");
     return gl !== null && !gl.isContextLost() && gl.getError() === gl.NO_ERROR;
   })).toBe(true);
+  expect(await progress.locator("canvas").evaluate((canvas: HTMLCanvasElement) => {
+    const gl = canvas.getContext("webgl")!;
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    const cloud = new Uint8Array(4), empty = new Uint8Array(4);
+    gl.readPixels(Math.floor(canvas.width * .4), Math.floor(canvas.height / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, cloud);
+    gl.readPixels(canvas.width - 1, Math.floor(canvas.height / 2), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, empty);
+    return cloud[3] > 0 && empty[3] === 0;
+  })).toBe(true);
+  const show = async (state: string, stage: string) => page.evaluate(([state, stage]) => {
+    (window as unknown as { showOperation: (state: string, stage: string) => void }).showOperation(state, stage);
+  }, [state, stage]);
+  // Settle the shader progress as well as CSS before comparing theme colors.
+  await page.emulateMedia({ reducedMotion: "reduce" });
   for (const theme of ["light", "island", "dark"]) {
     await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
     await expect(island).toBeVisible();
     const box = await island.boundingBox();
     expect(box && box.x >= 0 && box.x + box.width <= page.viewportSize()!.width).toBeTruthy();
     await page.screenshot({ path: testInfo.outputPath(`flowmist-${theme}-${testInfo.project.name}.png`), animations: "disabled" });
+    for (const state of ["succeeded", "failed", "cancelled"]) {
+      await show(state, "stopping");
+      await expect(progress).toHaveAttribute("aria-valuenow", "100");
+      await island.screenshot({ path: testInfo.outputPath(`flowmist-${theme}-${state}-${testInfo.project.name}.png`), animations: "disabled" });
+    }
+    await show("running", "stopping");
+    await expect(progress).toHaveAttribute("aria-valuenow", "66");
   }
-  const show = async (state: string, stage: string) => page.evaluate(([state, stage]) => {
-    (window as unknown as { showOperation: (state: string, stage: string) => void }).showOperation(state, stage);
-  }, [state, stage]);
+  await page.emulateMedia({ reducedMotion: "no-preference" });
   await show("running", "countdown");
   await island.getByRole("button", { name: "取消", exact: true }).click();
   await expect(progress).toHaveAttribute("aria-valuetext", "已取消");

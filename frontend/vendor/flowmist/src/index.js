@@ -17,7 +17,7 @@ export function normalizeOptions(options = {}) {
 /** Canvas renderer. Owns only the canvas; call destroy() on unmount. */
 export function createFlowMist(canvas, options = {}) {
   let state = normalizeOptions(options);
-  const gl = canvas.getContext('webgl', {alpha: false, antialias: false});
+  const gl = canvas.getContext('webgl', {alpha: true, premultipliedAlpha: false, antialias: false});
   if (!gl) throw new Error('FlowMist requires WebGL');
   const doc = canvas.ownerDocument, win = doc.defaultView;
   const motion = win.matchMedia('(prefers-reduced-motion: reduce)');
@@ -45,7 +45,7 @@ export function createFlowMist(canvas, options = {}) {
       buffer = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]), gl.STATIC_DRAW);
       const a = gl.getAttribLocation(program, 'a'); gl.enableVertexAttribArray(a); gl.vertexAttribPointer(a, 2, gl.FLOAT, false, 0, 0);
-      for (const name of ['time','aspect','progress','detail','baseColor','accentColor','lightColor','shadeColor','accentCut','shadeStrength','lightStrength']) uniforms[name] = gl.getUniformLocation(program, name);
+      for (const name of ['time','aspect','progress','detail','baseColor','accentColor','lightColor','shadeColor','accentCut','shadeStrength','lightStrength','transparentBackground']) uniforms[name] = gl.getUniformLocation(program, name);
     } catch (error) { release(); throw error; }
   }
   function draw() {
@@ -58,6 +58,7 @@ export function createFlowMist(canvas, options = {}) {
     if (canvas.height !== h) canvas.height = h;
     gl.useProgram(program); gl.viewport(0, 0, w, h);
     const palette = getPalette(state.palette);
+    gl.uniform1f(uniforms.transparentBackground, palette.transparent ? 1 : 0);
     ['baseColor','accentColor','lightColor','shadeColor'].forEach((name, i) => gl.uniform3fv(uniforms[name], [1,3,5].map(start => parseInt(palette.colors[i].slice(start, start+2), 16)/255)));
     for (const name of ['accentCut','shadeStrength','lightStrength']) gl.uniform1f(uniforms[name], palette[name]);
     for (const [name, value] of Object.entries({time, aspect: w/h, progress: shown, detail: state.detail})) gl.uniform1f(uniforms[name], value);

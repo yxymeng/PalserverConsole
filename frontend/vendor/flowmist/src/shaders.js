@@ -5,6 +5,7 @@ export const fragment = `
       uniform float time, aspect, progress, detail;
       uniform vec3 baseColor,accentColor,lightColor,shadeColor;
       uniform float accentCut,shadeStrength,lightStrength;
+      uniform float transparentBackground;
       float hash(vec3 p){p=fract(p*.3183099+vec3(.1,.2,.3));p*=17.;return fract(p.x*p.y*p.z*(p.x+p.y+p.z));}
       float noise(vec3 p){vec3 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);
         return mix(mix(mix(hash(i),hash(i+vec3(1,0,0)),f.x),mix(hash(i+vec3(0,1,0)),hash(i+vec3(1,1,0)),f.x),f.y),
@@ -84,6 +85,12 @@ export const fragment = `
           cloud=mix(cloud,lightColor,clamp(milk,0.,.84));
           col+=(1.-opacity)*cloud*density;
           opacity+=(1.-opacity)*density;
+        }
+        if(transparentBackground>.5){
+          // Keep the cloud pigment; let CSS supply the light/island/dark track.
+          float fade=.22+.78*smoothstep(.0,.30,uv.x);
+          gl_FragColor=vec4(pow(clamp(col/max(opacity,.0001),0.,1.),vec3(.94)),opacity*fade);
+          return;
         }
         col+=(1.-opacity)*vec3(.997);
         col=pow(col,vec3(.94));

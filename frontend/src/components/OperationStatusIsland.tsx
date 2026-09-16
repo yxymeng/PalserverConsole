@@ -70,7 +70,7 @@ export function OperationStatusIsland({
     <div className="operation-island-progress">
       <div><span>{countdown ? "维护倒计时" : completed ? "执行结果" : "阶段进度"}</span><strong>{countdown ? `剩余 ${remainingSeconds} 秒` : operationStageLabel(operation)}</strong></div>
       <FlowMist className="operation-flowmist" value={progress}
-        palette={tone === "danger" ? "ROSE" : tone === "neutral" ? "CHROME" : "CELADON"}
+        palette={tone === "danger" ? "PAL_CORAL" : tone === "neutral" ? "PAL_MIST" : tone === "success" ? "PAL_GROVE" : "PAL_TIDE"}
         paused={completed || needsForceConfirmation}
         label={countdown ? "维护倒计时进度" : "服务器操作进度"}
         aria-valuetext={countdown ? `剩余 ${remainingSeconds} 秒` : `${operationStageLabel(operation)}${completed || needsForceConfirmation ? "" : "，按执行阶段估算"}`} />

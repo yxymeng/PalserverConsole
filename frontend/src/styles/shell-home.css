@@ -156,7 +156,8 @@
 .operation-island-progress > div:first-child { display: grid; gap: 1px; }
 .operation-island-progress span { color: var(--muted); font-size: 11px; }
 .operation-island-progress strong { color: var(--foreground); font-size: 12px; }
-.operation-island .operation-flowmist { height: 48px; border-radius: 999px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 45%); }
+.operation-island .operation-flowmist { height: 48px; border-radius: 999px; background: var(--surface-muted); box-shadow: none; }
+.operation-island .operation-flowmist::after { box-shadow: inset 0 0 0 1px var(--border); }
 .operation-flowmist .flowmist-label, .operation-flowmist .flowmist-value { display: none; }
 .operation-flowmist .flowmist-fallback { background: var(--primary); }
 .operation-island[data-tone="success"] .flowmist-fallback { background: var(--success); }
