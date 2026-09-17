@@ -1008,6 +1008,10 @@ def query_pal_roster(
     work_suitabilities: Sequence[str] = (),
     min_work_level: int = 1,
     passive_skills: Sequence[str] = (),
+    passive_match: str = "all",
+    exclude_negative_passives: bool = False,
+    negative_passive_skills: Sequence[str] = (),
+    passive_search_skills: Sequence[str] = (),
     location: str = "all",
 ) -> tuple[list[dict[str, object]], int]:
     """Query the immutable cache in a stable roster order without loading all Pals."""
@@ -1016,7 +1020,8 @@ def query_pal_roster(
         marker not in {"all", "lucky", "boss"}
         or sort not in {"balanced", "name", "level", "rarity", "averageIv", "workSuitability"}
         or care not in {"all", "attention"}
-        or location not in {"all", "player", "base", "unassigned"}
+        or location not in {"all", "player", "party", "storage", "base", "unassigned"}
+        or passive_match not in {"all", "any"}
         or any(name not in _WORK_SUITABILITY_TYPES for name in work_suitabilities)
         or any(not name.strip() for name in passive_skills)
         or any(not name.strip() for name in character_ids)
@@ -1027,8 +1032,22 @@ def query_pal_roster(
     if search or character_ids:
         search_clauses: list[str] = []
         if search:
-            search_clauses.extend(("p.nickname LIKE ?", "p.character_id LIKE ?", "p.id LIKE ?"))
-            parameters.extend([f"%{search}%"] * 3)
+            search_clauses.extend(
+                (
+                    "p.nickname LIKE ?",
+                    "p.character_id LIKE ?",
+                    "p.id LIKE ?",
+                    "EXISTS(SELECT 1 FROM players AS search_owner "
+                    "WHERE search_owner.id = p.owner_player_id AND search_owner.name LIKE ?)",
+                )
+            )
+            parameters.extend([f"%{search}%"] * 4)
+            if passive_search_skills:
+                search_clauses.append(
+                    "EXISTS(SELECT 1 FROM json_each(p.passive_skills_json) "
+                    "WHERE value IN (" + ", ".join("?" for _ in passive_search_skills) + "))"
+                )
+                parameters.extend(passive_search_skills)
         if character_ids:
             search_clauses.append(
                 "p.character_id IN (" + ", ".join("?" for _ in character_ids) + ")"
@@ -1045,6 +1064,13 @@ def query_pal_roster(
         )
     if location == "player":
         clauses.append("p.owner_player_id IS NOT NULL AND p.owner_player_id <> ''")
+    elif location in {"party", "storage"}:
+        container_kind = "pal_party" if location == "party" else "pal_storage"
+        clauses.append(
+            "EXISTS(SELECT 1 FROM containers AS location_container "
+            "WHERE location_container.id = p.container_id AND location_container.kind = ?)"
+        )
+        parameters.append(container_kind)
     elif location == "base":
         clauses.append("p.base_id IS NOT NULL AND p.base_id <> ''")
     elif location == "unassigned":
@@ -1067,11 +1093,27 @@ def query_pal_roster(
     for suitability in dict.fromkeys(work_suitabilities):
         clauses.append(f"json_extract(p.work_suitability_json, '$.{suitability}') >= ?")
         parameters.append(min_work_level)
-    for passive_skill in dict.fromkeys(passive_skills):
+    unique_passive_skills = tuple(dict.fromkeys(passive_skills))
+    if unique_passive_skills and passive_match == "any":
         clauses.append(
-            "EXISTS(SELECT 1 FROM json_each(p.passive_skills_json) WHERE value = ?)"
+            "EXISTS(SELECT 1 FROM json_each(p.passive_skills_json) WHERE value IN ("
+            + ", ".join("?" for _ in unique_passive_skills)
+            + "))"
         )
-        parameters.append(passive_skill)
+        parameters.extend(unique_passive_skills)
+    else:
+        for passive_skill in unique_passive_skills:
+            clauses.append(
+                "EXISTS(SELECT 1 FROM json_each(p.passive_skills_json) WHERE value = ?)"
+            )
+            parameters.append(passive_skill)
+    if exclude_negative_passives and negative_passive_skills:
+        clauses.append(
+            "NOT EXISTS(SELECT 1 FROM json_each(p.passive_skills_json) WHERE value IN ("
+            + ", ".join("?" for _ in negative_passive_skills)
+            + "))"
+        )
+        parameters.extend(negative_passive_skills)
     where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     name_order = "COALESCE(NULLIF(p.nickname, ''), p.character_id) COLLATE NOCASE, p.id"
     order = {

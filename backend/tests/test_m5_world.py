@@ -1757,6 +1757,67 @@ def test_pal_skills_keep_unknowns_and_filter_by_all_selected_passives(tmp_path: 
     assert no_match == [] and no_match_total == 0
 
 
+def test_pal_roster_supports_gemini_filter_semantics(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache-gemini-filters.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    with sqlite3.connect(cache) as connection:
+        pal_ids = [row[0] for row in connection.execute("SELECT id FROM pals ORDER BY id")]
+        connection.execute(
+            "UPDATE pals SET passive_skills_json = ?, base_id = NULL WHERE id = ?",
+            ('["Legend", "Coward"]', pal_ids[0]),
+        )
+        connection.execute(
+            "UPDATE pals SET passive_skills_json = ?, base_id = NULL WHERE id = ?",
+            ('["MoveSpeed_up_2"]', pal_ids[1]),
+        )
+        connection.executemany(
+            "INSERT INTO containers(id, kind, owner_id, guild_id, base_id, slot_count) "
+            "VALUES(?, ?, NULL, NULL, NULL, 1)",
+            (("party-filter", "pal_party"), ("storage-filter", "pal_storage")),
+        )
+        connection.execute(
+            "UPDATE pals SET container_id = ? WHERE id = ?", ("party-filter", pal_ids[0])
+        )
+        connection.execute(
+            "UPDATE pals SET container_id = ? WHERE id = ?", ("storage-filter", pal_ids[1])
+        )
+
+    common: dict[str, Any] = dict(
+        page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )
+    all_rows, all_total = query_pal_roster(
+        cache, **common, passive_skills=("Legend", "MoveSpeed_up_2"), passive_match="all"
+    )
+    any_rows, any_total = query_pal_roster(
+        cache, **common, passive_skills=("Legend", "MoveSpeed_up_2"), passive_match="any"
+    )
+    clean_rows, clean_total = query_pal_roster(
+        cache,
+        **common,
+        exclude_negative_passives=True,
+        negative_passive_skills=("Coward",),
+    )
+    passive_search, passive_search_total = query_pal_roster(
+        cache,
+        **{**common, "search": "传说"},
+        passive_search_skills=("Legend",),
+    )
+    owner_search, owner_search_total = query_pal_roster(
+        cache, **{**common, "search": "测试玩家"}
+    )
+    party_rows, party_total = query_pal_roster(cache, **common, location="party")
+    storage_rows, storage_total = query_pal_roster(cache, **common, location="storage")
+
+    assert all_rows == [] and all_total == 0
+    assert any_total == 2 and {row["id"] for row in any_rows} == set(pal_ids)
+    assert clean_total == 1 and clean_rows[0]["id"] == pal_ids[1]
+    assert passive_search_total == 1 and passive_search[0]["id"] == pal_ids[0]
+    assert owner_search_total == 2 and len(owner_search) == 2
+    assert party_total == 1 and party_rows[0]["locationType"] == "party"
+    assert storage_total == 1 and storage_rows[0]["locationType"] == "storage"
+
+
 def test_missing_world_metadata_keeps_unknown_pal_records_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2173,6 +2234,11 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
             "/api/world/pals/roster?workSuitability=UnknownWork&minWorkLevel=1"
         )
         passive_roster = client.get("/api/world/pals/roster?passiveSkill=Legend")
+        passive_any_roster = client.get(
+            "/api/world/pals/roster?passiveSkill=Legend,UnknownPassive&passiveMatch=any"
+        )
+        invalid_passive_match = client.get("/api/world/pals/roster?passiveMatch=unknown")
+        storage_roster = client.get("/api/world/pals/roster?location=storage")
         localized_species_roster = client.get(
             "/api/world/pals/roster?search=%E6%A3%89%E6%82%A0%E6%82%A0&characterId=BOSS_SheepBall"
         )
@@ -2244,6 +2310,11 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert passive_roster.status_code == 200
     assert passive_roster.json()["total"] == 1
     assert passive_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"
+    assert passive_any_roster.status_code == 200
+    assert passive_any_roster.json()["total"] == 1
+    assert invalid_passive_match.status_code == 422
+    assert invalid_passive_match.json()["errorCode"] == "INVALID_PAL_PASSIVE_MATCH"
+    assert storage_roster.status_code == 200
     assert invalid_passive.status_code == 422
     assert invalid_passive.json()["errorCode"] == "INVALID_PAL_PASSIVE_FILTER"
     assert roster_replaced.status_code == 409

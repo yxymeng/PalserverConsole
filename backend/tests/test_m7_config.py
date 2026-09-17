@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import pytest
@@ -87,8 +88,9 @@ def make_world_service(
 def test_current_always_reads_latest_ini_and_masks_password(tmp_path: Path) -> None:
     service, _, _, config = make_service(tmp_path)
     first = service.current()
-    assert first["fields"]["ServerName"] == '"Test, world"'
-    assert first["fields"]["AdminPassword"] == "已配置"
+    first_fields = cast(dict[str, str], first["fields"])
+    assert first_fields["ServerName"] == '"Test, world"'
+    assert first_fields["AdminPassword"] == "已配置"
     assert "secret-value" not in str(first)
 
     config.write_text(
@@ -98,8 +100,9 @@ def test_current_always_reads_latest_ini_and_masks_password(tmp_path: Path) -> N
         encoding="utf-8",
     )
     latest = service.current()
-    assert latest["fields"]["ServerName"] == '"Manually edited"'
-    assert latest["fields"]["AutoSaveSpan"] == "720"
+    latest_fields = cast(dict[str, str], latest["fields"])
+    assert latest_fields["ServerName"] == '"Manually edited"'
+    assert latest_fields["AutoSaveSpan"] == "720"
     assert latest["sourceHash"] != first["sourceHash"]
 
 
@@ -126,7 +129,8 @@ def test_running_ini_save_waits_then_applies_after_stop(tmp_path: Path) -> None:
     assert saved["pending"] is True
     assert saved["serverRunning"] is True
     assert config.read_text(encoding="utf-8") == before
-    assert service.current()["pendingApply"]["kind"] == "ini"
+    pending = cast(dict[str, object], service.current()["pendingApply"])
+    assert pending["kind"] == "ini"
 
     state["running"] = False
     applied = service.apply_pending()
@@ -213,7 +217,8 @@ def test_stopped_world_option_save_creates_and_reads_effective_file(tmp_path: Pa
     assert fields["CrossplayPlatforms"] == "(Steam,PS5)"
     current = service.current()
     assert current["effectiveSource"] == "world-option"
-    assert current["worldOptionFields"]["BaseCampWorkerMaxNum"] == "25"
+    world_fields = cast(dict[str, str], current["worldOptionFields"])
+    assert world_fields["BaseCampWorkerMaxNum"] == "25"
 
 
 def test_sparse_world_option_uses_pal_conf_defaults_for_missing_fields(
@@ -226,15 +231,17 @@ def test_sparse_world_option_uses_pal_conf_defaults_for_missing_fields(
     (world / "WorldOption.sav").write_bytes(serialize_world_option(gvas, save_type))
 
     current = service.current()
+    schema = cast(list[str], current["worldOptionSchema"])
+    world_fields = cast(dict[str, str], current["worldOptionFields"])
 
-    assert len(current["worldOptionSchema"]) == 107
-    assert set(current["worldOptionFields"]) == set(current["worldOptionSchema"])
-    assert "bEnableVoiceChat" not in current["worldOptionSchema"]
-    assert current["worldOptionFields"]["BaseCampWorkerMaxNum"] == "25"
-    assert current["worldOptionFields"]["AutoSaveSpan"] == "30"
-    assert current["worldOptionFields"]["ServerName"] == '"Default Palworld Server"'
+    assert len(schema) == 107
+    assert set(world_fields) == set(schema)
+    assert "bEnableVoiceChat" not in schema
+    assert world_fields["BaseCampWorkerMaxNum"] == "25"
+    assert world_fields["AutoSaveSpan"] == "30"
+    assert world_fields["ServerName"] == '"Default Palworld Server"'
     assert current["worldOptionAdminPasswordConfigured"] is False
-    assert current["worldOptionFields"]["AdminPassword"] == "未配置"
+    assert world_fields["AdminPassword"] == "未配置"
 
 
 def test_world_option_reset_to_default_removes_explicit_field(tmp_path: Path) -> None:
@@ -251,7 +258,8 @@ def test_world_option_reset_to_default_removes_explicit_field(tmp_path: Path) ->
     assert "AutoSaveSpan" not in saved_fields
     assert "Difficulty" not in saved_fields
     assert saved_fields["BaseCampWorkerMaxNum"] == "25"
-    assert service.current()["worldOptionFields"]["AutoSaveSpan"] == "30"
+    current_fields = cast(dict[str, str], service.current()["worldOptionFields"])
+    assert current_fields["AutoSaveSpan"] == "30"
 
 
 def test_running_world_option_save_waits_and_is_verified_after_stop(tmp_path: Path) -> None:
@@ -259,7 +267,8 @@ def test_running_world_option_save_waits_and_is_verified_after_stop(tmp_path: Pa
     result = service.save_world_option({"BaseCampWorkerMaxNum": "25"})
     assert result["pending"] is True
     assert not (world / "WorldOption.sav").exists()
-    assert service.current()["pendingApply"]["kind"] == "world-option"
+    pending = cast(dict[str, object], service.current()["pendingApply"])
+    assert pending["kind"] == "world-option"
 
     state["running"] = False
     applied = service.apply_pending()

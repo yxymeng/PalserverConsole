@@ -564,10 +564,28 @@ class WorldSnapshotService:
         work_suitabilities: tuple[str, ...] = (),
         min_work_level: int = 1,
         passive_skills: tuple[str, ...] = (),
+        passive_match: str = "all",
+        exclude_negative_passives: bool = False,
         location: str = "all",
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
+        passive_options = query_pal_passive_skill_options(cache)
+        normalized_search = (search or "").strip().casefold()
+        passive_search_skills = tuple(
+            str(option["id"])
+            for option in passive_options
+            if normalized_search
+            and any(
+                normalized_search in str(option.get(key) or "").casefold()
+                for key in ("id", "name", "sourceName")
+            )
+        )
+        negative_passive_skills = tuple(
+            str(option["id"])
+            for option in passive_options
+            if isinstance(rank := option.get("rank"), int) and rank < 0
+        )
         items, total = query_pal_roster(
             cache,
             page=page,
@@ -587,6 +605,10 @@ class WorldSnapshotService:
             work_suitabilities=work_suitabilities,
             min_work_level=min_work_level,
             passive_skills=passive_skills,
+            passive_match=passive_match,
+            exclude_negative_passives=exclude_negative_passives,
+            negative_passive_skills=negative_passive_skills,
+            passive_search_skills=passive_search_skills,
             location=location,
         )
         state = self._status_for_snapshot(current)
@@ -596,7 +618,7 @@ class WorldSnapshotService:
             "pageSize": page_size,
             "total": total,
             "careSummary": query_pal_care_summary(cache),
-            "passiveSkills": query_pal_passive_skill_options(cache),
+            "passiveSkills": passive_options,
             "metadata": query_world_metadata_status(cache),
             "source": state["source"],
             "observedAt": state["observedAt"],
