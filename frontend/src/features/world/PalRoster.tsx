@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import type { WorldMetadataStatus, WorldPalAptitude, WorldPalCare, WorldPalDetail, WorldPalRosterItem, WorldPalRosterResponse, WorldPalSkill, WorldPalSkills } from "../../api/contracts";
 import { ApiRequestError, isAbortError, requestJson } from "../../api/client";
 import { useIsMobile } from "../../hooks/use-mobile";
-import { palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
+import { matchingPalCharacterIds, palTraitLabels, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { mergePalRosterPage } from "./palRosterState";
 import { careReasonLabels, careSummaryLabel } from "./palCare";
 import { PalDetailModal } from "./PalDetailModal";
@@ -77,7 +77,11 @@ export function PalRoster({ snapshotId, context, onSnapshotReplaced, onNavigate 
       const query = new URLSearchParams({
         page: String(page), pageSize: String(PAGE_SIZE), marker, care, sort, snapshotId: requestedSnapshotId,
       });
-      if (appliedSearch) query.set("search", appliedSearch);
+      if (appliedSearch) {
+        query.set("search", appliedSearch);
+        const characterIds = matchingPalCharacterIds(appliedSearch);
+        if (characterIds.length) query.set("characterId", characterIds.join(","));
+      }
       if (location !== "all") query.set("location", location);
       for (const key of ["minLevel", "minRank", "minRarity", "minHpIv", "minAttackIv", "minDefenseIv", "minAverageIv"] as const) {
         if (appliedAptitude[key]) query.set(key, appliedAptitude[key]);
@@ -316,10 +320,11 @@ function MobileAptitudeFilters({ open, filters, passiveSkillOptions, onUpdate, o
 
 function PalRosterRow({ item, onOpen }: { item: WorldPalRosterItem; onOpen: (item: WorldPalRosterItem, trigger: HTMLButtonElement) => void }) {
   const pal = resolvePal(item);
+  const hasNickname = pal.displayName !== pal.speciesName;
   const location = item.locationType === "base" ? item.baseName || locationLabels.base : item.ownerName || locationLabels[item.locationType];
-  return <button className="pal-roster-row" type="button" aria-label={pal.displayName} onClick={(event) => onOpen(item, event.currentTarget)}>
+  return <button className="pal-roster-row" type="button" aria-label={hasNickname ? `${pal.displayName}（${pal.speciesName}）` : pal.displayName} onClick={(event) => onOpen(item, event.currentTarget)}>
     <span className="pal-roster-top">
-      <span className="pal-roster-name"><span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"}><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span><span className="pal-roster-copy"><span><strong>{pal.displayName}</strong><span className="pal-roster-level" data-label="等级 / 星级">Lv.{item.level ?? "—"}<small><Star size={10} fill="currentColor" />{pal.rank ?? 0} 星</small></span></span><small>{pal.known ? pal.speciesName : pal.characterId}</small></span>{pal.gender && <span className={`world-pal-gender ${pal.gender}`} title={pal.gender === "male" ? "雄性" : "雌性"} aria-label={pal.gender === "male" ? "雄性" : "雌性"}>{pal.gender === "male" ? "♂" : "♀"}</span>}</span>
+      <span className="pal-roster-name"><span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"}><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span><span className="pal-roster-copy"><span><strong>{pal.displayName}</strong><span className="pal-roster-level" data-label="等级 / 星级">Lv.{item.level ?? "—"}<small><Star size={10} fill="currentColor" />{pal.rank ?? 0} 星</small></span></span>{hasNickname && <small>{pal.speciesName}</small>}</span>{pal.gender && <span className={`world-pal-gender ${pal.gender}`} title={pal.gender === "male" ? "雄性" : "雌性"} aria-label={pal.gender === "male" ? "雄性" : "雌性"}>{pal.gender === "male" ? "♂" : "♀"}</span>}</span>
       <PalRosterTraits item={item} />
     </span>
     <PalPassiveSummary skills={item.skills} />

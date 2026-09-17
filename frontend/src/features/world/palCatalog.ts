@@ -64,6 +64,14 @@ export function resolvePal(source: PalSource): PalPresentation {
   };
 }
 
+export function matchingPalCharacterIds(search: string): string[] {
+  const normalized = search.trim().toLocaleLowerCase("zh-CN");
+  if (!normalized) return [];
+  return Object.entries(PAL_CATALOG)
+    .filter(([, entry]) => [entry.name, entry.englishName].some((name) => name.trim().toLocaleLowerCase("zh-CN") === normalized))
+    .map(([characterId]) => characterId);
+}
+
 export function palTraitLabels(source: PalSource): string[] {
   const pal = resolvePal(source);
   const labels: string[] = [];

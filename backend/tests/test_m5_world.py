@@ -1558,6 +1558,17 @@ def test_pal_roster_queries_are_paged_stable_and_keep_unknown_records(tmp_path: 
     assert unknown[0]["id"] == "pal-01599"
     assert unknown[0]["locationType"] == "unassigned"
     assert cast(dict[str, Any], unknown[0]["aptitude"])["metadataLabel"] == "资料未收录"
+    localized_species, localized_species_total = query_pal_roster(
+        cache,
+        page=1,
+        page_size=60,
+        search="棉悠悠",
+        character_ids=("SheepBall",),
+        marker="all",
+        sort="balanced",
+    )
+    assert localized_species_total == 1_599
+    assert all(item["characterId"] == "SheepBall" for item in localized_species)
     unassigned, unassigned_total = query_pal_roster(
         cache,
         page=1,
@@ -2162,6 +2173,9 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
             "/api/world/pals/roster?workSuitability=UnknownWork&minWorkLevel=1"
         )
         passive_roster = client.get("/api/world/pals/roster?passiveSkill=Legend")
+        localized_species_roster = client.get(
+            "/api/world/pals/roster?search=%E6%A3%89%E6%82%A0%E6%82%A0&characterId=BOSS_SheepBall"
+        )
         invalid_passive = client.get(
             "/api/world/pals/roster?passiveSkill=Legend,Legend"
         )
@@ -2217,6 +2231,9 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert roster.json()["metadata"]["status"] == "ready"
     assert roster.json()["items"][0]["aptitude"]["metadataKnown"] is True
     assert roster.json()["passiveSkills"][0]["name"] == "传说"
+    assert localized_species_roster.status_code == 200
+    assert localized_species_roster.json()["total"] == 1
+    assert localized_species_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"
     assert aptitude_roster.status_code == 200
     assert aptitude_roster.json()["total"] == 1
     assert aptitude_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"

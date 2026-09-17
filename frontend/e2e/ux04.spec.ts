@@ -90,14 +90,18 @@ async function setupWorld(page: Page) {
       return route.fulfill({ json: { message: "已开始只读重新解析", reparseGeneration: reparseRequests } });
     }
     if (path === "/api/world/pals/roster") {
-      rosterUrls.push(new URL(route.request().url()));
-      const sort = new URL(route.request().url()).searchParams.get("sort");
-      const marker = new URL(route.request().url()).searchParams.get("marker");
-      const careFilter = new URL(route.request().url()).searchParams.get("care");
+      const requestUrl = new URL(route.request().url());
+      rosterUrls.push(requestUrl);
+      const sort = requestUrl.searchParams.get("sort");
+      const marker = requestUrl.searchParams.get("marker");
+      const careFilter = requestUrl.searchParams.get("care");
       const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }];
       const sorted = sort === "name" ? [rosterPals[2], rosterPals[0], rosterPals[1]] : rosterPals;
-      const location = new URL(route.request().url()).searchParams.get("location");
-      const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : location === "unassigned" ? rosterPals.slice(1) : sorted;
+      const location = requestUrl.searchParams.get("location");
+      const search = requestUrl.searchParams.get("search")?.toLocaleLowerCase() || "";
+      const characterIds = new Set((requestUrl.searchParams.get("characterId") || "").split(",").filter(Boolean));
+      const searched = search || characterIds.size ? sorted.filter((item) => item.nickname.toLocaleLowerCase().includes(search) || item.characterId.toLocaleLowerCase().includes(search) || item.id.toLocaleLowerCase().includes(search) || characterIds.has(item.characterId)) : sorted;
+      const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : location === "unassigned" ? rosterPals.slice(1) : searched;
       return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, passiveSkills: palSkills.passive, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     if (path === "/api/world/inventory-items") {
@@ -276,6 +280,11 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".pal-roster")).toContainText("FuturePal");
   await expect(page.locator(".pal-roster")).toContainText("据点工作");
   const palRow = page.locator(".pal-roster-row").filter({ hasText: "小羊" });
+  await expect(palRow.locator(".pal-roster-copy > span > strong")).toHaveText("小羊");
+  await expect(palRow.locator(".pal-roster-copy > small")).toHaveText("棉悠悠");
+  const unrenamedPalRow = page.locator(".pal-roster-row").filter({ hasText: "FuturePal" });
+  await expect(unrenamedPalRow.locator(".pal-roster-copy > span > strong")).toHaveText("FuturePal");
+  await expect(unrenamedPalRow.locator(".pal-roster-copy > small")).toHaveCount(0);
   await expect(palRow.locator(".world-pal-gender")).toHaveText("♀");
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
   await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("1 星");
@@ -286,6 +295,20 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(palRow.locator('[data-label="照护状态"]')).toContainText("需立即处理");
   await expect(palRow).not.toContainText("base-1");
   await expect(page.locator('[data-icon-key="pal-placeholder"]')).toHaveCount(1);
+  await page.getByLabel("搜索帕鲁图鉴花名册").fill("不存在的帕鲁");
+  await page.getByRole("button", { name: "应用筛选" }).click();
+  const emptyState = page.locator(".pal-roster-cards > .world-empty-state");
+  await expect(emptyState).toBeVisible();
+  const [emptyBox, rosterBox] = await Promise.all([emptyState.boundingBox(), page.locator(".pal-roster-cards").boundingBox()]);
+  expect(emptyBox).not.toBeNull();
+  expect(rosterBox).not.toBeNull();
+  expect(Math.abs((emptyBox!.x + emptyBox!.width / 2) - (rosterBox!.x + rosterBox!.width / 2))).toBeLessThan(2);
+  await page.getByRole("button", { name: "清除已应用筛选" }).first().click();
+  await page.getByLabel("搜索帕鲁图鉴花名册").fill("棉悠悠");
+  await page.getByRole("button", { name: "应用筛选" }).click();
+  await expect(page.locator(".pal-roster-row")).toHaveCount(2);
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("characterId")).toBe("BOSS_SheepBall,Quest_Farmer03_SheepBall,SheepBall");
+  await page.getByRole("button", { name: "清除已应用筛选" }).first().click();
   await page.screenshot({ path: testInfo.outputPath(`pal-roster-${testInfo.project.name}.png`), fullPage: true });
   await page.getByText("资质、工作与被动技能", { exact: true }).click();
   if (testInfo.project.name === "mobile") {

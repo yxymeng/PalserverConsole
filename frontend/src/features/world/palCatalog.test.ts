@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { palTraitLabels, playerInitial, resolvePal } from "./palCatalog";
+import { matchingPalCharacterIds, palTraitLabels, playerInitial, resolvePal } from "./palCatalog";
 
 describe("Pal catalog presentation", () => {
   it("uses a nickname first and keeps the known Chinese species name", () => {
@@ -46,5 +46,11 @@ describe("Pal catalog presentation", () => {
     expect(playerInitial("520Player")).toBe("5");
     expect(playerInitial("小明")).toBe("小");
     expect(playerInitial("   ")).toBe("?");
+  });
+
+  it("maps an exact localized species name to every matching Character ID", () => {
+    expect(matchingPalCharacterIds("美露帕")).toEqual(["Alpaca", "BOSS_Alpaca"]);
+    expect(matchingPalCharacterIds("  棉悠悠  ")).toEqual(["BOSS_SheepBall", "Quest_Farmer03_SheepBall", "SheepBall"]);
+    expect(matchingPalCharacterIds("不存在的帕鲁")).toEqual([]);
   });
 });

@@ -996,6 +996,7 @@ def query_pal_roster(
     search: str | None,
     marker: str,
     sort: str,
+    character_ids: Sequence[str] = (),
     care: str = "all",
     min_level: int | None = None,
     min_rank: int | None = None,
@@ -1018,13 +1019,22 @@ def query_pal_roster(
         or location not in {"all", "player", "base", "unassigned"}
         or any(name not in _WORK_SUITABILITY_TYPES for name in work_suitabilities)
         or any(not name.strip() for name in passive_skills)
+        or any(not name.strip() for name in character_ids)
     ):
         raise ValueError("Unknown Pal roster query.")
     clauses: list[str] = []
     parameters: list[object] = []
-    if search:
-        clauses.append("(p.nickname LIKE ? OR p.character_id LIKE ? OR p.id LIKE ?)")
-        parameters.extend([f"%{search}%"] * 3)
+    if search or character_ids:
+        search_clauses: list[str] = []
+        if search:
+            search_clauses.extend(("p.nickname LIKE ?", "p.character_id LIKE ?", "p.id LIKE ?"))
+            parameters.extend([f"%{search}%"] * 3)
+        if character_ids:
+            search_clauses.append(
+                "p.character_id IN (" + ", ".join("?" for _ in character_ids) + ")"
+            )
+            parameters.extend(character_ids)
+        clauses.append("(" + " OR ".join(search_clauses) + ")")
     if marker == "lucky":
         clauses.append("p.is_lucky = 1")
     elif marker == "boss":

@@ -1287,6 +1287,7 @@
 .pal-care-summary > small { border-radius: 10px; }
 .pal-roster-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 15px; overflow: visible; border: 0; background: transparent; }
 .pal-roster-cards .pal-roster-head { display: none; }
+.pal-roster-cards > .world-empty-state { grid-column: 1 / -1; }
 .pal-roster-cards .pal-roster-row { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; min-width: 0; min-height: 0; align-content: start; align-items: stretch; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: 16px; color: var(--foreground); background: var(--surface); box-shadow: 0 1px 2px rgb(35 57 61 / 7%); font: inherit; text-align: left; cursor: pointer; transition: transform .2s cubic-bezier(.4, 0, .2, 1), border-color .2s ease, box-shadow .2s ease; }
 .pal-roster-cards .pal-roster-row:hover { border-color: color-mix(in srgb, var(--primary) 38%, var(--border)); background: var(--surface); box-shadow: 0 11px 28px rgb(35 57 61 / 10%); transform: translateY(-4px); }
 .pal-roster-cards .pal-roster-row:focus-visible { outline: 3px solid color-mix(in srgb, var(--primary) 30%, transparent); outline-offset: 2px; border-color: var(--primary); }

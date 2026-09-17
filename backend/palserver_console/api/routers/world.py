@@ -84,6 +84,7 @@ def router(deps: AppDependencies) -> APIRouter:
         page: int = 1,
         pageSize: int = 60,
         search: str | None = None,
+        characterId: str | None = None,
         marker: str = "all",
         sort: str = "balanced",
         care: str = "all",
@@ -139,11 +140,23 @@ def router(deps: AppDependencies) -> APIRouter:
         )
         if len(passive_skills) > 12 or len(set(passive_skills)) != len(passive_skills):
             return error_response(422, "INVALID_PAL_PASSIVE_FILTER", "被动技能筛选条件不正确。")
+        character_ids = tuple(
+            name.strip() for name in (characterId or "").split(",") if name.strip()
+        )
+        if (
+            len(character_ids) > 24
+            or len(set(character_ids)) != len(character_ids)
+            or any(len(name) > 100 for name in character_ids)
+        ):
+            return error_response(
+                422, "INVALID_PAL_CHARACTER_FILTER", "帕鲁 Character ID 筛选条件不正确。"
+            )
         try:
             return deps.world.list_pal_roster(
                 page=page,
                 page_size=pageSize,
                 search=search,
+                character_ids=character_ids,
                 marker=marker,
                 sort=sort,
                 care=care,
