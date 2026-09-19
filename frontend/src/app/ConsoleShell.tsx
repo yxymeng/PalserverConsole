@@ -6,6 +6,7 @@ import { requestJson } from "../api/client";
 import { BroadcastDialog } from "../components/BroadcastDialog";
 import { BlurFade } from "../components/ui/blur-fade";
 import { Button } from "../components/ui/button";
+import { ApplicationUpdatePanel } from "../features/maintenance/ApplicationUpdatePanel";
 import { MaintenancePage } from "../features/maintenance/MaintenancePage";
 import { Overview } from "../features/overview/Overview";
 import { serverStateLabel } from "../features/server/labels";
@@ -142,6 +143,7 @@ function ConsoleLayout({
           <PrimaryNavigation className="psc-desktop-navigation" active={active} onActivate={activate} />
           <div className="psc-topbar-actions">
             <Button className="psc-topbar-control psc-broadcast-trigger" variant="outline" size="sm" type="button" aria-label="发送全服广播" title="发送全服广播" onClick={() => setBroadcastOpen(true)}><Megaphone data-icon="inline-start" aria-hidden="true" /><span>广播</span></Button>
+            <ApplicationUpdatePanel auth={auth} />
             <ThemeToggle theme={theme} onChange={onThemeChange} />
             {!auth.local && <LogoutButton csrfToken={auth.csrfToken} onDone={onAuthChanged} />}
           </div>

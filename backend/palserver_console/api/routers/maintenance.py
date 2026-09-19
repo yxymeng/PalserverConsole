@@ -94,6 +94,19 @@ def router(deps: AppDependencies) -> APIRouter:
         except ApplicationUpdateError as error:
             return error_response(502, error.code, str(error))
 
+    @api.get(
+        "/api/maintenance/application-update/progress",
+        response_model=None,
+        tags=["maintenance"],
+    )
+    def application_update_progress(
+        request: Request,
+    ) -> dict[str, object] | JSONResponse:
+        denied = require_authenticated_request(request, deps.auth)
+        if denied:
+            return denied
+        return deps.application_updates.progress()
+
     @api.post("/api/maintenance/application-update", response_model=None, tags=["maintenance"])
     def install_application_update(
         request: Request, payload: ApplicationUpdateRequest

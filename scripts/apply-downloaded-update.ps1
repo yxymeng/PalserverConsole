@@ -11,6 +11,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$NewPackage,
     [Parameter(Mandatory = $true)]
+    [string]$ExpectedVersion,
+    [Parameter(Mandatory = $true)]
     [string]$InstanceId,
     [Parameter(Mandatory = $true)]
     [int]$Port
@@ -144,6 +146,40 @@ function Write-UpdateLockJsonAtomically {
     }
 }
 
+function Publish-UpdateProgress {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ProgressPath,
+        [Parameter(Mandatory = $true)][string]$UpdateId,
+        [Parameter(Mandatory = $true)][string]$State,
+        [Parameter(Mandatory = $true)][int]$Step,
+        [Parameter(Mandatory = $true)][string]$Message,
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [string]$ErrorCode = ""
+    )
+
+    try {
+        $progress = [ordered]@{
+            updateId = $UpdateId
+            state = $State
+            step = $Step
+            message = $Message
+            updatedAt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+        }
+        if (-not [string]::IsNullOrWhiteSpace($ErrorCode)) {
+            $progress["errorCode"] = $ErrorCode
+        }
+        $mode = if (Test-Path -LiteralPath $ProgressPath -PathType Leaf) { "Replace" } else { "Create" }
+        Write-UpdateLockJsonAtomically `
+            -UpdateLockPath $ProgressPath `
+            -Json ($progress | ConvertTo-Json) `
+            -Mode $mode
+    }
+    catch {
+        $_ | Out-File -LiteralPath $LogPath -Append -Encoding utf8
+    }
+}
+
 function Assert-UpdateLockMetadataComplete {
     [CmdletBinding()]
     param(
@@ -198,6 +234,38 @@ function Start-ConsoleLauncher {
     }
     $arguments = @("-InstanceId", $InstanceId, "-Port", [string]$Port)
     Start-Process -FilePath $Launcher -ArgumentList $arguments -WorkingDirectory $InstallRootPath -WindowStyle Hidden
+}
+
+function Wait-ConsoleHealth {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $healthUrl = "http://127.0.0.1:$Port/api/health"
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    do {
+        try {
+            $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 1
+            $payload = $response.Content | ConvertFrom-Json
+            if (
+                $response.StatusCode -eq 200 -and
+                [string]$payload.service -eq "palserver-console" -and
+                [string]$payload.status -eq "ok" -and
+                [string]$payload.versions.application -eq $ExpectedVersion
+            ) {
+                return
+            }
+        }
+        catch {
+            # The new console may still be binding its listener.
+        }
+        Start-Sleep -Milliseconds 250
+    } while ([DateTime]::UtcNow -lt $deadline)
+
+    throw "UPDATE_RELAUNCH_HEALTH_TIMEOUT: PalServerConsole $ExpectedVersion did not become healthy at $healthUrl within $TimeoutSeconds seconds."
 }
 
 function Restore-ConsoleLauncher {
@@ -342,6 +410,7 @@ $launcher = Join-Path $installRootPath "PalServerConsole.exe"
 $updateLockPath = Join-Path $installRootPath ".palserver-console-update.lock"
 $logDirectory = Join-Path $dataDirectoryPath "application-updates"
 $logPath = Join-Path $logDirectory "apply-update.log"
+$progressPath = Join-Path $logDirectory "progress.json"
 $exitCode = 0
 
 try {
@@ -350,6 +419,7 @@ try {
         -UpdateLockPath $updateLockPath `
         -ExpectedLockId $UpdateLockId `
         -InstallRootPath $installRootPath
+    Publish-UpdateProgress -ProgressPath $progressPath -UpdateId $UpdateLockId -State "waiting_for_exit" -Step 4 -Message "Waiting for console shutdown." -LogPath $logPath
     $deadline = [DateTime]::UtcNow.AddMinutes(2)
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ([DateTime]::UtcNow -ge $deadline) {
@@ -373,6 +443,7 @@ try {
         throw "UPDATE_HELPER_INVALID: upgrade-portable.ps1 is missing from the downloaded package."
     }
 
+    Publish-UpdateProgress -ProgressPath $progressPath -UpdateId $UpdateLockId -State "installing" -Step 4 -Message "Applying console update." -LogPath $logPath
     & $upgradeScript `
         -NewPackage $packageRootPath `
         -InstallRoot $installRootPath `
@@ -386,11 +457,14 @@ try {
         throw "UPDATE_RELAUNCH_FAILED: upgraded PalServerConsole.exe is missing."
     }
 
+    Publish-UpdateProgress -ProgressPath $progressPath -UpdateId $UpdateLockId -State "restarting" -Step 4 -Message "Restarting console." -LogPath $logPath
     Release-UpdateLockForLaunch `
         -UpdateLockPath $updateLockPath `
         -ExpectedLockId $UpdateLockId `
         -InstallRootPath $installRootPath
     Start-ConsoleLauncher -Launcher $launcher -InstallRootPath $installRootPath -InstanceId $InstanceId -Port $Port
+    Wait-ConsoleHealth -Port $Port -ExpectedVersion $ExpectedVersion
+    Publish-UpdateProgress -ProgressPath $progressPath -UpdateId $UpdateLockId -State "completed" -Step 4 -Message "Console update completed." -LogPath $logPath
 }
 catch {
     $updateError = $_
@@ -405,6 +479,7 @@ catch {
     catch {
         $_ | Out-File -LiteralPath $logPath -Append -Encoding utf8
     }
+    Publish-UpdateProgress -ProgressPath $progressPath -UpdateId $UpdateLockId -State "failed" -Step 0 -Message "Application update failed. See error code." -LogPath $logPath -ErrorCode "APPLICATION_UPDATE_FAILED"
     $exitCode = 1
 }
 finally {

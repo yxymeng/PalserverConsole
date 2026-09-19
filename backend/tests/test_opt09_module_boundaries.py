@@ -29,6 +29,7 @@ EXPECTED_API_CONTRACT = {
     "GET /api/live/bans",
     "GET /api/maintenance/notifications",
     "GET /api/maintenance/application-update",
+    "GET /api/maintenance/application-update/progress",
     "GET /api/monitoring/status",
     "GET /api/operations/health",
     "GET /api/server/discovery",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -24,6 +25,24 @@ MAX_RELEASE_BYTES = 500 * 1024 * 1024
 DEFAULT_HELPER_HANDOFF_TIMEOUT_SECONDS = 10.0
 HELPER_HANDOFF_POLL_SECONDS = 0.05
 UPDATE_GUARD_POLL_SECONDS = 0.05
+ABANDONED_PROGRESS_GRACE_SECONDS = 90
+HELPER_PROGRESS_MESSAGES = {
+    "waiting_for_exit": "正在等待控制台安全退出。",
+    "installing": "正在替换控制台程序文件。",
+    "restarting": "升级完成，正在重新启动控制台。",
+    "completed": "控制台已完成升级并重新启动。",
+    "failed": "升级失败，请根据错误码处理。",
+}
+ACTIVE_UPDATE_STATES = {
+    "checking",
+    "downloading",
+    "validating",
+    "handoff",
+    "restart_scheduled",
+    "waiting_for_exit",
+    "installing",
+    "restarting",
+}
 
 
 class ApplicationUpdateError(RuntimeError):
@@ -163,6 +182,19 @@ def _write_update_lock_metadata_atomically(
         temporary_path.unlink(missing_ok=True)
 
 
+def _write_json_atomically(path: Path, payload: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = path.with_name(f"{path.name}.tmp-{uuid.uuid4().hex}")
+    try:
+        with temporary_path.open("x", encoding="utf-8", newline="\n") as stream:
+            json.dump(payload, stream, ensure_ascii=False)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
 class ApplicationUpdateService:
     def __init__(
         self,
@@ -185,6 +217,120 @@ class ApplicationUpdateService:
         self.process_runner = process_runner
         self.helper_handoff_timeout_seconds = max(0.0, float(helper_handoff_timeout_seconds))
         self._shutdown_requester: Callable[[], None] | None = None
+        self._progress_lock = threading.Lock()
+        self._progress_path = self.data_dir / "application-updates" / "progress.json"
+        self._progress: dict[str, object] = {
+            "state": "idle",
+            "step": 0,
+            "message": "等待开始升级。",
+        }
+
+    def progress(self) -> dict[str, object]:
+        with self._progress_lock:
+            persisted = self._read_progress()
+            if persisted is not None:
+                self._progress = persisted
+            if self._progress_is_abandoned(self._progress):
+                self._progress = {
+                    "state": "failed",
+                    "step": 0,
+                    "message": "升级任务已中断，请重新发起升级。",
+                    "errorCode": "APPLICATION_UPDATE_INTERRUPTED",
+                    "updatedAt": int(time.time()),
+                    **(
+                        {"updateId": self._progress["updateId"]}
+                        if isinstance(self._progress.get("updateId"), str)
+                        else {}
+                    ),
+                }
+                _write_json_atomically(self._progress_path, self._progress)
+            return dict(self._progress)
+
+    def _progress_is_abandoned(self, progress: dict[str, object]) -> bool:
+        if progress.get("state") not in ACTIVE_UPDATE_STATES or self.install_root is None:
+            return False
+        updated_at = progress.get("updatedAt")
+        if isinstance(updated_at, bool) or not isinstance(updated_at, int | float):
+            with suppress(OSError):
+                updated_at = self._progress_path.stat().st_mtime
+        if not isinstance(updated_at, int | float):
+            return False
+        if time.time() - float(updated_at) < ABANDONED_PROGRESS_GRACE_SECONDS:
+            return False
+        return not portable_application_update_in_progress(self.install_root)
+
+    def _read_progress(self) -> dict[str, object] | None:
+        try:
+            progress = json.loads(self._progress_path.read_text(encoding="utf-8-sig"))
+        except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        if (
+            not isinstance(progress, dict)
+            or not isinstance(progress.get("state"), str)
+            or isinstance(progress.get("step"), bool)
+            or not isinstance(progress.get("step"), int)
+            or not 0 <= cast(int, progress["step"]) <= 4
+            or not isinstance(progress.get("message"), str)
+        ):
+            return None
+        state = cast(str, progress["state"])
+        result = {
+            "state": state,
+            "step": progress["step"],
+            "message": HELPER_PROGRESS_MESSAGES.get(state, progress["message"]),
+        }
+        for key in ("updateId", "errorCode"):
+            value = progress.get(key)
+            if isinstance(value, str) and value:
+                result[key] = value
+        updated_at = progress.get("updatedAt")
+        if (
+            not isinstance(updated_at, bool)
+            and isinstance(updated_at, int | float)
+            and math.isfinite(float(updated_at))
+        ):
+            result["updatedAt"] = updated_at
+        return result
+
+    def _set_progress(
+        self,
+        state: str,
+        step: int,
+        message: str,
+        *,
+        update_id: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        progress: dict[str, object] = {
+            "state": state,
+            "step": step,
+            "message": message,
+            "updatedAt": int(time.time()),
+        }
+        if update_id:
+            progress["updateId"] = update_id
+        if error_code:
+            progress["errorCode"] = error_code
+        with self._progress_lock:
+            _write_json_atomically(self._progress_path, progress)
+            self._progress = progress
+
+    def _set_failure_progress(
+        self, error: Exception, *, update_id: str | None = None
+    ) -> None:
+        error_code = (
+            error.code
+            if isinstance(error, ApplicationUpdateError)
+            else "APPLICATION_UPDATE_FAILED"
+        )
+        with suppress(OSError):
+            self._set_progress(
+                "failed",
+                0,
+                "升级失败，请根据错误码处理。",
+                update_id=update_id,
+                error_code=error_code,
+            )
 
     def check(self) -> dict[str, object]:
         try:
@@ -202,14 +348,32 @@ class ApplicationUpdateService:
     def prepare(self, expected_version: str) -> dict[str, object]:
         install_root = self.install_root
         if install_root is None:
-            raise ApplicationUpdateError(
+            error = ApplicationUpdateError(
                 "PORTABLE_REQUIRED",
                 "Automatic installation is only available in the Windows portable package.",
             )
-        lock_path, update_lock_id = self._acquire_update_lock()
+            self._set_failure_progress(error)
+            raise error
+        try:
+            lock_path, update_lock_id = self._acquire_update_lock()
+        except Exception as error:
+            active_progress = self.progress().get("state") in ACTIVE_UPDATE_STATES
+            if not (
+                isinstance(error, ApplicationUpdateError)
+                and error.code == "APPLICATION_UPDATE_IN_PROGRESS"
+                and active_progress
+            ):
+                self._set_failure_progress(error)
+            raise
         helper_process: object | None = None
         helper_handed_off = False
         try:
+            self._set_progress(
+                "checking",
+                1,
+                "正在校验运行环境与目标版本。",
+                update_id=update_lock_id,
+            )
             if self._other_install_instances_running(install_root):
                 raise ApplicationUpdateError(
                     "APPLICATION_UPDATE_INSTANCES_RUNNING",
@@ -238,7 +402,19 @@ class ApplicationUpdateService:
             if package_root.exists():
                 shutil.rmtree(package_root)
             try:
+                self._set_progress(
+                    "downloading",
+                    2,
+                    "正在下载 Windows portable 更新包。",
+                    update_id=update_lock_id,
+                )
                 self._download(asset_url, download_path)
+                self._set_progress(
+                    "validating",
+                    3,
+                    "正在解压并校验更新包结构。",
+                    update_id=update_lock_id,
+                )
                 staging_root.mkdir()
                 _extract_release(download_path, staging_root)
                 _validate_release_root(staging_root, latest)
@@ -282,6 +458,8 @@ class ApplicationUpdateService:
                     str(self.data_dir),
                     "-NewPackage",
                     str(package_root),
+                    "-ExpectedVersion",
+                    latest,
                     "-InstanceId",
                     self.instance_id,
                     "-Port",
@@ -290,14 +468,27 @@ class ApplicationUpdateService:
                 cwd=str(install_root),
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
+            self._set_progress(
+                "handoff",
+                4,
+                "正在把升级任务交给安全更新脚本。",
+                update_id=update_lock_id,
+            )
             self._wait_for_helper_handoff(lock_path, update_lock_id, helper_process)
             helper_handed_off = True
+            self._set_progress(
+                "restart_scheduled",
+                4,
+                "更新包已校验，控制台即将退出并完成升级。",
+                update_id=update_lock_id,
+            )
             return {
                 "message": "更新包已校验，控制台将退出并完成升级。",
                 "version": latest,
                 "restartScheduled": True,
             }
-        except Exception:
+        except Exception as error:
+            self._set_failure_progress(error, update_id=update_lock_id)
             if not helper_handed_off:
                 helper_exited = helper_process is None
                 if helper_process is not None:
@@ -668,6 +859,7 @@ class ApplicationUpdateService:
             "releaseUrl": release.get("html_url"),
             "publishedAt": release.get("published_at"),
             "assetSizeBytes": asset.get("size") if isinstance(asset, dict) else None,
+            "releaseNotes": _release_notes(release.get("body")),
             "assetUrl": asset_url,
         }
 
@@ -712,6 +904,44 @@ class ApplicationUpdateService:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
+
+
+def _release_notes(value: object) -> list[str]:
+    if not isinstance(value, str):
+        return []
+    notes: list[str] = []
+    current = ""
+    fenced = False
+
+    def append_current() -> None:
+        nonlocal current
+        if current and len(notes) < 8:
+            notes.append(current[:500])
+        current = ""
+
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if line.startswith("```"):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        if not line:
+            append_current()
+            continue
+        if line.startswith("#"):
+            append_current()
+            continue
+        item = re.match(r"^(?:[-*+]|\d+[.)])\s+(.+)$", line)
+        if item:
+            append_current()
+            current = re.sub(r"^\[[ xX]\]\s*", "", item.group(1)).strip()
+        else:
+            current = f"{current} {line}".strip()
+        if len(notes) == 8:
+            break
+    append_current()
+    return notes
 
 
 def _version(value: str) -> str:

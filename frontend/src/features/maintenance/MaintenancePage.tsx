@@ -13,7 +13,6 @@ import { AuditPage } from "../audit/AuditPage";
 import { BackupsPage } from "../backups/BackupsPage";
 import { OperationalHealthPanel } from "../overview/OperationalHealthPanel";
 import { MaintenanceNotificationsPanel, MaintenancePanel } from "./MaintenancePanel";
-import { ApplicationUpdatePanel } from "./ApplicationUpdatePanel";
 
 type MaintenanceSection = "health" | "update" | "backups" | "audit" | "notifications";
 
@@ -136,7 +135,6 @@ export function MaintenancePage({ auth }: { auth: AuthStatus }) {
     <div ref={tabPanelRef} className="maintenance-tab-panel" role="tabpanel" id={`maintenance-${activeSection}`}>
       {activeSection === "health" && <OperationalHealthPanel auth={auth} refreshToken={healthRefreshToken} onHealthChange={handleHealthChange} />}
       {activeSection === "update" && <div className="maintenance-update-stack">
-        <ApplicationUpdatePanel auth={auth} />
         <MaintenancePanel auth={auth} status={status} onOperation={setOperation} />
       </div>}
       {activeSection === "backups" && <BackupsPage auth={auth} />}

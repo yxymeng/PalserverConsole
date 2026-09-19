@@ -5,11 +5,15 @@ import hashlib
 import json
 import math
 import os
+import re
+import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from contextlib import suppress
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psutil
@@ -17,6 +21,9 @@ import pytest
 
 import palserver_console.__main__ as console_main
 from palserver_console.application_updates import (
+    ABANDONED_PROGRESS_GRACE_SECONDS,
+    ACTIVE_UPDATE_STATES,
+    HELPER_PROGRESS_MESSAGES,
     _InstallUpdateGuard,
     portable_application_update_in_progress,
 )
@@ -836,25 +843,54 @@ def test_license_collector_includes_bundled_frontend_runtime_dependencies(
         "react": {"version": "19.1.1", "dependencies": {"scheduler": "1.0.0"}},
         "scheduler": {"version": "1.0.0"},
         "lucide-react": {"version": "0.468.0", "peerDependencies": {"react": "*"}},
+        "@yxymeng/flowmist": {
+            "version": "0.1.0",
+            "private": True,
+            "license": "UNLICENSED",
+        },
     }
     package_lock = {
         "name": "frontend-license-fixture",
         "lockfileVersion": 3,
         "packages": {
-            "": {"dependencies": {"react": "19.1.1", "lucide-react": "0.468.0"}},
-            **{f"node_modules/{name}": metadata for name, metadata in packages.items()},
+            "": {"dependencies": {
+                "react": "19.1.1",
+                "lucide-react": "0.468.0",
+                "@yxymeng/flowmist": "file:vendor/flowmist",
+            }},
+            **{
+                f"node_modules/{name}": (
+                    {"resolved": "vendor/flowmist", "link": True}
+                    if name == "@yxymeng/flowmist"
+                    else metadata
+                )
+                for name, metadata in packages.items()
+            },
+            "vendor/flowmist": {
+                "name": "@yxymeng/flowmist",
+                "version": "0.1.0",
+                "private": True,
+                "license": "UNLICENSED",
+            },
         },
     }
     lock_path = tmp_path / "package-lock.json"
     lock_path.write_text(json.dumps(package_lock), encoding="utf-8")
     for name, metadata in packages.items():
-        package_root = node_modules / name
+        package_root = (
+            tmp_path / "vendor" / "flowmist"
+            if name == "@yxymeng/flowmist"
+            else node_modules / name
+        )
         package_root.mkdir(parents=True)
         (package_root / "package.json").write_text(
-            json.dumps({"name": name, **metadata, "license": "MIT"}),
+            json.dumps({"name": name, "license": "MIT", **metadata}),
             encoding="utf-8",
         )
-        (package_root / "LICENSE").write_text(f"{name} fixture license", encoding="utf-8")
+        if name != "@yxymeng/flowmist":
+            (package_root / "LICENSE").write_text(
+                f"{name} fixture license", encoding="utf-8"
+            )
 
     output = tmp_path / "THIRD_PARTY_LICENSES.md"
     completed = subprocess.run(
@@ -884,6 +920,9 @@ def test_license_collector_includes_bundled_frontend_runtime_dependencies(
     assert "### react 19.1.1" in rendered
     assert "### scheduler 1.0.0" in rendered
     assert "### lucide-react 0.468.0" in rendered
+    assert "### @yxymeng/flowmist 0.1.0" in rendered
+    assert "Declared license: UNLICENSED" in rendered
+    assert "Bundled private workspace package" in rendered
 
 
 def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclosure() -> None:
@@ -1004,11 +1043,20 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     success_launch = application_update_helper.index(
         "Start-ConsoleLauncher -Launcher $launcher", success_release
     )
+    success_health = application_update_helper.index(
+        "Wait-ConsoleHealth -Port $Port -ExpectedVersion $ExpectedVersion",
+        success_launch,
+    )
+    success_complete = application_update_helper.index(
+        "Publish-UpdateProgress -ProgressPath $progressPath "
+        '-UpdateId $UpdateLockId -State "completed"',
+        success_health,
+    )
     failure_release = application_update_helper.rindex(release_call)
     failure_restore = application_update_helper.index(
         "Restore-ConsoleLauncher -Launcher $launcher"
     )
-    assert success_release < success_launch
+    assert success_release < success_launch < success_health < success_complete
     assert failure_release < failure_restore
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
@@ -1031,6 +1079,86 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "Python" in portable_readme and "Node.js" in portable_readme
     assert "npm >= 11.17" in root_readme
     assert "npm 11.17.0" in root_readme
+
+
+def test_application_update_progress_protocol_is_consistent_across_runtimes() -> None:
+    expected_steps = {
+        "idle": 0,
+        "checking": 1,
+        "downloading": 2,
+        "validating": 3,
+        "handoff": 4,
+        "restart_scheduled": 4,
+        "waiting_for_exit": 4,
+        "installing": 4,
+        "restarting": 4,
+        "completed": 4,
+        "failed": 0,
+    }
+    expected_active = set(expected_steps) - {"idle", "completed", "failed"}
+    expected_terminal = {"completed", "failed"}
+    project_root = Path(__file__).resolve().parents[2]
+    python_source = (
+        project_root / "backend" / "palserver_console" / "application_updates.py"
+    ).read_text(encoding="utf-8")
+    contracts = (project_root / "frontend" / "src" / "api" / "contracts.ts").read_text(
+        encoding="utf-8"
+    )
+    panel = (
+        project_root
+        / "frontend"
+        / "src"
+        / "features"
+        / "maintenance"
+        / "ApplicationUpdatePanel.tsx"
+    ).read_text(encoding="utf-8")
+    helper = (project_root / "scripts" / "apply-downloaded-update.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+
+    progress_type = re.search(
+        r"export type ApplicationUpdateProgress = \{.*?state:\s*([^;]+);",
+        contracts,
+        re.DOTALL,
+    )
+    active_states = re.search(
+        r"const ACTIVE_UPDATE_STATES.*?\(\[(.*?)\]\);", panel, re.DOTALL
+    )
+    terminal_states = re.search(
+        r"const TERMINAL_UPDATE_STATES.*?\(\[(.*?)\]\);", panel, re.DOTALL
+    )
+    health_timeout = re.search(
+        r"function Wait-ConsoleHealth.*?\[int\]\$TimeoutSeconds\s*=\s*(\d+)",
+        helper,
+        re.DOTALL,
+    )
+    assert progress_type and active_states and terminal_states and health_timeout
+    assert set(re.findall(r'"([a-z_]+)"', progress_type.group(1))) == set(expected_steps)
+    assert set(re.findall(r'"([a-z_]+)"', active_states.group(1))) == expected_active
+    assert set(re.findall(r'"([a-z_]+)"', terminal_states.group(1))) == expected_terminal
+    assert expected_active == ACTIVE_UPDATE_STATES
+    assert set(HELPER_PROGRESS_MESSAGES) == {
+        "waiting_for_exit",
+        "installing",
+        "restarting",
+        "completed",
+        "failed",
+    }
+    assert int(health_timeout.group(1)) < ABANDONED_PROGRESS_GRACE_SECONDS
+
+    written_steps = {
+        state: int(step)
+        for state, step in re.findall(
+            r'self\._set_progress\(\s*"([a-z_]+)",\s*(\d+)', python_source
+        )
+    }
+    written_steps.update(
+        (state, int(step))
+        for state, step in re.findall(r'-State "([a-z_]+)" -Step (\d+)', helper)
+    )
+    assert re.search(r'"state":\s*"idle",\s*"step":\s*0', python_source, re.DOTALL)
+    written_steps["idle"] = 0
+    assert written_steps == expected_steps
 
 
 def test_portable_v011_bootstrap_document_uses_candidate_upgrader() -> None:
@@ -1340,6 +1468,8 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
             str(data_directory),
             "-NewPackage",
             str(tmp_path / "missing-package"),
+            "-ExpectedVersion",
+            "0.3.0",
             "-InstanceId",
             "north",
             "-Port",
@@ -1357,6 +1487,19 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
     assert "UPDATE_HELPER_INVALID" in (
         data_directory / "application-updates" / "apply-update.log"
     ).read_text(encoding="utf-8")
+    progress = json.loads(
+        (data_directory / "application-updates" / "progress.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert isinstance(progress.pop("updatedAt"), int)
+    assert progress == {
+        "updateId": lock_id,
+        "state": "failed",
+        "step": 0,
+        "message": "Application update failed. See error code.",
+        "errorCode": "APPLICATION_UPDATE_FAILED",
+    }
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
@@ -1387,6 +1530,31 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
         encoding="utf-8",
     )
 
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path != "/api/health":
+                self.send_error(404)
+                return
+            payload = json.dumps(
+                {
+                    "service": "palserver-console",
+                    "status": "ok",
+                    "versions": {"application": "0.3.0"},
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            pass
+
+    health_server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+    health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
+    health_thread.start()
+
     try:
         completed = subprocess.run(
             [
@@ -1407,10 +1575,12 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
                 str(data_directory),
                 "-NewPackage",
                 str(package_root),
+                "-ExpectedVersion",
+                "0.3.0",
                 "-InstanceId",
                 "north",
                 "-Port",
-                "18224",
+                str(health_server.server_port),
             ],
             check=False,
             capture_output=True,
@@ -1421,8 +1591,111 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
 
         assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
         assert not lock_path.exists()
+        progress = json.loads(
+            (data_directory / "application-updates" / "progress.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert isinstance(progress.pop("updatedAt"), int)
+        assert progress == {
+            "updateId": lock_id,
+            "state": "completed",
+            "step": 4,
+            "message": "Console update completed.",
+        }
     finally:
+        health_server.shutdown()
+        health_server.server_close()
+        health_thread.join(timeout=5)
         _cleanup_test_launcher(install_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_health_wait_times_out_without_console() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    loader = _powershell_function_loader(update_helper, ("Wait-ConsoleHealth",))
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        unused_port = reservation.getsockname()[1]
+
+    script = f"""
+{loader}
+try {{
+    Wait-ConsoleHealth -Port {unused_port} -ExpectedVersion "0.3.0" -TimeoutSeconds 1
+    "no failure"
+}}
+catch {{
+    $_.Exception.Message
+}}
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    completed = subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "UPDATE_RELAUNCH_HEALTH_TIMEOUT" in completed.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_rejects_healthy_wrong_version() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    loader = _powershell_function_loader(update_helper, ("Wait-ConsoleHealth",))
+
+    class WrongVersionHealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            payload = json.dumps(
+                {
+                    "service": "palserver-console",
+                    "status": "ok",
+                    "versions": {"application": "0.2.0"},
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            pass
+
+    health_server = ThreadingHTTPServer(("127.0.0.1", 0), WrongVersionHealthHandler)
+    health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
+    health_thread.start()
+    script = f'''{loader}
+try {{
+    Wait-ConsoleHealth -Port {health_server.server_port} -ExpectedVersion "0.3.0" -TimeoutSeconds 1
+    "no failure"
+}}
+catch {{
+    $_.Exception.Message
+}}
+'''
+    try:
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        completed = subprocess.run(
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    finally:
+        health_server.shutdown()
+        health_server.server_close()
+        health_thread.join(timeout=5)
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "UPDATE_RELAUNCH_HEALTH_TIMEOUT" in completed.stdout
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
@@ -1870,6 +2143,8 @@ def test_portable_update_helper_does_not_delete_another_lock(tmp_path: Path) -> 
             str(data_directory),
             "-NewPackage",
             str(tmp_path / "missing-package"),
+            "-ExpectedVersion",
+            "0.3.0",
             "-InstanceId",
             "north",
             "-Port",

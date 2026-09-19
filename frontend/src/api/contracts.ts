@@ -159,6 +159,16 @@ export type ApplicationUpdateStatus = {
   releaseUrl: string | null;
   publishedAt: string | null;
   assetSizeBytes: number | null;
+  releaseNotes: string[];
+};
+
+export type ApplicationUpdateProgress = {
+  state: "idle" | "checking" | "downloading" | "validating" | "handoff" | "restart_scheduled" | "waiting_for_exit" | "installing" | "restarting" | "completed" | "failed";
+  step: number;
+  message: string;
+  updateId?: string;
+  errorCode?: string;
+  updatedAt?: number;
 };
 export type ApplicationUpdateResult = {
   message: string;
