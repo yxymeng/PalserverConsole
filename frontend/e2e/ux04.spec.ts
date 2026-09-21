@@ -505,7 +505,7 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });
 
-test("UX-04：765px 宽度仍可访问完整公会下拉菜单", async ({ page }) => {
+test("UX-04：765px 宽度可访问完整公会菜单与紧凑物资列表", async ({ page }) => {
   await page.setViewportSize({ width: 765, height: 844 });
   await setupWorld(page);
   await page.goto("/");
@@ -517,6 +517,21 @@ test("UX-04：765px 宽度仍可访问完整公会下拉菜单", async ({ page }
   await guildNav.locator("summary").click();
   await expect(guildNav.getByLabel("搜索公会")).toBeVisible();
   await expect(guildNav.getByRole("button", { name: /测试工会/ })).toBeVisible();
+  await page.getByRole("tab", { name: "全服物资检索" }).click();
+  const inventory = page.locator(".inventory-workspace");
+  await expect(inventory.locator(".inventory-toolbar")).toBeVisible();
+  await expect(inventory.locator(".inventory-item-summary")).toHaveCount(2);
+  expect(await inventory.evaluate((element) => {
+    const style = (selector: string) => getComputedStyle(element.querySelector(selector)!);
+    return {
+      searchHeight: style(".world-search").minHeight,
+      buttonHeight: style(".world-search-button").minHeight,
+      scopeHeight: style(".inventory-scope").minHeight,
+      controlHeight: style(".world-control").minHeight,
+      resultDisplay: style(".inventory-results").display,
+      itemRadius: style(".inventory-item").borderRadius,
+    };
+  })).toEqual({ searchHeight: "42px", buttonHeight: "42px", scopeHeight: "42px", controlHeight: "42px", resultDisplay: "block", itemRadius: "0px" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
 });
 

@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, MapPin, Search, SlidersHorizontal, X } from "lucide-react";
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, MapPin, Package, Search, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import type { WorldInventoryDetailResponse, WorldInventoryItem, WorldInventoryLocationGroup, WorldInventoryResponse, WorldInventoryScope } from "../../api/contracts";
@@ -210,7 +210,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
     {context.label && <div className="inventory-context" role="status"><MapPin size={17} aria-hidden="true" /><span>当前仅显示：{context.label}</span><button className="world-clear-button" type="button" onClick={onClearContext}><X size={15} />返回全部仓库</button></div>}
     {allUnknown && <p className="inventory-metadata-warning" role="status">当前结果中的物品资料尚未收录；仍保留 Item ID、真实数量和全部位置。</p>}
     <form className="inventory-toolbar" onSubmit={submitSearch}>
-      <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索物品" placeholder="搜索中文名称或 Item ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
+      <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索物品" placeholder="搜索物品名称或 Item ID（例如：Pal_Sphere、蛋糕、帕鲁之魂）" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
       <button className="primary-button world-search-button" type="submit">搜索</button>
       <fieldset className="inventory-scope" aria-label="仓库范围"><legend>仓库范围</legend>{([ ["inventory", "全部持有"], ["player", "玩家背包"], ["base", "据点箱子"] ] as const).map(([value, label]) => <button type="button" key={value} className={context.scope === value ? "active" : ""} aria-pressed={context.scope === value} onClick={() => { onContextChange({ scope: value }); setPage(1); }}>{label}</button>)}</fieldset>
       <label className="world-control"><SlidersHorizontal size={16} aria-hidden="true" /><span>分类</span><select aria-label="物品分类筛选" value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="">全部分类</option>{(result?.categories || []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
@@ -221,10 +221,11 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
     <div className="inventory-results" aria-live="polite" aria-busy={loading}>
       {loading ? <div className="inventory-loading"><LoaderCircle className="spin" size={20} />正在聚合仓库…</div> : result?.items.length ? result.items.map((item) => <article className="inventory-item" key={item.itemId} data-expanded={expanded?.itemId === item.itemId || undefined}>
         <button className="inventory-item-summary" type="button" aria-expanded={expanded?.itemId === item.itemId} onClick={() => toggleItem(item)}>
-          <span className="inventory-item-icon" aria-hidden="true"><Archive size={20} /></span>
-          <span className="inventory-item-main"><strong>{item.name || item.itemId}</strong><span className="inventory-item-meta"><code>{item.itemId}</code>{item.metadataLabel && <em>{item.metadataLabel}</em>}{item.category && <small>{item.category}</small>}{item.rarity && <small>{item.rarity}</small>}</span></span>
+          <span className="inventory-item-icon" aria-hidden="true"><Package size={20} /></span>
+          <span className="inventory-item-badges">{item.category && <small>{item.category}</small>}{item.rarity && <small>{item.rarity}</small>}{item.metadataLabel && <em>{item.metadataLabel}</em>}</span>
+          <span className="inventory-item-main"><strong>{item.name || item.itemId}</strong><code>{item.itemId}</code></span>
           <span className="inventory-item-number"><small>{quantityLabel}</small><strong>{item.totalQuantity.toLocaleString()}</strong></span>
-          <span className="inventory-item-number"><small>存放记录</small><strong>{item.locationCount.toLocaleString()}</strong></span>
+          <span className="inventory-item-location-count">{item.locationCount.toLocaleString()} 条存放记录</span>
           <ChevronDown className="inventory-chevron" size={19} aria-hidden="true" />
         </button>
         {expanded?.itemId === item.itemId && <section className="inventory-locations" aria-label={`${item.name || item.itemId}的存放分布`}>
