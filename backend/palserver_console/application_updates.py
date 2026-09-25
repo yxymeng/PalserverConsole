@@ -21,6 +21,7 @@ import httpx
 import psutil
 
 RELEASE_API_URL = "https://api.github.com/repos/yxymeng/PalserverConsole/releases/latest"
+RELEASE_CHECK_CACHE_SECONDS = 15 * 60
 MAX_RELEASE_BYTES = 500 * 1024 * 1024
 DEFAULT_HELPER_HANDOFF_TIMEOUT_SECONDS = 10.0
 HELPER_HANDOFF_POLL_SECONDS = 0.05
@@ -217,6 +218,9 @@ class ApplicationUpdateService:
         self.process_runner = process_runner
         self.helper_handoff_timeout_seconds = max(0.0, float(helper_handoff_timeout_seconds))
         self._shutdown_requester: Callable[[], None] | None = None
+        self._check_lock = threading.Lock()
+        self._cached_status: dict[str, object] | None = None
+        self._checked_at = 0.0
         self._progress_lock = threading.Lock()
         self._progress_path = self.data_dir / "application-updates" / "progress.json"
         self._progress: dict[str, object] = {
@@ -332,18 +336,39 @@ class ApplicationUpdateService:
                 error_code=error_code,
             )
 
-    def check(self) -> dict[str, object]:
-        try:
-            with self.client_factory() as client:
-                response = client.get(RELEASE_API_URL)
-                response.raise_for_status()
-                release = response.json()
-        except (httpx.HTTPError, json.JSONDecodeError, ValueError) as error:
-            raise ApplicationUpdateError(
-                "RELEASE_CHECK_FAILED",
-                f"GitHub Release check failed: {type(error).__name__}: {error}",
-            ) from error
-        return self._release_status(release)
+    def check(self, *, force: bool = False) -> dict[str, object]:
+        with self._check_lock:
+            if (
+                not force
+                and self._cached_status is not None
+                and time.monotonic() - self._checked_at < RELEASE_CHECK_CACHE_SECONDS
+            ):
+                return dict(self._cached_status)
+            try:
+                with self.client_factory() as client:
+                    response = client.get(RELEASE_API_URL)
+                    response.raise_for_status()
+                    release = response.json()
+                status = self._release_status(release)
+            except (
+                httpx.HTTPError,
+                json.JSONDecodeError,
+                ValueError,
+                ApplicationUpdateError,
+            ) as error:
+                if not force and self._cached_status is not None:
+                    self._cached_status = {**self._cached_status, "stale": True}
+                    self._checked_at = time.monotonic()
+                    return dict(self._cached_status)
+                if isinstance(error, ApplicationUpdateError):
+                    raise
+                raise ApplicationUpdateError(
+                    "RELEASE_CHECK_FAILED",
+                    f"GitHub Release check failed: {type(error).__name__}: {error}",
+                ) from error
+            self._cached_status = status
+            self._checked_at = time.monotonic()
+            return dict(status)
 
     def prepare(self, expected_version: str) -> dict[str, object]:
         install_root = self.install_root
@@ -380,7 +405,7 @@ class ApplicationUpdateService:
                     "Another PalServerConsole instance from this portable installation "
                     "is still running.",
                 )
-            status = self.check()
+            status = self.check(force=True)
             latest = str(status["latestVersion"])
             if expected_version != latest or not status["updateAvailable"]:
                 raise ApplicationUpdateError(

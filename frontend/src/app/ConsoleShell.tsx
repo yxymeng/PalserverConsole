@@ -142,8 +142,8 @@ function ConsoleLayout({
           <h1 className="psc-mobile-page-title">{pageTitle}</h1>
           <PrimaryNavigation className="psc-desktop-navigation" active={active} onActivate={activate} />
           <div className="psc-topbar-actions">
-            <Button className="psc-topbar-control psc-broadcast-trigger" variant="outline" size="sm" type="button" aria-label="发送全服广播" title="发送全服广播" onClick={() => setBroadcastOpen(true)}><Megaphone data-icon="inline-start" aria-hidden="true" /><span>广播</span></Button>
             <ApplicationUpdatePanel auth={auth} />
+            <Button className="psc-topbar-control psc-broadcast-trigger" variant="outline" size="sm" type="button" aria-label="发送全服广播" title="发送全服广播" onClick={() => setBroadcastOpen(true)}><Megaphone data-icon="inline-start" aria-hidden="true" /><span>广播</span></Button>
             <ThemeToggle theme={theme} onChange={onThemeChange} />
             {!auth.local && <LogoutButton csrfToken={auth.csrfToken} onDone={onAuthChanged} />}
           </div>

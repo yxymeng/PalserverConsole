@@ -47,6 +47,8 @@ backend/palserver_console/metadata/data/world-metadata-v1.json
 
 - `GET /api/maintenance/application-update` 只读取固定仓库
   `yxymeng/PalserverConsole` 的 latest GitHub Release。
+- 控制台页面保持打开时，每次检查结束约 15 分钟后自动复查；GitHub 暂不可用且无缓存时返回
+  `state: unavailable`；已有检查结果则保留并标记为旧结果，没有结果才隐藏更新入口。
 - “检查更新”不会写文件；“更新”只允许从控制台本机发起。
 - 自动安装只支持 Windows portable。源码运行会提供 Release 链接，不执行自我覆盖。
 - portable 会下载到自己的 `data/application-updates/`，校验包结构后退出控制台，调用

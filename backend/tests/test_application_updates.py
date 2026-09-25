@@ -15,16 +15,20 @@ from typing import Any, cast
 import httpx
 import psutil
 import pytest
+from fastapi.testclient import TestClient
 
 from palserver_console.application_updates import (
     ABANDONED_PROGRESS_GRACE_SECONDS,
     RELEASE_API_URL,
+    RELEASE_CHECK_CACHE_SECONDS,
     ApplicationUpdateError,
     ApplicationUpdateService,
     _InstallUpdateGuard,
     _release_notes,
     portable_application_update_in_progress,
 )
+from palserver_console.config import AppSettings
+from palserver_console.main import create_app
 
 
 def _release_zip(version: str) -> bytes:
@@ -382,6 +386,84 @@ def test_application_update_check_uses_fixed_release_asset() -> None:
     assert status["assetUrl"] == "https://github.com/yxymeng/PalserverConsole/releases/download/v0.2.0/PalServerConsole-0.2.0-windows-x64.zip"
     assert status["releaseNotes"] == ["新增右上角升级入口", "修复更新状态提示"]
     assert service.progress() == {"state": "idle", "step": 0, "message": "等待开始升级。"}
+
+
+def test_application_update_check_reuses_recent_release_but_forced_check_is_fresh() -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests > 1:
+            return httpx.Response(403, request=request)
+        return httpx.Response(
+            200,
+            json={"tag_name": "v0.2.0", "assets": []},
+            request=request,
+        )
+
+    service = ApplicationUpdateService(
+        "0.1.1",
+        Path("unused"),
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert service.check()["latestVersion"] == "0.2.0"
+    assert service.check()["latestVersion"] == "0.2.0"
+    assert requests == 1
+    service._checked_at -= RELEASE_CHECK_CACHE_SECONDS + 1
+    assert service.check()["stale"] is True
+    assert service.check()["stale"] is True
+    assert requests == 2
+    with pytest.raises(ApplicationUpdateError) as error:
+        service.check(force=True)
+    assert error.value.code == "RELEASE_CHECK_FAILED"
+    assert requests == 3
+
+
+def test_application_update_check_keeps_cache_when_release_fields_are_invalid() -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        release = {"tag_name": "v0.2.0", "assets": []} if requests == 1 else {
+            "tag_name": "v0.3.0", "assets": "invalid"
+        }
+        return httpx.Response(200, json=release, request=request)
+
+    service = ApplicationUpdateService(
+        "0.1.1",
+        Path("unused"),
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert service.check()["latestVersion"] == "0.2.0"
+    service._checked_at -= RELEASE_CHECK_CACHE_SECONDS + 1
+    assert service.check()["stale"] is True
+    assert service.check()["latestVersion"] == "0.2.0"
+    with pytest.raises(ApplicationUpdateError) as error:
+        service.check(force=True)
+    assert error.value.code == "RELEASE_RESPONSE_INVALID"
+
+
+def test_application_update_get_reports_unavailable_without_502(tmp_path: Path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static"))
+    app.state.application_updates.client_factory = lambda: httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(503, request=request))
+    )
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8223",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        response = client.get("/api/maintenance/application-update")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "unavailable"
+    assert response.json()["errorCode"] == "RELEASE_CHECK_FAILED"
+    assert "latestVersion" not in response.json()
 
 
 def test_release_notes_preserve_common_markdown_shapes() -> None:

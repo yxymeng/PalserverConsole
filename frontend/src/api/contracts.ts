@@ -155,11 +155,17 @@ export type ApplicationUpdateStatus = {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
+  stale?: boolean;
   portable: boolean;
   releaseUrl: string | null;
   publishedAt: string | null;
   assetSizeBytes: number | null;
   releaseNotes: string[];
+};
+export type ApplicationUpdateCheck = ApplicationUpdateStatus | {
+  state: "unavailable";
+  errorCode: string;
+  message: string;
 };
 
 export type ApplicationUpdateProgress = {

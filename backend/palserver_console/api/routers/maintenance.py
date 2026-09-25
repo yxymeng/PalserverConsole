@@ -92,7 +92,7 @@ def router(deps: AppDependencies) -> APIRouter:
         try:
             return deps.application_updates.check()
         except ApplicationUpdateError as error:
-            return error_response(502, error.code, str(error))
+            return {"state": "unavailable", "errorCode": error.code, "message": str(error)}
 
     @api.get(
         "/api/maintenance/application-update/progress",

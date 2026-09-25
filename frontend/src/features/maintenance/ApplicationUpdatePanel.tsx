@@ -1,7 +1,7 @@
 import { ArrowRight, Check, DownloadCloud, Rocket, RotateCw, ShieldCheck, Sparkles, Zap } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
-import type { ApplicationUpdateProgress, ApplicationUpdateResult, ApplicationUpdateStatus, AuthStatus } from "../../api/contracts";
+import type { ApplicationUpdateCheck, ApplicationUpdateProgress, ApplicationUpdateResult, ApplicationUpdateStatus, AuthStatus } from "../../api/contracts";
 import { requestJson } from "../../api/client";
 import { Button } from "../../components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "../../components/ui/dialog";
@@ -16,32 +16,34 @@ const ACTIVE_UPDATE_STATES = new Set<ApplicationUpdateProgress["state"]>([
   "checking", "downloading", "validating", "handoff", "restart_scheduled", "waiting_for_exit", "installing", "restarting",
 ]);
 const TERMINAL_UPDATE_STATES = new Set<ApplicationUpdateProgress["state"]>(["completed", "failed"]);
+const UPDATE_CHECK_RETRY_MS = 15 * 60 * 1000;
 
 export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<ApplicationUpdateStatus | null>(null);
   const [progress, setProgress] = useState<ApplicationUpdateProgress>({ state: "idle", step: 0, message: "等待开始升级。" });
   const [open, setOpen] = useState(false);
   const [requestPending, setRequestPending] = useState(false);
-  const [statusPending, setStatusPending] = useState(false);
-  const [statusError, setStatusError] = useState("");
   const [dismissedProgress, setDismissedProgress] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  const checkStatus = useCallback(async () => {
-    setStatusPending(true);
-    setStatusError("");
-    try {
-      setStatus(await requestJson<ApplicationUpdateStatus>("/api/maintenance/application-update"));
-    } catch (caught) {
-      setStatusError(caught instanceof Error ? caught.message : "检查 PalServerConsole 更新失败");
-    } finally {
-      setStatusPending(false);
-    }
-  }, []);
-
   useEffect(() => {
     let active = true;
+    let retry = 0;
+    const keepLastStatus = () => {
+      if (active) setStatus(previous => previous && { ...previous, stale: true });
+    };
+    async function checkStatus() {
+      try {
+        const next = await requestJson<ApplicationUpdateCheck>("/api/maintenance/application-update");
+        if ("state" in next) keepLastStatus();
+        else if (active) setStatus(next);
+      } catch {
+        keepLastStatus();
+      } finally {
+        if (active) retry = window.setTimeout(() => { void checkStatus(); }, UPDATE_CHECK_RETRY_MS);
+      }
+    }
     void checkStatus();
     void requestJson<ApplicationUpdateProgress>("/api/maintenance/application-update/progress")
       .then((next) => {
@@ -50,8 +52,8 @@ export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
         if (next.state !== "idle" && !wasProgressDismissed(next)) setOpen(true);
       })
       .catch(() => undefined);
-    return () => { active = false; };
-  }, [checkStatus]);
+    return () => { active = false; window.clearTimeout(retry); };
+  }, []);
 
   async function refreshProgress() {
     try {
@@ -97,8 +99,7 @@ export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
 
   const updateAvailable = Boolean(status?.updateAvailable);
   const hasVisibleProgress = progress.state !== "idle" && !dismissedProgress;
-  const hasStatusError = Boolean(statusError && !status);
-  if (!updateAvailable && !hasVisibleProgress && !hasStatusError) return null;
+  if (!updateAvailable && !hasVisibleProgress) return null;
 
   const releaseNotes = status?.releaseNotes ?? [];
   const installAllowed = Boolean(auth.local && status?.portable && updateAvailable);
@@ -116,8 +117,8 @@ export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
   }
 
   return <>
-    <Button className="psc-update-trigger" data-state={hasStatusError ? "error" : undefined} type="button" title={hasStatusError ? "更新检查失败，点击查看并重试" : updateAvailable ? `检测到新版本 v${latestVersion}，点击查看更新详情并一键升级` : "查看最近一次控制台升级结果"} aria-label={hasStatusError ? "PalServerConsole 更新检查失败" : updateAvailable ? `升级 PalServerConsole 至 v${latestVersion}` : "查看 PalServerConsole 升级结果"} onClick={() => setOpen(true)}>
-      {hasStatusError ? <RotateCw aria-hidden="true" /> : <Rocket aria-hidden="true" />}<span className="psc-update-label">{hasStatusError ? "更新检查失败" : updateAvailable ? "升级" : "升级结果"}</span>{latestVersion && <span>v{latestVersion}</span>}{!hasStatusError && <span className="psc-update-alert-dot" aria-hidden="true"><span /></span>}
+    <Button className="psc-topbar-control psc-update-trigger" variant="outline" size="sm" data-state={updateAvailable ? "available" : undefined} type="button" title={updateAvailable ? `检测到新版本 v${latestVersion}，点击查看更新详情` : "查看最近一次控制台更新结果"} aria-label={updateAvailable ? `查看 PalServerConsole v${latestVersion} 更新详情` : "查看 PalServerConsole 更新结果"} onClick={() => setOpen(true)}>
+      <Rocket aria-hidden="true" /><span className="psc-update-label">{updateAvailable ? "更新" : "更新结果"}</span>{updateAvailable && <span className="psc-update-alert-dot" aria-hidden="true" />}
     </Button>
 
     <Dialog open={open} onOpenChange={changeOpen}>
@@ -130,10 +131,11 @@ export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
             {status && <><span>当前: {status.currentVersion}</span><ArrowRight aria-hidden="true" /><strong>目标: {status.latestVersion}</strong></>}
             {status?.publishedAt && <time dateTime={status.publishedAt}>· 发布于 {formatReleaseDate(status.publishedAt)}</time>}
           </DialogDescription>
+          {status?.stale && <p className="psc-update-stale">暂时无法确认最新版本，当前显示上次检查结果；升级前会重新核对版本。</p>}
         </header>
 
         <div className="psc-update-body">
-          {hasStatusError ? <section className="psc-update-load-error" role="alert"><RotateCw aria-hidden="true" /><div><strong>暂时无法检查控制台更新</strong><p>{statusError}</p></div></section> : showProgress ? <UpdateProgress progress={progress} message={message} /> : <>
+          {showProgress ? <UpdateProgress progress={progress} message={message} /> : <>
             <section className="psc-update-notes" aria-labelledby="psc-update-notes-title">
               <div className="psc-update-section-title"><span id="psc-update-notes-title"><Zap aria-hidden="true" />更新亮点与变更日志</span><small>{releaseNotes.length} 项变更</small></div>
               <div className="psc-update-note-list">{releaseNotes.length ? releaseNotes.map((note, index) => <p key={`${index}-${note}`}><span aria-hidden="true" />{note}</p>) : <p className="psc-update-empty">本次 Release 未提供变更说明。</p>}</div>
@@ -145,8 +147,7 @@ export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
         </div>
 
         <DialogFooter className="psc-update-footer">
-          <Button variant="outline" type="button" disabled={busy} onClick={() => changeOpen(false)}>{hasStatusError ? "关闭" : hasVisibleProgress ? "知道了" : "稍后提醒"}</Button>
-          {hasStatusError && <Button className="psc-update-install" type="button" disabled={statusPending} onClick={() => void checkStatus()}>{statusPending && <RotateCw className="psc-update-spin" aria-hidden="true" />}{statusPending ? "正在重新检查" : "重新检查"}</Button>}
+          <Button variant="outline" type="button" disabled={busy} onClick={() => changeOpen(false)}>{hasVisibleProgress ? "知道了" : "稍后提醒"}</Button>
           {updateAvailable && !status?.portable && status?.releaseUrl && <a className="psc-update-release" href={status.releaseUrl} target="_blank" rel="noreferrer">查看 Release</a>}
           {installAllowed && <Button className="psc-update-install" type="button" disabled={busy || Boolean(message)} onClick={() => void install()}>{busy ? <RotateCw className="psc-update-spin" aria-hidden="true" /> : <DownloadCloud aria-hidden="true" />}{busy ? "正在准备升级" : "升级并重启"}</Button>}
         </DialogFooter>
