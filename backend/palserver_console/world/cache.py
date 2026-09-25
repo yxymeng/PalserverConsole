@@ -552,7 +552,7 @@ def query_cache(
         },
         "pals": {
             "name": "COALESCE(NULLIF(nickname, ''), character_id) COLLATE NOCASE, id",
-            "level-desc": "level IS NULL, level DESC, character_id COLLATE NOCASE, id",
+            "level-desc": "COALESCE(level, 1) DESC, character_id COLLATE NOCASE, id",
             "id": "id",
         },
         "guilds": {
@@ -623,6 +623,30 @@ def query_cache(
         connection.close()
 
 
+_INVENTORY_GROUP_FIELDS = (
+    "ii.owner_kind AS ownerKind, "
+    "CASE WHEN ii.owner_kind = 'player_inventory' THEN ii.owner_id "
+    "WHEN ii.owner_kind = 'base_inventory' THEN ii.base_id "
+    "WHEN ii.owner_kind = 'guild_inventory' THEN ii.guild_id "
+    "ELSE NULL END AS groupId, "
+    "MAX(p.name) AS ownerName, MAX(g.name) AS guildName, MAX(b.name) AS baseName, "
+    "SUM(ii.quantity) AS quantitySum, COUNT(*) AS locationCount, "
+    "COUNT(DISTINCT ii.container_id) AS containerCount "
+)
+_INVENTORY_GROUP_FROM = (
+    "FROM inventory_items AS ii "
+    "LEFT JOIN players AS p ON p.id = ii.owner_id "
+    "LEFT JOIN guilds AS g ON g.id = ii.guild_id "
+    "LEFT JOIN bases AS b ON b.id = ii.base_id"
+)
+_INVENTORY_GROUP_ORDER = (
+    "CASE ii.owner_kind WHEN 'player_inventory' THEN 0 "
+    "WHEN 'base_inventory' THEN 1 WHEN 'guild_inventory' THEN 2 "
+    "WHEN 'world' THEN 3 ELSE 4 END, "
+    "COALESCE(MAX(p.name), MAX(g.name), MAX(b.name), groupId, '') COLLATE NOCASE"
+)
+
+
 def query_inventory(
     path: Path,
     *,
@@ -679,6 +703,27 @@ def query_inventory(
             f"{where} GROUP BY ii.item_id ORDER BY {order} LIMIT ? OFFSET ?",
             (*parameters, page_size, (page - 1) * page_size),
         ).fetchall()
+        items = [_inventory_public_row(dict(row)) for row in rows]
+        if items:
+            item_ids = [str(item["itemId"]) for item in items]
+            preview_rows = connection.execute(
+                "SELECT ii.item_id AS itemId, "
+                + _INVENTORY_GROUP_FIELDS
+                + _INVENTORY_GROUP_FROM
+                + f"{where}{' AND ' if where else ' WHERE '}"
+                + f"ii.item_id IN ({','.join('?' for _ in item_ids)}) "
+                + "GROUP BY ii.item_id, ii.owner_kind, groupId "
+                + "ORDER BY ii.item_id, "
+                + _INVENTORY_GROUP_ORDER,
+                (*parameters, *item_ids),
+            ).fetchall()
+            by_id = {str(item["itemId"]): item for item in items}
+            for row in preview_rows:
+                item = by_id[str(row["itemId"])]
+                item["locationGroupCount"] = (_integer(item["locationGroupCount"]) or 0) + 1
+                preview = item["locationPreview"]
+                if isinstance(preview, list) and len(preview) < 3:
+                    preview.append(_inventory_group_public_row(dict(row)))
         category_clauses, category_parameters = _inventory_filters(
             search=None,
             category=None,
@@ -704,7 +749,7 @@ def query_inventory(
         ]
     finally:
         connection.close()
-    return [_inventory_public_row(dict(row)) for row in rows], total, categories
+    return items, total, categories
 
 
 def query_inventory_locations(
@@ -790,23 +835,12 @@ def query_inventory_location_groups(
     connection.row_factory = sqlite3.Row
     try:
         rows = connection.execute(
-            "SELECT ii.owner_kind AS ownerKind, "
-            "CASE WHEN ii.owner_kind = 'player_inventory' THEN ii.owner_id "
-            "WHEN ii.owner_kind = 'base_inventory' THEN ii.base_id "
-            "WHEN ii.owner_kind = 'guild_inventory' THEN ii.guild_id "
-            "ELSE NULL END AS groupId, "
-            "MAX(p.name) AS ownerName, MAX(g.name) AS guildName, MAX(b.name) AS baseName, "
-            "SUM(ii.quantity) AS quantitySum, COUNT(*) AS locationCount, "
-            "COUNT(DISTINCT ii.container_id) AS containerCount "
-            "FROM inventory_items AS ii "
-            "LEFT JOIN players AS p ON p.id = ii.owner_id "
-            "LEFT JOIN guilds AS g ON g.id = ii.guild_id "
-            "LEFT JOIN bases AS b ON b.id = ii.base_id"
-            f"{where} GROUP BY ii.owner_kind, groupId "
-            "ORDER BY CASE ii.owner_kind WHEN 'player_inventory' THEN 0 "
-            "WHEN 'base_inventory' THEN 1 WHEN 'guild_inventory' THEN 2 "
-            "WHEN 'world' THEN 3 ELSE 4 END, "
-            "COALESCE(MAX(p.name), MAX(g.name), MAX(b.name), groupId, '') COLLATE NOCASE",
+            "SELECT "
+            + _INVENTORY_GROUP_FIELDS
+            + _INVENTORY_GROUP_FROM
+            + f"{where} GROUP BY ii.owner_kind, groupId "
+            + "ORDER BY "
+            + _INVENTORY_GROUP_ORDER,
             parameters,
         ).fetchall()
     finally:
@@ -902,6 +936,8 @@ def _inventory_public_row(row: Mapping[str, object]) -> dict[str, object]:
         "metadataLabel": None if metadata_known else "资料未收录",
         "totalQuantity": _integer(row.get("totalQuantity")) or 0,
         "locationCount": _integer(row.get("locationCount")) or 0,
+        "locationGroupCount": 0,
+        "locationPreview": [],
     }
 
 
@@ -1079,8 +1115,8 @@ def query_pal_roster(
             "AND (p.base_id IS NULL OR p.base_id = '')"
         )
     for value, column in (
-        (min_level, "p.level"),
-        (min_rank, "p.rank"),
+        (min_level, "COALESCE(p.level, 1)"),
+        (min_rank, "COALESCE(p.rank, 1)"),
         (min_rarity, "p.species_rarity"),
         (min_hp_iv, "p.iv_hp"),
         (min_attack_iv, "p.iv_attack"),
@@ -1119,7 +1155,7 @@ def query_pal_roster(
     order = {
         "balanced": name_order,
         "name": name_order,
-        "level": "p.level IS NULL, p.level DESC, " + name_order,
+        "level": "COALESCE(p.level, 1) DESC, " + name_order,
         "rarity": "p.species_rarity IS NULL, p.species_rarity DESC, " + name_order,
         "averageIv": "p.iv_average IS NULL, p.iv_average DESC, " + name_order,
         "workSuitability": (
@@ -1769,6 +1805,8 @@ def _characters(
                 )
             )
             continue
+        if "Level" not in save_parameter:
+            level = 1
         character_id = _text(_scalar(save_parameter.get("CharacterID")))
         if not character_id:
             continue
@@ -2551,6 +2589,9 @@ def _public_row(row: dict[str, Any]) -> dict[str, object]:
                 result[public_key] = {}
         else:
             result[public_key] = value
+    # Older caches stored the omitted Pal level as NULL; the save default is 1.
+    if "character_id" in row and "level" in row and result["level"] is None:
+        result["level"] = 1
     return result
 
 

@@ -75,6 +75,13 @@ def test_pinned_world_metadata_loads_with_declared_collections() -> None:
     assert bundle.player_progress_totals_data_version == "2026.08.30.2"
 
 
+def test_passive_descriptions_expand_known_effects_without_internal_targets() -> None:
+    bundle = load_world_metadata()
+
+    assert bundle.skill("PAL_conceited")["description"] == "工作速度 +10%，防御 -10%"
+    assert bundle.skill("ElementBoost_Thunder_1_PAL")["description"] == "雷属性攻击伤害增加10%"
+
+
 def test_tower_boss_total_excludes_enum_sentinels() -> None:
     source = """enum class EPalBossType : uint8 {
         None,

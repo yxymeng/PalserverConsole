@@ -189,10 +189,18 @@ def main() -> None:
         localized = chinese_passives.get(asset)
         skills[asset] = {
             "kind": "passive",
+            **(
+                {"displayable": True}
+                if str(raw.get("category")) == "EPalPassiveCategory::SortDisplayable"
+                else {}
+            ),
             "name": _game_text(skill_names, "PASSIVE_", asset)
             or _localized_text(localized, "name"),
-            "description": _game_text(skill_descriptions, "PASSIVE_", asset)
-            or _localized_text(localized, "desc"),
+            "description": _passive_description(
+                _game_text(skill_descriptions, "PASSIVE_", asset)
+                or _localized_text(localized, "desc"),
+                raw,
+            ),
             "sourceName": str(raw["name"]),
             "rank": int(raw["rank"]),
             "element": None,
@@ -441,6 +449,23 @@ def _fmodel_rows(path: Path, expected_sha256: str | None = None) -> dict[str, ob
     if not isinstance(rows, dict):
         raise ValueError(f"Unexpected {path.name} FModel Rows payload.")
     return rows
+
+
+def _passive_description(description: str | None, raw: Mapping[str, Any]) -> str | None:
+    if description is None:
+        return None
+
+    def effect_value(match: re.Match[str]) -> str:
+        value = raw.get(f"effect{match.group(1)}")
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return f"{value:g}"
+        return match.group(0)
+
+    return re.sub(
+        r"\s*\(ToSelf\)",
+        "",
+        re.sub(r"\{EffectValue([1-4])\}", effect_value, description),
+    )
 
 
 def _game_text(rows: dict[str, object], prefix: str, identifier: str) -> str | None:

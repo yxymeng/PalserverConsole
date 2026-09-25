@@ -19,7 +19,7 @@ const palSkills = {
 const noSkills = { passive: [], equipped: [], learned: [], partner: null };
 const pal = { id: "pal-1", nickname: "小羊", characterId: "SheepBall", level: 18, ownerPlayerId: "player-1", ownerName: "Alice", baseId: "base-1", baseName: "据点一号", containerId: "container-1", slotIndex: 2, assignment: "base_worker", gender: "Female", rank: 1, isLucky: true, aptitude, skills: palSkills, care };
 const unknownPal = { id: "pal-2", nickname: "", characterId: "FuturePal", level: 1, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude: unknownAptitude, skills: noSkills, care: unavailableCare };
-const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude, skills: noSkills, care: unavailableCare };
+const sortPal = { id: "pal-3", nickname: "阿帕", characterId: "SheepBall", level: 6, rank: 5, ownerPlayerId: null, baseId: null, containerId: null, slotIndex: null, assignment: "unassigned", aptitude, skills: noSkills, care: unavailableCare };
 const base = { id: "base-1", name: "据点一号", guildId: "guild-1", guildName: "测试工会", workerContainerId: "container-1", x: 1, y: 2, z: 3, workerCount: 1, maxWorkerCount: 15, workers: [pal] };
 const communityMembers = [player, ...Array.from({ length: 63 }, (_, index) => ({ ...player, id: `player-${index + 2}`, instanceId: `instance-player-${index + 2}`, name: `成员 ${index + 2}`, level: index + 2 }))];
 const guild = { id: "guild-1", name: "测试工会", memberCount: 64, baseCount: 80, adminPlayerId: "player-1", adminPlayerName: "Alice", members: communityMembers.map((member, index) => ({ id: member.id, name: member.name, level: member.level, role: index ? "member" as const : "leader" as const })) };
@@ -95,21 +95,27 @@ async function setupWorld(page: Page) {
       const sort = requestUrl.searchParams.get("sort");
       const marker = requestUrl.searchParams.get("marker");
       const careFilter = requestUrl.searchParams.get("care");
-      const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }];
+      const rosterPals = [{ ...pal, gender: "Female", rank: 1, isBoss: false, isLucky: true, locationType: "base" }, { ...unknownPal, gender: null, rank: null, isBoss: false, isLucky: false, locationType: "unassigned" }, { ...sortPal, gender: null, rank: 5, isBoss: false, isLucky: false, locationType: "unassigned" }];
       const sorted = sort === "name" ? [rosterPals[2], rosterPals[0], rosterPals[1]] : rosterPals;
       const location = requestUrl.searchParams.get("location");
       const search = requestUrl.searchParams.get("search")?.toLocaleLowerCase() || "";
       const characterIds = new Set((requestUrl.searchParams.get("characterId") || "").split(",").filter(Boolean));
       const searched = search || characterIds.size ? sorted.filter((item) => item.nickname.toLocaleLowerCase().includes(search) || item.characterId.toLocaleLowerCase().includes(search) || item.id.toLocaleLowerCase().includes(search) || characterIds.has(item.characterId)) : sorted;
       const items = careFilter === "attention" ? [rosterPals[0]] : marker === "lucky" ? [rosterPals[0]] : marker === "boss" ? [] : location === "unassigned" ? rosterPals.slice(1) : searched;
-      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, passiveSkills: palSkills.passive, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
+      const passiveSkills = [...palSkills.passive, { ...palSkills.passive[0], id: "MoveSpeed_up_3", name: "神速", description: "移动速度 +30%", sourceName: "Swift" }];
+      const passiveCatalog = [...passiveSkills, { ...palSkills.passive[0], id: "MoveSpeed_up_2", name: "运动健将", description: "移动速度 +20%", sourceName: "Runner" }, { ...palSkills.passive[0], id: "MoveSpeed_up_1", name: "灵活", description: "移动速度 +10%", sourceName: "Nimble" }, { ...palSkills.passive[0], id: "Rare", name: "稀有", description: "攻击 +15%，防御 +15% (None)，工作速度 +20%", sourceName: "Lucky" }];
+      return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: activeSnapshotId, stale: false, errorCode: null, careSummary: { total: 3, critical: 1, warning: 0, attention: 1, unavailable: 2 }, passiveSkills, passiveCatalog, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     if (path === "/api/world/inventory-items") {
       const requestUrl = new URL(route.request().url());
       inventoryUrls.push(requestUrl);
       const scope = requestUrl.searchParams.get("scope") || "all";
-      const wood = (totalQuantity: number, locationCount: number) => ({ itemId: "Wood", name: "木材", category: "材料", rarity: "普通", metadataKnown: true, metadataLabel: null, totalQuantity, locationCount });
-      const unknown = { itemId: "FutureOre", name: null, category: null, rarity: null, metadataKnown: false, metadataLabel: "资料未收录", totalQuantity: 4, locationCount: 1 };
+      const wood = (totalQuantity: number, locationCount: number) => {
+        const groups = [{ locationType: "player", groupId: "player-1", label: "玩家：Alice", quantitySum: 3, locationCount: 1, containerCount: 1 }, { locationType: "base", groupId: "base-1", label: "据点：据点一号", quantitySum: 9, locationCount: 2, containerCount: 1 }, { locationType: "world", groupId: null, label: "其他位置", quantitySum: 6, locationCount: 3, containerCount: 2 }, { locationType: "unassigned", groupId: null, label: "未识别位置", quantitySum: 4, locationCount: 1, containerCount: 1 }];
+        const selected = scope === "player" ? groups.slice(0, 1) : scope === "base" ? groups.slice(1, 2) : scope === "world" ? groups.slice(2, 3) : scope === "inventory" ? groups.slice(0, 2) : groups;
+        return { itemId: "Wood", name: "木材", category: "材料", rarity: "普通", metadataKnown: true, metadataLabel: null, totalQuantity, locationCount, locationGroupCount: selected.length, locationPreview: selected.slice(0, 3) };
+      };
+      const unknown = { itemId: "FutureOre", name: null, category: null, rarity: null, metadataKnown: false, metadataLabel: "资料未收录", totalQuantity: 4, locationCount: 1, locationGroupCount: 1, locationPreview: [{ locationType: "base", groupId: "base-1", label: "据点：据点一号", quantitySum: 4, locationCount: 1, containerCount: 1 }] };
       const metadata = requestUrl.searchParams.get("metadata");
       const scopedItems = scope === "player" ? [wood(3, 1)] : scope === "base" ? [wood(9, 2), unknown] : scope === "world" ? [wood(6, 3)] : scope === "inventory" ? [wood(12, 3), unknown] : [wood(22, 7), unknown];
       const items = metadata === "unknown" ? scopedItems.filter((item) => !item.metadataKnown) : scopedItems;
@@ -141,12 +147,13 @@ async function setupWorld(page: Page) {
     }
     const details: Record<string, object> = {
       "/api/world/players/player-1": { ...player, snapshotId: activeSnapshotId, guild, pals: [pal], partyPals: [pal], storagePals: [], inventory: [{ id: "item-1", itemId: "Wood", quantity: 3, containerId: "bag-1" }] },
-      "/api/world/pals/pal-1": { ...pal, snapshotId: "world", owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } },
+      "/api/world/pals/pal-1": { ...pal, snapshotId: activeSnapshotId, owner: player, base, container: { id: "container-1", kind: "base_workers", slotCount: 20 }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } },
       "/api/world/guilds/guild-1": { ...guild, snapshotId: activeSnapshotId, members: communityMembers, bases: guildDetailBases, pals: communityWorkers, assetSummary: { memberCount: 64, baseCount: 80, palCount: communityWorkers.length, inventory: { itemTypeCount: 2, totalQuantity: 12, locationCount: 3 } }, missingMemberIds: [], missingBaseIds: [] },
       "/api/world/bases/base-1": { ...base, snapshotId: activeSnapshotId, guild, guildAssociation: "linked", workers: [pal], workerCount: 1, careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 }, inventorySummary: { itemTypeCount: 2, totalQuantity: 9, locationCount: 2 } },
     };
     if (path in details) {
       worldDetailUrls.push(new URL(route.request().url()));
+      if (new URL(route.request().url()).searchParams.get("snapshotId") !== activeSnapshotId) return route.fulfill({ status: 409, json: { errorCode: "SNAPSHOT_REPLACED", message: "请求的存档快照已被新的成功缓存替换。" } });
       return route.fulfill({ json: details[path] });
     }
     const communityBase = communityBases.find((item) => path === `/api/world/bases/${item.id}`);
@@ -168,8 +175,53 @@ async function setupWorld(page: Page) {
     return route.fulfill({ status: 404, json: { errorCode: "WORLD_ENTITY_NOT_FOUND", message: path } });
   });
 
-  return { worldListUrls, worldDetailUrls, rosterUrls, inventoryUrls, getReparseStatusReads: () => reparseStatusReads };
+  return { worldListUrls, worldDetailUrls, rosterUrls, inventoryUrls, getReparseStatusReads: () => reparseStatusReads, switchSnapshot: (id: string) => { activeSnapshotId = id; } };
 }
+
+test("帕鲁星级筛选按显示星数请求，过期详情会刷新快照", async ({ page }) => {
+  const { rosterUrls, worldDetailUrls, switchSnapshot } = await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  await expect(page.locator(".pal-roster-row")).toHaveCount(3);
+  await expect(page.locator(".pal-roster-row").filter({ hasText: "阿帕" }).locator(".pal-roster-stars svg[fill='currentColor']")).toHaveCount(4);
+  await page.getByText("资质与工作适应性", { exact: true }).click();
+  const minStars = page.getByLabel("最低星级");
+  await expect(minStars).toHaveAttribute("max", "4");
+  await minStars.fill("1");
+  await page.getByRole("button", { name: "应用资质筛选" }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("minRank")).toBe("2");
+  await minStars.fill("4");
+  await page.getByRole("button", { name: "应用资质筛选" }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("minRank")).toBe("5");
+  await minStars.fill("0");
+  await page.getByRole("button", { name: "应用资质筛选" }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.has("minRank")).toBe(false);
+
+  switchSnapshot("world-next");
+  await page.getByRole("button", { name: "小羊" }).click();
+  await expect.poll(() => worldDetailUrls.some((url) => url.pathname === "/api/world/pals/pal-1" && url.searchParams.get("snapshotId") === "world")).toBe(true);
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("snapshotId")).toBe("world-next");
+  await expect.poll(() => worldDetailUrls.filter((url) => url.pathname === "/api/world/pals/pal-1").map((url) => url.searchParams.get("snapshotId")).slice(0, 2)).toEqual(["world", "world-next"]);
+  await expect(page.getByRole("dialog", { name: "帕鲁详情" })).toBeVisible();
+  await expect.poll(() => worldDetailUrls.at(-1)?.searchParams.get("snapshotId")).toBe("world-next");
+});
+
+test("跨实体详情遇到 SNAPSHOT_REPLACED 后按新快照重试", async ({ page }) => {
+  const { worldDetailUrls, switchSnapshot } = await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const playerCard = page.locator(".world-player-card").filter({ hasText: "Alice" });
+  await expect(playerCard).toBeVisible();
+  switchSnapshot("world-next");
+  await playerCard.getByRole("button", { name: "查看完整训练家档案" }).click();
+  await expect.poll(() => worldDetailUrls.filter((url) => url.pathname === "/api/world/players/player-1").map((url) => url.searchParams.get("snapshotId"))).toEqual(["world", "world-next"]);
+  await expect(page.getByRole("dialog", { name: "世界实体详情" })).toBeVisible();
+  await expect(page.locator(".world-player-card").filter({ hasText: "Alice" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "世界实体详情" })).toBeVisible();
+  await expect(page.locator(".world-request-failure")).toHaveCount(0);
+});
 
 test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", async ({ page }, testInfo) => {
   const { worldListUrls, worldDetailUrls, rosterUrls, inventoryUrls, getReparseStatusReads } = await setupWorld(page);
@@ -287,7 +339,9 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(unrenamedPalRow.locator(".pal-roster-copy > small")).toHaveCount(0);
   await expect(palRow.locator(".world-pal-gender")).toHaveText("♀");
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
-  await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("1 星");
+  await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("0 星");
+  await expect(unrenamedPalRow.locator('[data-label="等级 / 星级"]')).toContainText("0 星");
+  await expect(page.locator(".pal-roster-row").filter({ hasText: "阿帕" }).locator('[data-label="等级 / 星级"]')).toContainText("4 星");
   await expect(palRow.locator('[data-label="资质"]')).toContainText("稀有度 1");
   await expect(palRow.locator('[data-label="工作适应性"]')).toContainText("手工作业Lv.1");
   await expect(palRow.locator('[data-label="个体标记"]')).toHaveText("闪光");
@@ -299,6 +353,12 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await page.getByRole("button", { name: "搜索", exact: true }).click();
   const emptyState = page.locator(".pal-roster-cards > .world-empty-state");
   await expect(emptyState).toBeVisible();
+  const appliedBounds = await page.locator(".pal-applied-filters").boundingBox();
+  const advancedBounds = await page.locator(".pal-aptitude-filters").boundingBox();
+  expect(appliedBounds).not.toBeNull();
+  expect(advancedBounds).not.toBeNull();
+  expect(appliedBounds!.y).toBeLessThan(advancedBounds!.y);
+  await expect(page.locator(".pal-applied-heading").getByRole("button", { name: "重置全部" })).toBeVisible();
   const [emptyBox, rosterBox] = await Promise.all([emptyState.boundingBox(), page.locator(".pal-roster-cards").boundingBox()]);
   expect(emptyBox).not.toBeNull();
   expect(rosterBox).not.toBeNull();
@@ -312,31 +372,78 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await page.getByLabel("帕鲁存放位置筛选").selectOption("storage");
   await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("location")).toBe("storage");
   await page.getByLabel("帕鲁存放位置筛选").selectOption("all");
+  await page.getByRole("button", { name: /纯净零负面词条/ }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("excludeNegativePassives")).toBe("true");
+  await page.getByRole("button", { name: /纯净零负面词条/ }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.has("excludeNegativePassives")).toBe(false);
   await page.evaluate(() => window.scrollTo(0, 0));
   await page.screenshot({ path: testInfo.outputPath(`pal-roster-${testInfo.project.name}.png`) });
   await page.getByText("词条组合高级筛选", { exact: true }).click();
-  if (testInfo.project.name === "mobile") {
-    const aptitudeDialog = page.getByRole("dialog", { name: "资质、工作与被动技能" });
-    await expect(aptitudeDialog).toHaveAttribute("aria-modal", "true");
-    await expect(aptitudeDialog).toHaveCSS("position", "fixed");
-    await expect(aptitudeDialog.getByRole("button", { name: "关闭高级筛选" })).toBeFocused();
-  }
+  await expect(page.locator(".pal-advanced-summary")).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("dialog", { name: "资质、工作与被动技能" })).toHaveCount(0);
+  await expect(page.locator(".pal-combo-current")).toBeVisible();
+  await expect(page.locator(".pal-combo-categories")).toBeVisible();
+  await page.locator(".pal-aptitude-filters").evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: testInfo.outputPath(`pal-filter-open-${testInfo.project.name}.png`) });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.getByRole("button", { name: /极速骑乘/ }).click();
+  await expect(page.getByRole("button", { name: /极速骑乘/ })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: /全部/ }).last().click();
+  await page.getByRole("button", { name: /极速坐骑四词条/ }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("passiveSkill")).toBe("Legend,MoveSpeed_up_3,MoveSpeed_up_2,MoveSpeed_up_1");
+  await page.getByRole("button", { name: /极速坐骑四词条/ }).click();
+  await page.getByLabel("搜索特性词条").fill("灵活");
+  await page.getByRole("button", { name: "加入" }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("passiveSkill")).toBe("MoveSpeed_up_1");
+  await page.getByLabel("已应用筛选").getByRole("button", { name: "灵活" }).click();
+  await page.getByLabel("搜索特性词条").fill("神速");
+  await expect(page.locator(".pal-combo-list").getByRole("button", { name: /神速/ })).toHaveCount(1);
+  await page.getByLabel("搜索特性词条").fill("稀有");
+  const rareSkill = page.locator(".pal-combo-list").getByRole("button", { name: /稀有/ }).first();
+  await expect(rareSkill).toHaveAttribute("title", "攻击 +15%，防御 +15%，工作速度 +20%");
+  await expect(rareSkill).not.toContainText("(None)");
+  await page.getByLabel("搜索特性词条").clear();
+  await page.getByText("资质与工作适应性", { exact: true }).click();
   await page.getByLabel("最低物种稀有度").fill("1");
   await page.getByLabel("最低工作等级").selectOption("1");
   await page.getByLabel("手工作业", { exact: true }).check();
   await page.getByLabel("搬运", { exact: true }).check();
-  await page.getByRole("checkbox", { name: /传说/ }).check();
+  let releasePassiveResponse: (() => void) | undefined;
+  await page.route("**/api/world/pals/roster?*", async (route) => {
+    if (new URL(route.request().url()).searchParams.get("passiveSkill") === "Legend") {
+      await new Promise<void>((resolve) => { releasePassiveResponse = resolve; });
+    }
+    await route.fallback();
+  });
+  await page.locator(".pal-combo-list").getByRole("button", { name: /传说/ }).first().click();
+  await expect.poll(() => Boolean(releasePassiveResponse)).toBeTruthy();
+  await expect(page.locator(".pal-roster-skeleton-card")).toHaveCount(6);
+  await expect(page.locator(".pal-roster-skeleton-card .avatar")).toHaveCount(6);
+  await page.locator(".pal-roster-skeleton-card").first().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: testInfo.outputPath(`pal-filter-loading-${testInfo.project.name}.png`) });
+  await expect(page.locator(".pal-combo-list").getByRole("button", { name: /神速/ }).first()).toBeVisible();
+  releasePassiveResponse?.();
+  await expect(page.locator(".pal-roster-skeleton-card")).toHaveCount(0);
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("passiveSkill")).toBe("Legend");
+  const matchedPassive = page.locator(".pal-roster-row").filter({ hasText: "小羊" }).locator(".pal-passive-summary em");
+  await expect(matchedPassive).toHaveClass(/matched/);
+  await expect(matchedPassive).toHaveAttribute("title", "命中筛选词条: 传说");
+  await expect(matchedPassive).toHaveCSS("background-color", "rgb(14, 165, 233)");
+  await page.locator(".pal-combo-list").getByRole("button", { name: /神速/ }).first().click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("passiveSkill")).toBe("Legend,MoveSpeed_up_3");
   await page.getByRole("button", { name: "满足任一 OR" }).click();
+  await expect.poll(() => rosterUrls.at(-1)?.searchParams.get("passiveMatch")).toBe("any");
   await page.getByRole("button", { name: /过滤负面词条/ }).click();
   await page.getByRole("button", { name: "应用资质筛选" }).click();
-  await expect.poll(() => rosterUrls.some((url) => url.searchParams.get("minRarity") === "1" && url.searchParams.get("workSuitability") === "Handcraft,Transport" && url.searchParams.get("minWorkLevel") === "1" && url.searchParams.get("passiveSkill") === "Legend" && url.searchParams.get("passiveMatch") === "any" && url.searchParams.get("excludeNegativePassives") === "true")).toBeTruthy();
-  if (testInfo.project.name === "mobile") await expect(page.getByRole("button", { name: /词条组合高级筛选/ })).toBeFocused();
+  await expect.poll(() => rosterUrls.some((url) => url.searchParams.get("minRarity") === "1" && url.searchParams.get("workSuitability") === "Handcraft,Transport" && url.searchParams.get("minWorkLevel") === "1" && url.searchParams.get("passiveSkill") === "Legend,MoveSpeed_up_3" && url.searchParams.get("passiveMatch") === "any" && url.searchParams.get("excludeNegativePassives") === "true")).toBeTruthy();
   await expect(page.getByLabel("已应用筛选")).toContainText("手工作业 ≥ 1 级");
   await expect(page.getByLabel("已应用筛选")).toContainText("搬运 ≥ 1 级");
   await expect(page.getByLabel("已应用筛选")).toContainText("传说");
+  await page.locator(".pal-aptitude-filters").evaluate((element) => element.scrollIntoView({ block: "start" }));
+  await page.screenshot({ path: testInfo.outputPath(`pal-filter-applied-${testInfo.project.name}.png`) });
   const requestCount = rosterUrls.length;
   await page.getByLabel("已应用筛选").getByRole("button", { name: "传说" }).click();
-  await expect.poll(() => rosterUrls.slice(requestCount).some((url) => !url.searchParams.has("passiveSkill"))).toBeTruthy();
+  await expect.poll(() => rosterUrls.slice(requestCount).some((url) => url.searchParams.get("passiveSkill") === "MoveSpeed_up_3")).toBeTruthy();
   await page.getByLabel("帕鲁图鉴花名册排序").selectOption("name");
   await expect(page.locator(".pal-roster-row").first()).toContainText("阿帕");
   await page.getByRole("button", { name: "小羊" }).click();
@@ -366,13 +473,9 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(palDrawer).not.toContainText("存放位置:");
   const closePalDrawer = palDrawer.getByRole("button", { name: "关闭帕鲁详情" });
   await expect(closePalDrawer).toBeFocused();
-  const passiveTrigger = palDrawer.locator(".pal-passive-grid button").first();
-  await passiveTrigger.click();
-  const passiveDialog = palDrawer.getByRole("dialog", { name: "被动词条详情" });
-  await expect(passiveDialog).toContainText("攻击 +20%，防御 +20%");
-  await expect(passiveDialog.getByRole("button", { name: "关闭被动词条详情" })).toBeFocused();
-  await passiveDialog.getByRole("button", { name: "关闭被动词条详情" }).click();
-  await expect(passiveTrigger).toBeFocused();
+  await expect(palDrawer.locator(".pal-passive-grid article").first()).toContainText("攻击 +20%，防御 +20%");
+  await expect(palDrawer.locator(".pal-passive-grid button")).toHaveCount(0);
+  await expect(palDrawer.getByRole("dialog", { name: "被动词条详情" })).toHaveCount(0);
   const palDrawerControls = palDrawer.locator("button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])");
   const firstPalDrawerControl = palDrawerControls.first();
   const lastPalDrawerControl = palDrawerControls.last();
@@ -505,7 +608,7 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });
 
-test("UX-04：765px 宽度可访问完整公会菜单与紧凑物资列表", async ({ page }) => {
+test("UX-04：765px 宽度可访问完整公会菜单与响应式物资卡片", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 765, height: 844 });
   await setupWorld(page);
   await page.goto("/");
@@ -521,6 +624,7 @@ test("UX-04：765px 宽度可访问完整公会菜单与紧凑物资列表", asy
   const inventory = page.locator(".inventory-workspace");
   await expect(inventory.locator(".inventory-toolbar")).toBeVisible();
   await expect(inventory.locator(".inventory-item-summary")).toHaveCount(2);
+  await expect(inventory.locator(".inventory-item").first().locator(".inventory-preview")).toContainText("玩家：Alice");
   expect(await inventory.evaluate((element) => {
     const style = (selector: string) => getComputedStyle(element.querySelector(selector)!);
     return {
@@ -529,10 +633,32 @@ test("UX-04：765px 宽度可访问完整公会菜单与紧凑物资列表", asy
       scopeHeight: style(".inventory-scope").minHeight,
       controlHeight: style(".world-control").minHeight,
       resultDisplay: style(".inventory-results").display,
+      resultColumns: style(".inventory-results").gridTemplateColumns.split(" ").length,
       itemRadius: style(".inventory-item").borderRadius,
     };
-  })).toEqual({ searchHeight: "42px", buttonHeight: "42px", scopeHeight: "42px", controlHeight: "42px", resultDisplay: "block", itemRadius: "0px" });
+  })).toEqual({ searchHeight: "42px", buttonHeight: "42px", scopeHeight: "42px", controlHeight: "42px", resultDisplay: "grid", resultColumns: 1, itemRadius: "16px" });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.route("**/api/world/inventory-items?*", async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    await route.fallback();
+  });
+  await inventory.getByLabel("物品分类筛选").selectOption("材料");
+  await expect(inventory.locator(".inventory-skeleton")).toHaveCount(8);
+  await expect(inventory.locator(".inventory-item-summary")).toHaveCount(2);
+  await page.setViewportSize({ width: 768, height: 844 });
+  await expect.poll(() => inventory.locator(".inventory-results").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
+  await page.setViewportSize({ width: 1440, height: 960 });
+  await expect.poll(() => inventory.locator(".inventory-results").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(4);
+  await page.screenshot({ path: testInfo.outputPath("inventory-desktop.png"), fullPage: true });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(() => inventory.locator(".inventory-results").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(1);
+  const search = await inventory.getByLabel("搜索物品").boundingBox();
+  const category = await inventory.getByLabel("物品分类筛选").boundingBox();
+  const scope = await inventory.getByRole("group", { name: "仓库范围" }).boundingBox();
+  const sort = await inventory.getByLabel("仓库排序方式").boundingBox();
+  expect(search && category && scope && sort && search.y < category.y && category.y < scope.y && scope.y < sort.y).toBeTruthy();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+  await page.screenshot({ path: testInfo.outputPath("inventory-mobile.png"), fullPage: true });
 });
 
 test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async ({ page }) => {
@@ -631,14 +757,14 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await expect(dialog.locator(".pal-detail-header")).toContainText("物种稀有度: 1");
   expect(await dialog.locator(".pal-iv-list > div, .pal-vitals > section, .pal-detail-body").evaluateAll((cells) => cells.every((cell) => cell.scrollWidth <= cell.clientWidth))).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("pal-detail.png"), animations: "disabled" });
-  await dialog.locator(".pal-passive-grid button").first().click();
-  const passive = dialog.getByRole("dialog", { name: "被动词条详情" });
-  await expect(passive).toContainText("攻击 +20%，防御 +20%");
-  if (testInfo.project.name === "mobile") {
-    await expect(passive.getByRole("button", { name: "调整抽屉高度" })).toBeVisible();
-    await page.screenshot({ path: testInfo.outputPath("passive-sheet.png"), animations: "disabled" });
-  }
-  await passive.getByRole("button", { name: "关闭被动词条详情" }).click();
+  const passiveCard = dialog.locator(".pal-passive-grid article").first();
+  await passiveCard.scrollIntoViewIfNeeded();
+  await expect(passiveCard).toBeInViewport();
+  await expect(passiveCard).toContainText("攻击 +20%，防御 +20%");
+  expect(await passiveCard.locator("p").evaluate((element) => getComputedStyle(element).whiteSpace)).toBe("pre-line");
+  if (testInfo.project.name === "mobile") await page.screenshot({ path: testInfo.outputPath("pal-passive-mobile.png"), animations: "disabled" });
+  await expect(dialog.locator(".pal-passive-grid button")).toHaveCount(0);
+  await expect(dialog.getByRole("dialog", { name: "被动词条详情" })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();

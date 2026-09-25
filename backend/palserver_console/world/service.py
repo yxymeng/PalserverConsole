@@ -21,7 +21,10 @@ from typing import Any
 
 from ..config import ProfileError, ServerProfile
 from ..metadata import WorldMetadataError, load_world_metadata
-from ..metadata.loader import METADATA_SCHEMA_NAME, METADATA_SCHEMA_VERSION
+from ..metadata.loader import (
+    METADATA_SCHEMA_NAME,
+    METADATA_SCHEMA_VERSION,
+)
 from ..persistence import Database
 from ..steam import is_reparse_point
 from .cache import (
@@ -84,6 +87,45 @@ def _with_player_progress_totals(item: Mapping[str, object]) -> dict[str, object
         "totalsDataVersion": data_version,
     }
     return result
+
+
+def _passive_catalog() -> list[dict[str, object]]:
+    skills = load_world_metadata().skills
+    fields = ("name", "description", "sourceName", "rank", "element", "power", "cooldown")
+    return [
+        {"id": skill_id, **{field: skill.get(field) for field in fields}, "metadataKnown": True}
+        for skill_id, skill in skills.items()
+        if skill.get("kind") == "passive"
+        and skill.get("displayable") is True
+        and skill.get("name")
+        and not skill_id.startswith("Test_")
+    ]
+
+
+def _with_current_passive_descriptions(item: Mapping[str, object]) -> dict[str, object]:
+    skills = item.get("skills")
+    if not isinstance(skills, Mapping):
+        return dict(item)
+    passive = skills.get("passive")
+    if not isinstance(passive, list):
+        return dict(item)
+    try:
+        metadata = load_world_metadata()
+    except WorldMetadataError:
+        return dict(item)
+    refreshed = []
+    for skill in passive:
+        if not isinstance(skill, Mapping):
+            refreshed.append(skill)
+            continue
+        current = metadata.skill(str(skill.get("id") or ""))
+        description = current.get("description") if current else None
+        refreshed.append(
+            {**skill, "description": description}
+            if isinstance(description, str)
+            else skill
+        )
+    return {**item, "skills": {**skills, "passive": refreshed}}
 
 
 @dataclass(frozen=True)
@@ -612,6 +654,13 @@ class WorldSnapshotService:
             location=location,
         )
         state = self._status_for_snapshot(current)
+        metadata_status = query_world_metadata_status(cache)
+        passive_catalog_error_code: str | None = None
+        try:
+            passive_catalog = _passive_catalog()
+        except WorldMetadataError as error:
+            passive_catalog = []
+            passive_catalog_error_code = error.code
         return {
             "items": items,
             "page": page,
@@ -619,7 +668,9 @@ class WorldSnapshotService:
             "total": total,
             "careSummary": query_pal_care_summary(cache),
             "passiveSkills": passive_options,
-            "metadata": query_world_metadata_status(cache),
+            "passiveCatalog": passive_catalog,
+            "passiveCatalogErrorCode": passive_catalog_error_code,
+            "metadata": metadata_status,
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],
@@ -770,7 +821,13 @@ class WorldSnapshotService:
             raise WorldDataError("WORLD_ENTITY_NOT_FOUND", "实体不存在于当前存档缓存。")
         state = self._status_for_snapshot(current)
         response: dict[str, object] = {
-            **(_with_player_progress_totals(result) if resource == "players" else result),
+            **(
+                _with_player_progress_totals(result)
+                if resource == "players"
+                else _with_current_passive_descriptions(result)
+                if resource == "pals"
+                else result
+            ),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],

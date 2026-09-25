@@ -36,9 +36,18 @@ describe("Pal catalog presentation", () => {
     expect(palTraitLabels({
       characterId: "BOSS_ChickenPal",
       gender: "EPalGenderType::Female", rank: 3, isLucky: true, isAwakened: true,
-    })).toEqual(["闪光", "头目", "觉醒", "浓缩等级 3"]);
+    })).toEqual(["闪光", "头目", "觉醒", "浓缩等级 2"]);
     expect(resolvePal({ characterId: "SheepBall", gender: "EPalGenderType::Female" }).gender).toBe("female");
     expect(palTraitLabels({ characterId: "GrassBoss" })).toContain("头目");
+    expect(resolvePal({ characterId: "SheepBall", rank: null }).rank).toBe(0);
+  });
+
+  it("maps sparse save Rank 1–5 to the game's 0–4 condensation stars", () => {
+    for (const [rank, stars] of [[null, 0], [1, 0], [2, 1], [3, 2], [4, 3], [5, 4]] as const) {
+      expect(resolvePal({ characterId: "SheepBall", rank }).rank).toBe(stars);
+    }
+    expect(resolvePal({ characterId: "SheepBall", rank: 0 }).rank).toBeNull();
+    expect(resolvePal({ characterId: "SheepBall", rank: 6 }).rank).toBeNull();
   });
 
   it("uses the first visible character for player text avatars", () => {

@@ -58,5 +58,4 @@
   .mobile-bottom-sheet > .pal-detail-footer { flex-shrink: 0; }
   .mobile-bottom-sheet.psc-exploration-dialog { grid-template-rows: repeat(4, max-content); }
   .mobile-bottom-sheet > .psc-exploration-body { max-height: none; overflow: visible; }
-  .mobile-bottom-sheet > .pal-passive-dialog-layer { position: fixed; z-index: 10; }
 }

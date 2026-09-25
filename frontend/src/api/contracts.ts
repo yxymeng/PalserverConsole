@@ -268,6 +268,8 @@ export type WorldPalRosterResponse = WorldSnapshotContext & {
   total: number;
   careSummary: WorldPalCareSummary;
   passiveSkills: WorldPalSkill[];
+  passiveCatalog: WorldPalSkill[];
+  passiveCatalogErrorCode: string | null;
   metadata: WorldMetadataStatus;
 };
 export type WorldGuildListItem = {
@@ -308,6 +310,8 @@ export type WorldInventoryItem = {
   metadataLabel: "资料未收录" | null;
   totalQuantity: number;
   locationCount: number;
+  locationGroupCount: number;
+  locationPreview: WorldInventoryLocationGroup[];
 };
 export type WorldInventoryLocation = {
   id: number;

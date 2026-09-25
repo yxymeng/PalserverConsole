@@ -19,7 +19,12 @@ from fastapi.testclient import TestClient
 import palserver_console.world.cache as world_cache
 from palserver_console.config import AppSettings, ProfileError, ServerProfile, ServerProfileService
 from palserver_console.main import create_app
-from palserver_console.metadata import ItemMetadata, WorldMetadataBundle, WorldMetadataError
+from palserver_console.metadata import (
+    ItemMetadata,
+    WorldMetadataBundle,
+    WorldMetadataError,
+    load_world_metadata,
+)
 from palserver_console.persistence import Database
 from palserver_console.world.adapter import read_save_properties, verify_stable_parse
 from palserver_console.world.cache import (
@@ -42,8 +47,25 @@ from palserver_console.world.pal_care_species import max_full_stomach
 from palserver_console.world.service import (
     WorldDataError,
     WorldSnapshotService,
+    _with_current_passive_descriptions,
     _with_player_progress_totals,
 )
+
+
+def test_old_pal_detail_uses_current_passive_description() -> None:
+    old = {
+        "skills": {
+            "passive": [
+                {
+                    "id": "ElementBoost_Thunder_1_PAL",
+                    "description": "雷属性攻击伤害增加{EffectValue1}%",
+                }
+            ]
+        }
+    }
+    refreshed = _with_current_passive_descriptions(old)
+    assert refreshed["skills"]["passive"][0]["description"] == "雷属性攻击伤害增加10%"
+    assert old["skills"]["passive"][0]["description"] == "雷属性攻击伤害增加{EffectValue1}%"
 
 
 def _profile_fixture(tmp_path: Path) -> tuple[Database, Path, Path, Path]:
@@ -620,7 +642,11 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
     )
     assert total == 2
     assert categories == ["材料", "矿石"]
-    assert items == [
+    preview_fields = {"locationGroupCount", "locationPreview"}
+    assert [
+        {key: value for key, value in item.items() if key not in preview_fields}
+        for item in items
+    ] == [
         {
             "itemId": "Wood",
             "name": "木材",
@@ -631,6 +657,11 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
             "totalQuantity": 12,
             "locationCount": 3,
         }
+    ]
+    assert items[0]["locationGroupCount"] == 2
+    preview = cast(list[dict[str, object]], items[0]["locationPreview"])
+    assert [(group["locationType"], group["quantitySum"]) for group in preview] == [
+        ("player", 3), ("base", 9)
     ]
     locations, location_total = query_inventory_locations(
         cache,
@@ -704,6 +735,20 @@ def test_inventory_aggregates_slots_and_preserves_unknown_items(
     assert empty_items == []
     assert empty_total == 0
     assert empty_categories == []
+
+    with sqlite3.connect(cache) as connection:
+        connection.executemany(
+            "INSERT INTO inventory_items(container_id, slot_index, item_id, quantity, owner_kind) "
+            "VALUES(?, 0, 'Wood', 1, ?)",
+            [("world-box", "world"), ("unknown-box", "unassigned")],
+        )
+    preview_items, _, _ = query_inventory(
+        cache, page=1, page_size=1, search="Wood", category=None, scope="all",
+        owner_id=None, base_id=None, sort="name",
+    )
+    assert preview_items[0]["locationGroupCount"] == 4
+    assert len(cast(list[dict[str, object]], preview_items[0]["locationPreview"])) == 3
+    assert preview_items[0]["totalQuantity"] == 14
 
 
 def test_world_overview_aggregates_assets_and_actionable_counts(tmp_path: Path) -> None:
@@ -1818,6 +1863,57 @@ def test_pal_roster_supports_gemini_filter_semantics(tmp_path: Path) -> None:
     assert storage_total == 1 and storage_rows[0]["locationType"] == "storage"
 
 
+def test_pal_roster_min_rank_includes_uncondensed_pals(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    cache = tmp_path / "world-cache-rank.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    common: dict[str, Any] = dict(
+        page=1, page_size=60, search=None, marker="all", sort="balanced"
+    )
+
+    all_rows, all_total = query_pal_roster(cache, **common)
+    zero_rows, zero_total = query_pal_roster(cache, **common, min_rank=0)
+    baseline_rows, baseline_total = query_pal_roster(cache, **common, min_rank=1)
+    upgraded_rows, upgraded_total = query_pal_roster(cache, **common, min_rank=2)
+
+    assert all_total == zero_total == baseline_total == 2
+    assert {row["id"] for row in zero_rows} == {row["id"] for row in all_rows}
+    assert {row["id"] for row in baseline_rows} == {row["id"] for row in all_rows}
+    assert upgraded_total == 1 and upgraded_rows[0]["rank"] == 3
+
+
+def test_pal_missing_level_defaults_to_one_in_new_and_existing_caches(tmp_path: Path) -> None:
+    level, players = _synthetic_properties()
+    characters = level["worldSaveData"]["value"]["CharacterSaveParameterMap"]["value"]
+    pal_id = str(uuid.UUID(int=402))
+    characters[2]["value"]["RawData"]["value"]["object"]["SaveParameter"]["value"].pop("Level")
+    cache = tmp_path / "world-cache-level.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+
+    with sqlite3.connect(cache) as connection:
+        stored_level = connection.execute(
+            "SELECT level FROM pals WHERE id = ?", (pal_id,)
+        ).fetchone()[0]
+        assert stored_level == 1
+
+    common: dict[str, Any] = dict(
+        page=1, page_size=60, search=None, marker="all", sort="level"
+    )
+    for old_cache in (False, True):
+        if old_cache:
+            with sqlite3.connect(cache) as connection:
+                connection.execute("UPDATE pals SET level = NULL WHERE id = ?", (pal_id,))
+        rows, total = query_pal_roster(cache, **common, min_level=1)
+        upgraded, upgraded_total = query_pal_roster(cache, **common, min_level=2)
+        generic, _ = query_cache(cache, "pals", page=1, page_size=50, sort="level-desc")
+        detail = entity_detail(cache, "pals", pal_id)
+
+        assert total == 2 and [row["level"] for row in rows] == [20, 1]
+        assert upgraded_total == 1 and upgraded[0]["level"] == 20
+        assert [row["level"] for row in generic] == [20, 1]
+        assert detail is not None and detail["level"] == 1
+
+
 def test_missing_world_metadata_keeps_unknown_pal_records_read_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2192,7 +2288,7 @@ def test_world_status_marks_cache_invalid_when_metadata_table_is_missing(
     assert cache.is_file()
 
 
-def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
+def test_world_api_enforces_page_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
     database = Database(settings.database_path)
     database.migrate()
@@ -2247,6 +2343,13 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
         )
         roster_replaced = client.get("/api/world/pals/roster?snapshotId=superseded")
         pal_detail = client.get(f"/api/world/pals/{uuid.UUID(int=401)}")
+        monkeypatch.setattr(
+            "palserver_console.world.service.load_world_metadata",
+            lambda: (_ for _ in ()).throw(
+                WorldMetadataError("WORLD_METADATA_INVALID", "fixture metadata failure")
+            ),
+        )
+        roster_without_runtime_metadata = client.get("/api/world/pals/roster?pageSize=60")
 
     assert response.status_code == 200
     assert response.json()["total"] == 2
@@ -2271,18 +2374,22 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert inventory.status_code == 200
     assert inventory.json()["pageSize"] == 60
     assert inventory.json()["total"] == 1
-    assert inventory.json()["items"] == [
-        {
-            "itemId": "Wood",
-            "name": "木材",
-            "category": "Material / MaterialWood",
-            "rarity": "0",
-            "metadataKnown": True,
-            "metadataLabel": None,
-            "totalQuantity": 3,
-            "locationCount": 1,
-        }
-    ]
+    inventory_item = inventory.json()["items"][0]
+    assert {
+        key: value for key, value in inventory_item.items()
+        if key not in {"locationGroupCount", "locationPreview"}
+    } == {
+        "itemId": "Wood",
+        "name": "木材",
+        "category": "Material / MaterialWood",
+        "rarity": "0",
+        "metadataKnown": True,
+        "metadataLabel": None,
+        "totalQuantity": 3,
+        "locationCount": 1,
+    }
+    assert inventory_item["locationGroupCount"] == len(inventory_detail.json()["groups"])
+    assert inventory_item["locationPreview"] == inventory_detail.json()["groups"][:3]
     assert inventory_invalid_page.status_code == 422
     assert inventory_invalid_page.json()["errorCode"] == "INVALID_INVENTORY_PAGE"
     assert inventory_detail.status_code == 200
@@ -2297,6 +2404,23 @@ def test_world_api_enforces_page_limit(tmp_path: Path) -> None:
     assert roster.json()["metadata"]["status"] == "ready"
     assert roster.json()["items"][0]["aptitude"]["metadataKnown"] is True
     assert roster.json()["passiveSkills"][0]["name"] == "传说"
+    catalog = {skill["id"]: skill for skill in roster.json()["passiveCatalog"]}
+    assert set(catalog) == {
+        skill_id for skill_id, skill in load_world_metadata().skills.items()
+        if skill.get("kind") == "passive"
+        and skill.get("displayable") is True
+        and skill.get("name")
+        and not skill_id.startswith("Test_")
+    }
+    assert len(catalog) == 114
+    assert catalog["MoveSpeed_up_1"]["name"] == "灵活"
+    assert roster.json()["passiveCatalogErrorCode"] is None
+    assert roster_without_runtime_metadata.json()["passiveCatalog"] == []
+    assert roster_without_runtime_metadata.json()["metadata"]["status"] == "ready"
+    assert (
+        roster_without_runtime_metadata.json()["passiveCatalogErrorCode"]
+        == "WORLD_METADATA_INVALID"
+    )
     assert localized_species_roster.status_code == 200
     assert localized_species_roster.json()["total"] == 1
     assert localized_species_roster.json()["items"][0]["characterId"] == "BOSS_SheepBall"

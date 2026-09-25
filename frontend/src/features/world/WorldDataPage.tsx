@@ -81,6 +81,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selected, setSelected] = useState<EntityDetail | null>(null);
+  const [pendingPalDetail, setPendingPalDetail] = useState<{ id: string; snapshotId: string } | null>(null);
   const [detailHistory, setDetailHistory] = useState<EntityDetail[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [listLoading, setListLoading] = useState(false);
@@ -104,6 +105,12 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setStatus(nextStatus);
     return nextStatus.snapshotId;
   }, []);
+  const refreshPalSnapshot = useCallback(async (detailId?: string) => {
+    const nextSnapshotId = await refreshSnapshot();
+    if (detailId && nextSnapshotId && nextSnapshotId !== snapshotId) setPendingPalDetail({ id: detailId, snapshotId: nextSnapshotId });
+    return nextSnapshotId;
+  }, [refreshSnapshot, snapshotId]);
+  const clearPendingPalDetail = useCallback(() => setPendingPalDetail(null), []);
 
   const load = useCallback(async () => {
     const sequence = ++loadSequence.current;
@@ -191,11 +198,13 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   }, [workspace]);
   useEffect(() => {
     if (previousSnapshotId.current !== undefined && previousSnapshotId.current !== snapshotId) {
+      const shouldReloadEntities = Boolean(previousSnapshotId.current && snapshotId && (workspace === "players" || workspace === "community"));
       entityStateCache.current = {};
       scrollPositions.current = {};
       setWorkspaceHistory([]);
       setDetailHistory([]);
-      setSelected(null);
+      setSelected((current) => current?.data.snapshotId === snapshotId ? current : null);
+      setPendingPalDetail((current) => current?.snapshotId === snapshotId ? current : null);
       setResult(null);
       setCommunityResults({ guilds: null, bases: null });
       setPage(1);
@@ -205,9 +214,10 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
       setSortKey("name");
       setPalContext((current) => ({ token: current.token + 1 }));
       setInventoryContext({ scope: "inventory" });
+      if (shouldReloadEntities) void load();
     }
     previousSnapshotId.current = snapshotId;
-  }, [snapshotId]);
+  }, [load, snapshotId, workspace]);
   useEffect(() => {
     if (!listLoading) {
       setShowListLoading(false);
@@ -331,15 +341,25 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     setDetailLoading(true);
     setError("");
     try {
-      const nextDetail = await loadEntityDetail(nextResource, id, snapshotId);
-      if (preserveCurrent && selected) setDetailHistory((current) => [...current, selected]);
+      let requestedSnapshotId = snapshotId;
+      let nextDetail: EntityDetail;
+      try {
+        nextDetail = await loadEntityDetail(nextResource, id, requestedSnapshotId);
+      } catch (caught) {
+        if (!(caught instanceof ApiRequestError) || caught.code !== "SNAPSHOT_REPLACED") throw caught;
+        requestedSnapshotId = await refreshSnapshot();
+        if (!requestedSnapshotId || requestedSnapshotId === snapshotId) throw caught;
+        nextDetail = await loadEntityDetail(nextResource, id, requestedSnapshotId);
+      }
+      if (requestedSnapshotId && nextDetail.data.snapshotId !== requestedSnapshotId) throw new Error("SNAPSHOT_REPLACED: 详情与当前快照不一致。");
+      if (preserveCurrent && selected && selected.data.snapshotId === nextDetail.data.snapshotId) setDetailHistory((current) => [...current, selected]);
       setSelected(nextDetail);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "实体详情读取失败");
     } finally {
       setDetailLoading(false);
     }
-  }, [selected, snapshotId]);
+  }, [refreshSnapshot, selected, snapshotId]);
 
   function closeDetail() {
     const previous = detailHistory.at(-1) || null;
@@ -364,7 +384,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     <main className="world-workspace">
       <section id="world-workspace-overview" role="tabpanel" aria-labelledby="world-workspace-tab-overview" hidden={workspace !== "overview"}><WorldOverviewLobby status={status} onlinePlayerCount={onlinePlayerCount} onChooseResource={(target) => chooseResource(target, true)} onShowInventory={(context) => openInventory(context, true)} onShowPals={openPalSummary} /></section>
       <section id="world-workspace-inventories" role="tabpanel" aria-labelledby="world-workspace-tab-inventories" hidden={workspace !== "inventories"}>{visitedWorkspaces.has("inventories") && <InventoryWorkspace key={snapshotId || "none"} snapshotId={snapshotId} context={inventoryContext} onSnapshotReplaced={refreshSnapshot} onContextChange={setInventoryContext} onClearContext={() => setInventoryContext({ scope: "inventory" })} />}</section>
-      <section id="world-workspace-pals" role="tabpanel" aria-labelledby="world-workspace-tab-pals" hidden={workspace !== "pals"}>{visitedWorkspaces.has("pals") && <PalRoster key={snapshotId || "none"} snapshotId={snapshotId} context={palContext} onSnapshotReplaced={refreshSnapshot} onNavigate={(target, id) => target === "bases" ? chooseResource(target, true) : void openDetail(target, id, true)} />}</section>
+      <section id="world-workspace-pals" role="tabpanel" aria-labelledby="world-workspace-tab-pals" hidden={workspace !== "pals"}>{visitedWorkspaces.has("pals") && <PalRoster key={snapshotId || "none"} snapshotId={snapshotId} context={palContext} pendingDetail={pendingPalDetail} onPendingDetailHandled={clearPendingPalDetail} onSnapshotReplaced={refreshPalSnapshot} onNavigate={(target, id) => target === "bases" ? chooseResource(target, true) : void openDetail(target, id, true)} />}</section>
       <section id="world-workspace-players" role="tabpanel" aria-labelledby="world-workspace-tab-players" hidden={workspace !== "players"}>{workspace === "players" && <div className="world-player-archive">
         <section className="world-list-panel" aria-label="训练家档案列表">
           <form className="world-toolbar world-player-toolbar" onSubmit={submitSearch}>
