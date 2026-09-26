@@ -466,6 +466,38 @@ def test_application_update_get_reports_unavailable_without_502(tmp_path: Path) 
     assert "latestVersion" not in response.json()
 
 
+def test_application_update_manual_check_bypasses_cache(tmp_path: Path) -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests > 2:
+            return httpx.Response(503, request=request)
+        return httpx.Response(
+            200, json={"tag_name": f"v0.{requests + 1}.0", "assets": []}, request=request
+        )
+
+    app = create_app(AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static"))
+    app.state.application_updates.client_factory = lambda: httpx.Client(
+        transport=httpx.MockTransport(handler)
+    )
+    with TestClient(
+        app, base_url="http://127.0.0.1:8223", client=("127.0.0.1", 50000)
+    ) as client:
+        assert client.get("/api/maintenance/application-update").json()["latestVersion"] == "0.2.0"
+        assert client.get("/api/maintenance/application-update").json()["latestVersion"] == "0.2.0"
+        assert requests == 1
+        fresh = client.get("/api/maintenance/application-update?force=true")
+        assert fresh.status_code == 200
+        assert fresh.json()["latestVersion"] == "0.3.0"
+        failed = client.get("/api/maintenance/application-update?force=true")
+        assert failed.status_code == 200
+        assert failed.json()["state"] == "unavailable"
+        assert failed.json()["errorCode"] == "RELEASE_CHECK_FAILED"
+        assert requests == 3
+
+
 def test_release_notes_preserve_common_markdown_shapes() -> None:
     assert _release_notes(
         """## 更新内容

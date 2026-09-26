@@ -214,11 +214,7 @@ def router(deps: AppDependencies) -> APIRouter:
         if denied:
             return denied
         try:
-            operation = deps.database.operation(operation_id)
-            if operation and operation.get("kind") == "steamcmd_update":
-                deps.updates.cancel(operation_id)
-            else:
-                deps.lifecycle.cancel(operation_id)
+            deps.lifecycle.cancel(operation_id)
         except LifecycleError as error:
             return error_response(409, error.code, str(error))
         return MessageResponse(message="取消请求已提交。")

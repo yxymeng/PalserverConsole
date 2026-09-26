@@ -1,5 +1,5 @@
 import { ArrowRight, Check, DownloadCloud, Rocket, RotateCw, ShieldCheck, Sparkles, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 
 import type { ApplicationUpdateCheck, ApplicationUpdateProgress, ApplicationUpdateResult, ApplicationUpdateStatus, AuthStatus } from "../../api/contracts";
 import { requestJson } from "../../api/client";
@@ -17,8 +17,11 @@ const ACTIVE_UPDATE_STATES = new Set<ApplicationUpdateProgress["state"]>([
 ]);
 const TERMINAL_UPDATE_STATES = new Set<ApplicationUpdateProgress["state"]>(["completed", "failed"]);
 const UPDATE_CHECK_RETRY_MS = 15 * 60 * 1000;
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
+export type ApplicationUpdateHandle = { check: () => Promise<ApplicationUpdateStatus> };
+
+export function ApplicationUpdatePanel({ auth, ref, onStatusChange }: { auth: AuthStatus; ref?: Ref<ApplicationUpdateHandle>; onStatusChange?: (status: ApplicationUpdateStatus | null) => void }) {
   const [status, setStatus] = useState<ApplicationUpdateStatus | null>(null);
   const [progress, setProgress] = useState<ApplicationUpdateProgress>({ state: "idle", step: 0, message: "等待开始升级。" });
   const [open, setOpen] = useState(false);
@@ -26,25 +29,50 @@ export function ApplicationUpdatePanel({ auth }: { auth: AuthStatus }) {
   const [dismissedProgress, setDismissedProgress] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const checkRef = useRef<(force: boolean) => Promise<ApplicationUpdateStatus>>(async () => {
+    throw new Error("更新检查尚未就绪，请稍后重试。");
+  });
+  useImperativeHandle(ref, () => ({ check: () => checkRef.current(true) }), []);
+  useEffect(() => { onStatusChange?.(status); }, [status, onStatusChange]);
 
   useEffect(() => {
     let active = true;
     let retry = 0;
+    let pending: Promise<ApplicationUpdateStatus> | null = null;
     const keepLastStatus = () => {
       if (active) setStatus(previous => previous && { ...previous, stale: true });
     };
-    async function checkStatus() {
-      try {
-        const next = await requestJson<ApplicationUpdateCheck>("/api/maintenance/application-update");
-        if ("state" in next) keepLastStatus();
-        else if (active) setStatus(next);
-      } catch {
-        keepLastStatus();
-      } finally {
-        if (active) retry = window.setTimeout(() => { void checkStatus(); }, UPDATE_CHECK_RETRY_MS);
+    async function checkStatus(force = false): Promise<ApplicationUpdateStatus> {
+      if (pending) {
+        if (!force) return pending;
+        await pending.catch(() => undefined);
       }
+      if (!active) throw new Error("更新检查已取消。");
+      window.clearTimeout(retry);
+      pending = (async () => {
+        let delay = UPDATE_CHECK_RETRY_MS;
+        try {
+          const next = await requestJson<ApplicationUpdateCheck>(`/api/maintenance/application-update${force ? "?force=true" : ""}`);
+          if ("state" in next) throw new Error(`${next.errorCode}: ${next.message}`);
+          if (active) {
+            setStatus(next);
+          }
+          if (next.stale) throw new Error("暂时无法确认最新版本，请稍后重新检查。");
+          if (active && force && next.updateAvailable) setOpen(true);
+          delay = UPDATE_CHECK_INTERVAL_MS;
+          return next;
+        } catch (caught) {
+          keepLastStatus();
+          throw caught;
+        } finally {
+          if (active) retry = window.setTimeout(() => { void checkStatus().catch(() => undefined); }, delay);
+        }
+      })();
+      try { return await pending; }
+      finally { pending = null; }
     }
-    void checkStatus();
+    checkRef.current = checkStatus;
+    void checkStatus().catch(() => undefined);
     void requestJson<ApplicationUpdateProgress>("/api/maintenance/application-update/progress")
       .then((next) => {
         if (!active) return;

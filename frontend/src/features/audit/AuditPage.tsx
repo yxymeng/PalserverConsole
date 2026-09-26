@@ -61,7 +61,7 @@ export function AuditPage({ auth }: { auth: AuthStatus }) {
   const totalPages = events ? Math.max(1, Math.ceil(events.total / pageSize)) : 1;
   return <section className="maintenance-section maintenance-audit" id="maintenance-audit" aria-labelledby="maintenance-audit-title">
     <section className="audit-header">
-      <div><h2 id="maintenance-audit-title">运营审计</h2><p>包含生命周期操作、配置修改、备份/恢复、SteamCMD 和其他管理员写操作。</p></div>
+      <div><h2 id="maintenance-audit-title">运营审计</h2><p>包含生命周期操作、配置修改、备份/恢复、控制台更新和其他管理员写操作。</p></div>
       <div className="audit-export"><button className="quiet-button" onClick={() => exportEvents("json")}><Download size={17} />JSON</button><button className="quiet-button" onClick={() => exportEvents("csv")}><Download size={17} />CSV</button></div>
     </section>
     <section className="audit-filters">

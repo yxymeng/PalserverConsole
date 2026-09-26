@@ -55,7 +55,7 @@ EXPECTED_API_CONTRACT = {
     "POST /api/live/players/{player_id}/ban",
     "POST /api/live/players/{player_id}/kick",
     "POST /api/live/players/{player_id}/unban",
-    "POST /api/maintenance/steamcmd-update",
+    "POST /api/maintenance/notifications/test",
     "POST /api/maintenance/application-update",
     "POST /api/server/operations/{kind}",
     "POST /api/server/operations/{operation_id}/cancel",
