@@ -301,7 +301,7 @@ def test_test_notification_uses_saved_signature_even_when_disabled(tmp_path: Pat
     database.migrate()
     deliveries: list[tuple[str, dict[str, object], dict[str, str]]] = []
     service = NotificationService(database, "north", sender=lambda *args: deliveries.append(args))
-    with pytest.raises(NotificationError, match="Save an HTTPS"):
+    with pytest.raises(NotificationError, match="请先保存 HTTPS Webhook 地址和密钥"):
         service.test()
     service.configure(
         enabled=False, webhook_url="https://example.test/webhook", secret="test-secret"
@@ -315,6 +315,24 @@ def test_test_notification_uses_saved_signature_even_when_disabled(tmp_path: Pat
     assert payload["event"] == "maintenance.test"
     assert headers["X-PalServerConsole-Signature"] == f"sha256={expected}"
     assert "test-secret" not in json.dumps(payload)
+
+
+def test_enabling_notifications_without_connection_returns_chinese_error(tmp_path: Path) -> None:
+    settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
+    with TestClient(
+        create_app(settings), base_url="http://127.0.0.1:8223", client=("127.0.0.1", 50000)
+    ) as client:
+        auth = client.get("/api/auth/status").json()
+        response = client.put(
+            "/api/maintenance/notifications",
+            headers={"Origin": "http://127.0.0.1:8223", "X-CSRF-Token": auth["csrfToken"]},
+            json={"enabled": True},
+        )
+    assert response.status_code == 422
+    assert response.json()["errorCode"] == "NOTIFICATION_CONFIGURATION_REQUIRED"
+    assert response.json()["message"] == (
+        "启用运维事件推送前，请先填写并保存 HTTPS Webhook 地址和密钥。"
+    )
 
 
 def test_notification_test_failure_does_not_expose_transport_details(tmp_path: Path) -> None:

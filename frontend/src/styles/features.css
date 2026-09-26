@@ -148,11 +148,7 @@
 .maintenance-version-summary strong { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
 .maintenance-version-summary > div:last-child strong { color: var(--mr-success); }
 .maintenance-version-summary strong[data-available] { color: var(--mr-primary); }
-.maintenance-service-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.maintenance-service-option strong { display: block; font-size: 12px; font-weight: 700; line-height: 16px; }
-.maintenance-service-option > div { font-size: 16px; line-height: 24px; }
-.maintenance-service-option small { color: var(--mr-muted); font-size: 11px; line-height: 16.5px; }
-.maintenance-service-option input, .maintenance-notification-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; padding: 0; accent-color: auto; }
+.maintenance-notification-option input { width: 16px; height: 16px; flex: 0 0 auto; margin: 0; padding: 0; accent-color: auto; }
 .maintenance-service-card .maintenance-service-note { margin-bottom: 0; color: var(--mr-muted); font-size: 11px; line-height: 16.5px; }
 .maintenance-notification-form { display: grid; gap: 12px; }
 .maintenance-notification-form label { display: block; margin-bottom: 6px; color: var(--mr-text); font-size: 12px; font-weight: 700; line-height: 16px; letter-spacing: .05em; text-transform: uppercase; }
@@ -162,7 +158,6 @@
 .maintenance-notification-options { display: grid; gap: 8px; }
 .maintenance-notification-option { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 12px; }
 .maintenance-notification-option label { margin: 0; color: var(--mr-text); font-weight: 700; letter-spacing: 0; text-transform: none; }
-.maintenance-notification-coverage span { font-weight: 700; }
 .maintenance-secondary-button { display: flex; width: 100%; align-items: center; justify-content: center; gap: 6px; padding: 10px 0; border: 1px solid var(--mr-border); border-radius: 12px; color: var(--mr-text); background: var(--mr-surface); box-shadow: 0 1px 2px 0 rgb(0 0 0 / 5%); font: inherit; font-size: 12px; font-weight: 700; line-height: 16px; cursor: pointer; transition: all .15s cubic-bezier(.4,0,.2,1); }
 .maintenance-secondary-button svg { width: 14px; height: 14px; color: var(--mr-primary); }
 .maintenance-secondary-button:not(:disabled):hover { background: var(--mr-surface); }

@@ -2,13 +2,17 @@ import { Bell, DownloadCloud, Save, Send } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
 
 import type { ApplicationUpdateStatus, AuthStatus, NotificationStatus } from "../../api/contracts";
-import { requestJson } from "../../api/client";
+import { ApiRequestError, requestJson } from "../../api/client";
 
 type Props = {
   auth: AuthStatus;
   applicationUpdateStatus: ApplicationUpdateStatus | null;
   onCheckApplicationUpdate: () => Promise<ApplicationUpdateStatus>;
 };
+
+function notificationError(caught: unknown, fallback: string) {
+  return caught instanceof ApiRequestError ? caught.message.slice(caught.code.length + 2) : fallback;
+}
 
 export function MaintenancePanel({ auth, applicationUpdateStatus: status, onCheckApplicationUpdate }: Props) {
   const [checking, setChecking] = useState(false);
@@ -40,7 +44,6 @@ export function MaintenancePanel({ auth, applicationUpdateStatus: status, onChec
           <div><span>当前控制台版本:</span><strong>{status ? `v${status.currentVersion}` : "等待检查"}</strong></div>
           <div><span>最新稳定版本:</span><strong data-available={status?.updateAvailable || undefined}>{status ? `v${status.latestVersion}${status.stale ? "（上次结果）" : status.updateAvailable ? "（可更新）" : "（已是最新）"}` : "尚未取得检查结果"}</strong></div>
         </div>
-        <div className="maintenance-service-box maintenance-service-option"><div><strong>更新前备份控制台数据库</strong><small>固定启用，保留用户数据与实例配置</small></div><input type="checkbox" checked disabled aria-label="更新前备份控制台数据库（强制启用）" /></div>
         <button className="maintenance-application-check-button" type="button" disabled={checking} onClick={() => void checkUpdate()}>{checking ? <span className="maintenance-application-check-spinner" aria-hidden="true" /> : <DownloadCloud aria-hidden="true" />}<span>{checking ? "正在检查控制台更新..." : "检查控制台更新"}</span></button>
         {status?.stale && <p className="maintenance-service-note">暂时无法确认最新版本；当前显示上次检查结果，更新前会重新核对版本。</p>}
         {status && !status.portable && <p className="maintenance-service-note">源码模式可检查版本；自动安装需要 Windows portable 发行包。</p>}
@@ -67,7 +70,7 @@ function MaintenanceNotifications({ auth }: { auth: AuthStatus }) {
     void requestJson<NotificationStatus>("/api/maintenance/notifications").then(next => {
       if (active) { setNotification(next); setEnabled(next.enabled); setError(""); }
     }).catch((caught: unknown) => {
-      if (active) setError(caught instanceof Error ? caught.message : "维护通知状态读取失败");
+      if (active) setError(notificationError(caught, "维护通知状态读取失败，请稍后重试。"));
     });
     return () => { active = false; };
   }, [retry]);
@@ -85,7 +88,7 @@ function MaintenanceNotifications({ auth }: { auth: AuthStatus }) {
       setNotification(next); setEnabled(next.enabled); setWebhookUrl(""); setSecret("");
       setMessage(next.enabled ? "运维事件推送已启用。" : "通知设置已保存，自动推送已停用。");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "维护通知保存失败");
+      setError(notificationError(caught, "维护通知保存失败，请稍后重试。"));
     } finally { setBusy(null); }
   }
 
@@ -97,7 +100,7 @@ function MaintenanceNotifications({ auth }: { auth: AuthStatus }) {
       });
       setMessage(result.message);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "测试告警消息发送失败");
+      setError(notificationError(caught, "测试告警消息发送失败，请稍后重试。"));
     } finally { setBusy(null); }
   }
 
@@ -111,7 +114,6 @@ function MaintenanceNotifications({ auth }: { auth: AuthStatus }) {
       <div><label htmlFor="notification-secret">Webhook 密钥</label><input id="notification-secret" type="password" autoComplete="new-password" disabled={!editable} value={secret} onChange={event => setSecret(event.target.value)} placeholder={notification?.configured ? "已配置；留空保持已保存的密钥" : "首次配置时填写，保存后不回显"} /></div>
       <div className="maintenance-notification-options">
         <div className="maintenance-service-box maintenance-notification-option"><label htmlFor="notification-enabled">启用服务器运维事件推送</label><input id="notification-enabled" type="checkbox" disabled={!editable} checked={enabled} onChange={event => setEnabled(event.target.checked)} /></div>
-        <div className="maintenance-service-box maintenance-notification-option maintenance-notification-coverage"><span>计划 · 开始 · 完成 · 取消 · 失败</span><input type="checkbox" checked disabled aria-label="固定覆盖五类运维事件" /></div>
       </div>
       <button className="maintenance-secondary-button" type="button" disabled={!auth.local || !notification?.configured || Boolean(busy) || dirty} onClick={() => void testNotification()}>{busy === "test" ? <span className="maintenance-application-check-spinner" aria-hidden="true" /> : <Send aria-hidden="true" />}{busy === "test" ? "正在发送测试告警..." : "发送测试告警消息"}</button>
       <button className="maintenance-secondary-button" type="submit" disabled={!editable}><Save aria-hidden="true" />{busy === "save" ? "正在保存通知设置..." : "保存通知设置"}</button>

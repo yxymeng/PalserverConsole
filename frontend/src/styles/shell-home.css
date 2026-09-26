@@ -127,12 +127,6 @@
 .psc-update-note-list p { display: flex; align-items: flex-start; gap: 8px; margin: 0; color: var(--foreground); font-size: 12px; line-height: 1.55; }
 .psc-update-note-list p > span { width: 6px; height: 6px; flex: 0 0 6px; margin-top: 6px; border-radius: 50%; background: #0ea5e9; }
 .psc-update-note-list .psc-update-empty { color: var(--muted); }
-.psc-update-safety { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 16px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); }
-.psc-update-safety > svg:first-child { width: 17px; height: 17px; color: #10b981; }
-.psc-update-check { width: 18px; height: 18px; margin: 0; accent-color: #0ea5e9; opacity: 1; }
-.psc-update-safety div { display: grid; gap: 2px; }
-.psc-update-safety strong { color: var(--foreground); font-size: 12px; }
-.psc-update-safety small { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .psc-update-notice { margin: 14px 0 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: 10px; color: var(--warning); background: var(--warning-surface); font-size: 11px; line-height: 1.5; }
 .psc-update-progress { display: grid; gap: 18px; padding: 22px 0; }
 .psc-update-progress > div { text-align: center; }

@@ -83,8 +83,7 @@ class NotificationService:
         if enabled and (not url or not resolved_secret):
             raise NotificationError(
                 "NOTIFICATION_CONFIGURATION_REQUIRED",
-                "An HTTPS Webhook URL and a secret are required before notifications "
-                "can be enabled.",
+                "启用运维事件推送前，请先填写并保存 HTTPS Webhook 地址和密钥。",
             )
         if new_url is not None:
             self.database.set_setting(_NOTIFICATION_URL_KEY, new_url)
@@ -108,13 +107,14 @@ class NotificationService:
         if not self.status()["configured"]:
             raise NotificationError(
                 "NOTIFICATION_CONFIGURATION_REQUIRED",
-                "Save an HTTPS Webhook URL and secret before sending a test notification.",
+                "发送测试告警前，请先保存 HTTPS Webhook 地址和密钥。",
             )
         if not self._deliver(
             "maintenance.test", "测试告警", "PalServerConsole 运维事件推送连接测试。"
         ):
             raise NotificationError(
-                "NOTIFICATION_TEST_FAILED", "Test notification delivery failed."
+                "NOTIFICATION_TEST_FAILED",
+                "测试告警发送失败，请检查 Webhook 地址、密钥和接收服务。",
             )
 
     def on_operation_transition(self, detail: dict[str, object]) -> None:
@@ -231,7 +231,9 @@ def _validate_webhook_url(value: str) -> str:
     try:
         parsed = urlsplit(url)
     except ValueError as error:
-        raise NotificationError("INVALID_NOTIFICATION_URL", str(error)) from error
+        raise NotificationError(
+            "INVALID_NOTIFICATION_URL", "Webhook 地址格式不正确，请填写有效的 HTTPS 地址。"
+        ) from error
     if (
         parsed.scheme != "https"
         or not parsed.hostname
@@ -242,7 +244,7 @@ def _validate_webhook_url(value: str) -> str:
     ):
         raise NotificationError(
             "INVALID_NOTIFICATION_URL",
-            "Webhook URL must be HTTPS and must not contain credentials, a query, or a fragment.",
+            "Webhook 地址必须使用 HTTPS，且不能包含用户名、密码、查询参数或片段。",
         )
     return url
 
@@ -250,7 +252,7 @@ def _validate_webhook_url(value: str) -> str:
 def _validate_notification_secret(value: str) -> str:
     if not value or len(value) > 4096:
         raise NotificationError(
-            "INVALID_NOTIFICATION_SECRET", "Webhook secret must contain 1-4096 characters."
+            "INVALID_NOTIFICATION_SECRET", "Webhook 密钥长度必须为 1 至 4096 个字符。"
         )
     return value
 

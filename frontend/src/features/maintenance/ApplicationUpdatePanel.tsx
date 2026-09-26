@@ -1,4 +1,4 @@
-import { ArrowRight, Check, DownloadCloud, Rocket, RotateCw, ShieldCheck, Sparkles, Zap } from "lucide-react";
+import { ArrowRight, Check, DownloadCloud, Rocket, RotateCw, Sparkles, Zap } from "lucide-react";
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 
 import type { ApplicationUpdateCheck, ApplicationUpdateProgress, ApplicationUpdateResult, ApplicationUpdateStatus, AuthStatus } from "../../api/contracts";
@@ -168,7 +168,6 @@ export function ApplicationUpdatePanel({ auth, ref, onStatusChange }: { auth: Au
               <div className="psc-update-section-title"><span id="psc-update-notes-title"><Zap aria-hidden="true" />更新亮点与变更日志</span><small>{releaseNotes.length} 项变更</small></div>
               <div className="psc-update-note-list">{releaseNotes.length ? releaseNotes.map((note, index) => <p key={`${index}-${note}`}><span aria-hidden="true" />{note}</p>) : <p className="psc-update-empty">本次 Release 未提供变更说明。</p>}</div>
             </section>
-            <div className="psc-update-safety"><ShieldCheck aria-hidden="true" /><div><strong>升级前强制备份控制台数据库</strong><small>此安全步骤固定启用；用户数据与实例配置会保留，真实存档不会被修改。</small></div><input className="psc-update-check" type="checkbox" checked disabled aria-label="升级前自动备份（强制启用）" /></div>
           </>}
           {updateAvailable && !installAllowed && <p className="psc-update-notice" role="note">{auth.local ? "当前为源码运行模式；自动安装仅支持 Windows portable。" : "可从 LAN 查看更新；安装只能在控制台本机执行。"}</p>}
           {error && <p className="form-error" role="alert">{error}</p>}

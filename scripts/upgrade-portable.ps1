@@ -5,7 +5,9 @@ param(
     [string]$NewPackage,
     [string]$InstallRoot = "",
     [string]$DataDirectory = "",
-    [string]$UpdateLockId = ""
+    [string]$UpdateLockId = "",
+    [switch]$PruneBackupsOnly,
+    [string]$PruneAfterUpdateId = ""
 )
 
 Set-StrictMode -Version Latest
@@ -673,6 +675,57 @@ function Get-ManagedDatabaseCandidates {
     return @($candidates)
 }
 
+function Remove-OlderBackupGroups {
+    param([string]$Directory, [string]$NamePattern)
+
+    $root = Get-Item -LiteralPath $Directory -Force -ErrorAction SilentlyContinue
+    if ($null -eq $root -or -not $root.PSIsContainer -or (Test-ReparsePoint $root)) { return }
+    $groups = @(
+        Get-ChildItem -LiteralPath $root.FullName -Force | ForEach-Object {
+            if ($_.Name -match $NamePattern -and -not (Test-ReparsePoint $_)) {
+                [pscustomobject]@{ Item = $_; Timestamp = $Matches[1] }
+            }
+        } | Group-Object Timestamp | Sort-Object Name -Descending
+    )
+    foreach ($group in @($groups | Select-Object -Skip 1)) {
+        foreach ($entry in $group.Group) {
+            $item = $entry.Item
+            $target = [System.IO.Path]::GetFullPath($item.FullName)
+            if (-not [string]::Equals(
+                [System.IO.Path]::GetDirectoryName($target), $root.FullName,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )) { throw "BACKUP_CLEANUP_PATH_INVALID: $target" }
+            if ($item.PSIsContainer -and @(
+                Get-ChildItem -LiteralPath $target -Recurse -Force |
+                    Where-Object { Test-ReparsePoint $_ }
+            ).Count -gt 0) { continue }
+            Remove-Item -LiteralPath $target -Recurse -Force
+        }
+    }
+}
+
+function Remove-OldUpgradeBackups {
+    param([string]$InstallRootPath, [string]$DataDirectoryPath)
+
+    # Cleanup is best effort; a locked old backup must not turn a completed update into failure.
+    try {
+        $directories = @(
+            Get-ManagedDatabaseCandidates $InstallRootPath $DataDirectoryPath |
+                ForEach-Object { Join-Path $_.DataDirectory "upgrade-backups" }
+        )
+    }
+    catch { Write-Warning "BACKUP_CLEANUP_FAILED: $($_.Exception.Message)"; return }
+    foreach ($directory in $directories) {
+        try { Remove-OlderBackupGroups $directory '^(\d{8}-\d{6}-\d{3})$' }
+        catch { Write-Warning "BACKUP_CLEANUP_FAILED: $($_.Exception.Message)" }
+    }
+    try {
+        Remove-OlderBackupGroups (Join-Path $InstallRootPath "program-backups") `
+            '^(?:Program|PalServerConsole|apply-downloaded-update|upgrade-portable)-(\d{8}-\d{6}-\d{3})(?:\.exe|\.ps1)?$'
+    }
+    catch { Write-Warning "BACKUP_CLEANUP_FAILED: $($_.Exception.Message)" }
+}
+
 if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
     $InstallRoot = if (Test-Path -LiteralPath (Join-Path $PSScriptRoot "Program") -PathType Container) {
         $PSScriptRoot
@@ -683,6 +736,43 @@ if ([string]::IsNullOrWhiteSpace($InstallRoot)) {
 }
 
 $installRootPath = Resolve-Directory $InstallRoot "安装目录"
+if ($PruneBackupsOnly) {
+    if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
+        $DataDirectory = Join-Path $installRootPath "data"
+    }
+    $progressPath = Join-Path $DataDirectory "application-updates\progress.json"
+    if (-not [string]::IsNullOrWhiteSpace($PruneAfterUpdateId)) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(90)
+        do {
+            try {
+                $progress = Get-Content -LiteralPath $progressPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ([string]$progress.updateId -ne $PruneAfterUpdateId -or [string]$progress.state -eq "failed") {
+                    return
+                }
+                if ([string]$progress.state -eq "completed") { break }
+            }
+            catch { }
+            if ([DateTime]::UtcNow -ge $deadline) { return }
+            Start-Sleep -Milliseconds 250
+        } while ($true)
+    }
+    $cleanupGuard = Open-InstallUpdateGuard -InstallRootPath $installRootPath
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($PruneAfterUpdateId)) {
+            # Recheck under the guard: a later update may have replaced progress.
+            $progress = Get-Content -LiteralPath $progressPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            if ([string]$progress.updateId -ne $PruneAfterUpdateId -or [string]$progress.state -ne "completed") {
+                return
+            }
+        }
+        # A new update may have started while the previous helper waited for health.
+        if (-not (Test-Path -LiteralPath (Join-Path $installRootPath ".palserver-console-update.lock"))) {
+            Remove-OldUpgradeBackups $installRootPath ([System.IO.Path]::GetFullPath($DataDirectory))
+        }
+    }
+    finally { $cleanupGuard.Dispose() }
+    return
+}
 $packageRootPath = Resolve-Directory $NewPackage "新版本目录"
 if ([string]::Equals($installRootPath, $packageRootPath, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "UPGRADE_INPUT_INVALID: install root and new package must be different directories."
@@ -896,6 +986,33 @@ catch {
 Write-Host "升级完成：已替换根目录启动器、Program 和维护脚本，data 未被替换。旧程序保留在 $previousProgram。"
 if (Test-Path -LiteralPath $previousLauncher -PathType Leaf) {
     Write-Host "旧启动器保留在 $previousLauncher。"
+}
+if ($ownsManualUpdateLock) {
+    Remove-OldUpgradeBackups $installRootPath $dataDirectory
+}
+else {
+    # Older installed helpers only publish completed after health; they do not
+    # call retention. Let the downloaded script wait for that existing signal.
+    $progressPath = Join-Path $dataDirectory "application-updates\progress.json"
+    if (Test-Path -LiteralPath $progressPath -PathType Leaf) {
+        try {
+            $cleanupArguments = @($PSCommandPath, $packageRootPath, $installRootPath, $dataDirectory, $UpdateLockId) |
+                ForEach-Object { "'" + $_.Replace("'", "''") + "'" }
+            $cleanupCommand = "& $($cleanupArguments[0]) -NewPackage $($cleanupArguments[1]) " +
+                "-InstallRoot $($cleanupArguments[2]) -DataDirectory $($cleanupArguments[3]) " +
+                "-PruneBackupsOnly -PruneAfterUpdateId $($cleanupArguments[4])"
+            $cleanupLog = (Join-Path $dataDirectory "application-updates\apply-update.log").Replace("'", "''")
+            # Buffer output until waiting ends; holding the log open would block
+            # the old helper from recording a failure and publishing failed.
+            $cleanupCommand = 'try { $cleanupOutput = ' + $cleanupCommand +
+                ' *>&1 } catch { $cleanupOutput = "BACKUP_CLEANUP_FAILED: $($_.Exception.Message)" }; $cleanupOutput' +
+                " | Out-File -LiteralPath '$cleanupLog' -Append -Encoding utf8"
+            $encodedCommand = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($cleanupCommand))
+            Start-Process -FilePath (Join-Path $PSHOME "powershell.exe") -WindowStyle Hidden `
+                -ArgumentList @("-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", $encodedCommand)
+        }
+        catch { Write-Warning "BACKUP_CLEANUP_FAILED: $($_.Exception.Message)" }
+    }
 }
 }
 finally {

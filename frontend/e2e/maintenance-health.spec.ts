@@ -130,8 +130,7 @@ test("维护：服务运维入口保留更新弹窗，健康页支持刷新", as
   await expect(installButton).toBeVisible();
   await expect.poll(async () => (await installButton.boundingBox())?.height).toBeGreaterThanOrEqual(40);
   const requiredBackup = page.getByRole("checkbox", { name: "升级前自动备份（强制启用）" });
-  await expect(requiredBackup).toBeChecked();
-  await expect(requiredBackup).toBeDisabled();
+  await expect(requiredBackup).toHaveCount(0);
   await page.getByRole("button", { name: "升级并重启" }).click();
   await expect(page.getByText("正在准备控制台升级...", { exact: true })).toBeVisible();
   await expect(page.getByText("3. 解压并校验更新包结构", { exact: true })).toBeVisible();
@@ -470,7 +469,7 @@ test("服务运维：保存通知设置、使用已保存连接测试并保留�
     expect(route.request().headers()["x-csrf-token"]).toBe(auth.csrfToken);
     expect(route.request().postDataJSON()).toEqual({});
     return failTest
-      ? route.fulfill({ status: 502, json: { errorCode: "NOTIFICATION_TEST_FAILED", message: "Test notification delivery failed." } })
+      ? route.fulfill({ status: 502, json: { errorCode: "NOTIFICATION_TEST_FAILED", message: "测试告警发送失败，请检查 Webhook 地址、密钥和接收服务。" } })
       : route.fulfill({ json: { message: "测试告警消息已发送。" } });
   });
   await page.goto("/#maintenance-notifications");
@@ -494,12 +493,30 @@ test("服务运维：保存通知设置、使用已保存连接测试并保留�
   await page.getByLabel("HTTPS Webhook 地址").fill("");
   failTest = true;
   await sendTest.click();
-  await expect(page.getByRole("alert")).toHaveText("NOTIFICATION_TEST_FAILED: Test notification delivery failed.");
+  await expect(page.getByRole("alert")).toHaveText("测试告警发送失败，请检查 Webhook 地址、密钥和接收服务。");
   await page.getByLabel("启用服务器运维事件推送").uncheck();
   await page.getByRole("button", { name: "保存通知设置", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("自动推送已停用");
   expect(saved[1]).toEqual({ enabled: false });
   await expect(sendTest).toBeEnabled();
+});
+
+test("服务运维：缺少通知连接时显示中文，固定选项不再显示", async ({ page }, testInfo) => {
+  await routeMaintenanceApis(page, false, () => undefined, { status: { latestVersion: "0.2.0", updateAvailable: false } });
+  await page.route("**/api/maintenance/notifications", route => route.request().method() === "PUT"
+    ? route.fulfill({ status: 422, json: {
+      errorCode: "NOTIFICATION_CONFIGURATION_REQUIRED",
+      message: "启用运维事件推送前，请先填写并保存 HTTPS Webhook 地址和密钥。",
+    } })
+    : route.fulfill({ json: { enabled: false, configured: false } }));
+  await page.goto("/#maintenance-update");
+  await openMaintenance(page);
+  await expect(page.getByText("更新前备份控制台数据库", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("计划 · 开始 · 完成 · 取消 · 失败", { exact: true })).toHaveCount(0);
+  await page.getByLabel("启用服务器运维事件推送").check();
+  await page.getByRole("button", { name: "保存通知设置", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("启用运维事件推送前，请先填写并保存 HTTPS Webhook 地址和密钥。");
+  await page.screenshot({ path: testInfo.outputPath("maintenance-options-chinese-error.png"), fullPage: true });
 });
 
 test("服务运维：LAN 可检查版本，通知配置和测试只读", async ({ page }) => {
@@ -519,11 +536,11 @@ test("服务运维：通知读取失败禁止覆盖设置，并可重试", async
   await routeMaintenanceApis(page, false, () => undefined);
   let failed = true;
   await page.route("**/api/maintenance/notifications", route => failed
-    ? route.fulfill({ status: 503, json: { errorCode: "NOTIFICATION_UNAVAILABLE", message: "Notification settings unavailable" } })
+    ? route.fulfill({ status: 503, json: { errorCode: "NOTIFICATION_UNAVAILABLE", message: "维护通知状态暂时不可用。" } })
     : route.fulfill({ json: { enabled: true, configured: true } }));
   await page.goto("/#maintenance-update");
   await openMaintenance(page);
-  await expect(page.getByRole("alert")).toContainText("NOTIFICATION_UNAVAILABLE");
+  await expect(page.getByRole("alert")).toHaveText("维护通知状态暂时不可用。");
   await expect(page.getByRole("button", { name: "保存通知设置", exact: true })).toBeDisabled();
   failed = false;
   await page.getByRole("button", { name: "重试读取通知设置" }).click();

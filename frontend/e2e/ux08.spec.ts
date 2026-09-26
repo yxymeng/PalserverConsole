@@ -65,7 +65,7 @@ test("UX-08：低频维护能力集中并保留备份危险操作确认", async 
   await page.screenshot({ path: testInfo.outputPath(`ux08-audit-${testInfo.project.name}.png`), fullPage: true });
   await sections.getByRole("tab", { name: "服务运维与告警" }).click();
   await expect(page.getByRole("heading", { name: "运维事件告警推送" })).toBeVisible();
-  await expect(page.locator(".maintenance-notification-coverage")).toContainText("计划 · 开始 · 完成 · 取消 · 失败");
+  await expect(page.getByText("计划 · 开始 · 完成 · 取消 · 失败", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("checkbox", { name: "启用服务器运维事件推送" })).toBeChecked();
   expect(await page.locator(".maintenance-services").evaluate((section) => section.scrollWidth <= section.clientWidth)).toBe(true);
   await expect(page.getByText("steamcmd.exe 路径")).toHaveCount(0);
