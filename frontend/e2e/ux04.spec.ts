@@ -332,11 +332,13 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".pal-roster")).toContainText("FuturePal");
   await expect(page.locator(".pal-roster")).toContainText("据点工作");
   const palRow = page.locator(".pal-roster-row").filter({ hasText: "小羊" });
-  await expect(palRow.locator(".pal-roster-copy > span > strong")).toHaveText("小羊");
-  await expect(palRow.locator(".pal-roster-copy > small")).toHaveText("棉悠悠");
+  await expect(palRow.locator(".pal-roster-copy > span > strong")).toHaveText("棉悠悠");
+  await expect(palRow.locator(".pal-roster-copy > small")).toHaveText("「小羊」");
+  await expect(palRow).toHaveAccessibleName("棉悠悠（昵称：小羊）");
   const unrenamedPalRow = page.locator(".pal-roster-row").filter({ hasText: "FuturePal" });
   await expect(unrenamedPalRow.locator(".pal-roster-copy > span > strong")).toHaveText("FuturePal");
   await expect(unrenamedPalRow.locator(".pal-roster-copy > small")).toHaveCount(0);
+  await expect(unrenamedPalRow).toHaveAccessibleName("FuturePal");
   await expect(palRow.locator(".world-pal-gender")).toHaveText("♀");
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
   await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("0 星");
@@ -344,6 +346,10 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".pal-roster-row").filter({ hasText: "阿帕" }).locator('[data-label="等级 / 星级"]')).toContainText("4 星");
   await expect(palRow.locator('[data-label="资质"]')).toContainText("稀有度 1");
   await expect(palRow.locator('[data-label="工作适应性"]')).toContainText("手工作业Lv.1");
+  await expect(palRow.locator(".pal-work-summary em svg")).toHaveCount(2);
+  await expect(palRow.locator(".pal-work-summary em svg").first()).toHaveAttribute("width", "12");
+  await expect(palRow.locator(".pal-work-summary em svg").first()).toHaveAttribute("aria-hidden", "true");
+  await expect(page.getByLabel("工作技能筛选").locator('option[value="Handcraft"]')).toHaveText("手工作业");
   await expect(palRow.locator('[data-label="个体标记"]')).toHaveText("闪光");
   await expect(palRow.locator('[data-label="归属"]')).toContainText("据点一号");
   await expect(palRow.locator('[data-label="照护状态"]')).toContainText("需立即处理");
@@ -606,6 +612,51 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.getByText(/SNAPSHOT_PARSE_FAILED/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
+});
+
+test("UX-04：未知工作技能保留原标识和等级，并使用主题化 SVG 兜底", async ({ page }, testInfo) => {
+  await setupWorld(page);
+  await page.route("**/api/world/pals/roster?*", (route) => route.fulfill({ json: {
+    items: [{ ...pal, locationType: "base", aptitude: { ...aptitude, workSuitabilities: [{ type: "FutureWork", level: 2 }] } }],
+    snapshotId: new URL(route.request().url()).searchParams.get("snapshotId"), page: 1, pageSize: 60, total: 1,
+    careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 },
+    passiveSkills: [], passiveCatalog: [], metadata: { status: "ready" },
+  } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  const work = page.locator(".pal-work-summary em");
+  await expect(work).toHaveText("FutureWorkLv.2");
+  await expect(work.locator("svg.lucide-settings")).toHaveCount(1);
+  await expect(work.locator("svg")).toHaveAttribute("stroke", "currentColor");
+  await expect(page.getByLabel("工作技能筛选").locator("option")).toHaveCount(14);
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+    await expect.poll(() => work.evaluate((element) => getComputedStyle(element.querySelector("svg")!).stroke === getComputedStyle(element).color)).toBeTruthy();
+    await work.screenshot({ path: testInfo.outputPath(`work-fallback-${theme}.png`) });
+  }
+});
+
+test("UX-04：帕鲁卡片从 1024px 起显示三列，保留手机布局与间距", async ({ page }, testInfo) => {
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  const cards = page.locator(".pal-roster-cards");
+  await expect(cards.locator(".pal-roster-row")).toHaveCount(3);
+  for (const [width, columns] of [[390, 1], [760, 1], [765, 2], [1023, 2], [1024, 3], [1180, 3], [1181, 3]]) {
+    await page.setViewportSize({ width, height: 960 });
+    await expect.poll(() => cards.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(columns);
+    await expect(cards).toHaveCSS("gap", "15px");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    if (width === 1024 || width === 390) {
+      await cards.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: testInfo.outputPath(`pal-roster-${width}.png`), fullPage: true });
+    }
+  }
+  await page.setViewportSize({ width: 1024, height: 960 });
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  await expect.poll(() => page.locator(".world-player-grid").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(2);
 });
 
 test("UX-04：765px 宽度可访问完整公会菜单与响应式物资卡片", async ({ page }, testInfo) => {

@@ -60,6 +60,13 @@ test("旧快照中的被动说明不显示内部目标标记", () => {
   expect(html).not.toContain("(ToSelf)");
 });
 
+test("合并工作技能表后保留详情的旧标识翻译及未知类型回退", () => {
+  const types = ["Kindling", "Planting", "Gathering", "Lumbering", "Medicine", "Cooling", "Farming", "FutureWork"];
+  const html = render({ ...pal, aptitude: { ...pal.aptitude, workSuitabilities: types.map((type) => ({ type, level: 2 })) } });
+  for (const label of ["生火", "播种", "采集", "伐木", "制药", "冷却", "牧场", "工作类型未收录"]) expect(html).toContain(label);
+  for (const type of types) expect(html).not.toContain(type);
+});
+
 test("稀有词条不显示 None 内部标记，保留三项加成", () => {
   const skill = { id: "Rare", name: "稀有", description: "攻击 +15%，防御 +15% (None)，工作速度 +20%", sourceName: "Lucky", rank: 4, element: null, power: null, cooldown: null, metadataKnown: true };
   const html = render({ ...pal, skills: { ...pal.skills, passive: [skill] } });

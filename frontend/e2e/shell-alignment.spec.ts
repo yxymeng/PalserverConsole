@@ -22,6 +22,66 @@ const shell = {
   instanceId: "default",
 };
 
+for (const local of [true, false]) {
+  test(`顶栏控件和内容始终位于背景内：${local ? "本机" : "LAN"}`, async ({ page }) => {
+    await page.route("**/api/**", route => {
+      const path = new URL(route.request().url()).pathname;
+      if (!path.startsWith("/api/")) return route.continue();
+      if (path === "/api/auth/status") return route.fulfill({ json: { ...auth, local } });
+      if (path === "/api/shell/status") return route.fulfill({ json: shell });
+      if (path === "/api/maintenance/application-update") return route.fulfill({ json: {
+        currentVersion: "0.2.0", latestVersion: "0.3.0", updateAvailable: true, portable: true, releaseNotes: [],
+      } });
+      if (path === "/api/maintenance/application-update/progress") return route.fulfill({ json: { state: "idle", step: 0, message: "" } });
+      return route.fulfill({ status: 503, json: { errorCode: "TEST_OFFLINE", message: "topbar fixture" } });
+    });
+    await page.goto("/");
+    await expect(page.getByRole("combobox", { name: /选择界面主题/ })).toBeVisible();
+    await expect(page.locator(".psc-update-trigger")).toBeVisible();
+    const failures: string[] = [];
+    for (const name of ["轻爽极简", "灵动海岛", "深邃夜色"]) {
+      await page.setViewportSize({ width: 1440, height: 960 });
+      await page.getByRole("combobox", { name: /选择界面主题/ }).click();
+      await page.getByRole("option", { name: new RegExp(name) }).click();
+      for (const width of [1035, 768, 1100, 1101, 1180, 1181, 1280, 1281, 767, 431, 430, 390, 360, 320, 1440]) {
+        await page.setViewportSize({ width, height: 960 });
+        const problems = await page.locator(".psc-topbar-actions").evaluate(actions => {
+          const errors: string[] = [];
+          const outer = actions.getBoundingClientRect();
+          const header = actions.closest("header")!.getBoundingClientRect();
+          if (outer.left < header.left || outer.right > document.documentElement.clientWidth + .25) errors.push("actions outside header");
+          for (const control of actions.querySelectorAll("button")) {
+            const box = control.getBoundingClientRect();
+            for (const child of control.children) {
+              const rect = child.getBoundingClientRect();
+              if (!rect.width || !rect.height) continue;
+              if (rect.left < box.left - .25 || rect.right > box.right + .25 || rect.top < box.top - .25 || rect.bottom > box.bottom + .25) errors.push(`${control.getAttribute("aria-label") || control.textContent}: ${child.tagName} outside control`);
+            }
+          }
+          const brand = document.querySelector(".psc-desktop-brand")!.getBoundingClientRect();
+          if (brand.right > outer.left + .25) errors.push("actions overlap brand");
+          const nav = document.querySelector(".psc-desktop-navigation")!.getBoundingClientRect();
+          if (nav.width && (brand.right > nav.left + .25 || nav.right > outer.left + .25)) errors.push("navigation overlaps adjacent content");
+          return errors;
+        });
+        failures.push(...problems.map(problem => `${name}, ${width}px: ${problem}`));
+        if (width === 1035 || width === 320) {
+          await page.getByRole("combobox", { name: /选择界面主题/ }).click();
+          const menu = page.getByRole("listbox");
+          await expect(menu).toBeVisible();
+          await expect(menu.getByRole("option")).toHaveCount(3);
+          const box = await menu.boundingBox();
+          expect(box?.x).toBeGreaterThanOrEqual(0);
+          expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+          await menu.getByRole("option", { name: new RegExp(name) }).click();
+          await expect(page.getByRole("combobox", { name: /选择界面主题/ })).toHaveAttribute("aria-expanded", "false");
+        }
+      }
+    }
+    expect(failures).toEqual([]);
+  });
+}
+
 test("首次连接使用与首页同位的壳层骨架", async ({ page }, testInfo) => {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;

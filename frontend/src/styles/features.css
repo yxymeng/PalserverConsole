@@ -1368,6 +1368,7 @@
 :root[data-theme="dark"] .pal-roster-cards .pal-passive-summary em.matched { box-shadow: 0 0 0 1px #0369a1, var(--shadow-xs); }
 .pal-roster-cards .pal-work-summary em { color: var(--foreground); font-weight: 700; }
 .pal-roster-cards .pal-work-summary em strong { color: var(--primary); font-weight: 850; }
+.pal-roster-cards .pal-work-summary em svg { flex: none; }
 .pal-roster-cards .pal-passive-summary small, .pal-roster-cards .pal-work-summary small { color: var(--muted); font-size: 11px; }
 .pal-roster-extra { display: flex; min-width: 0; align-items: flex-end; justify-content: space-between; gap: 8px; }
 .pal-roster-cards .pal-aptitude-summary { display: grid; min-width: 0; gap: 2px; }
@@ -1390,12 +1391,13 @@
 @media (max-width: 1180px) {
   .world-page-navigation { grid-template-columns: 1fr; }
   .world-snapshot-utility { justify-self: end; min-height: 52px; }
-  .world-player-grid, .pal-roster-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .world-player-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .world-overview-assets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .world-overview-assets button:last-child:nth-child(2n) { grid-column: auto; }
 }
 
 @media (max-width: 1023px) {
+  .pal-roster-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .world-community-base-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
   .inventory-toolbar { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "search submit" "category category" "scope scope" "sort clear"; }
   .inventory-scope { justify-self: stretch; }
