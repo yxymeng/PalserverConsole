@@ -1236,6 +1236,7 @@
 .pal-detail-section.work > h3 svg { color: var(--primary); }
 .pal-detail-section.work > div { display: flex; flex-wrap: wrap; gap: 8px; }
 .pal-detail-section.work > div > span { display: inline-flex; align-items: center; gap: 8px; padding: 7px 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); font-size: 12px; font-weight: 800; }
+.pal-detail-section.work > div > span > img, .pal-detail-section.work > div > span > svg { flex: none; }
 .pal-detail-section.work strong { color: var(--primary); font-size: 14px; }
 .pal-detail-empty { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 16px; color: var(--muted); background: var(--surface-subtle); font-size: 12px; }
 .pal-detail-location { display: grid; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--surface-subtle); box-shadow: var(--shadow-sm); }
@@ -1363,7 +1364,7 @@
 :root[data-theme="dark"] .pal-roster-cards .pal-passive-summary em.matched { box-shadow: 0 0 0 1px #0369a1, var(--shadow-xs); }
 .pal-roster-cards .pal-work-summary em { color: var(--foreground); font-weight: 700; }
 .pal-roster-cards .pal-work-summary em strong { color: var(--primary); font-weight: 850; }
-.pal-roster-cards .pal-work-summary em svg { flex: none; }
+.pal-roster-cards .pal-work-summary em svg, .pal-roster-cards .pal-work-summary em img { flex: none; }
 .pal-roster-cards .pal-passive-summary small, .pal-roster-cards .pal-work-summary small { color: var(--muted); font-size: 11px; }
 .pal-roster-extra { display: flex; min-width: 0; align-items: flex-end; justify-content: space-between; gap: 8px; }
 .pal-roster-cards .pal-aptitude-summary { display: grid; min-width: 0; gap: 2px; }

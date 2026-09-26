@@ -346,9 +346,12 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".pal-roster-row").filter({ hasText: "阿帕" }).locator('[data-label="等级 / 星级"]')).toContainText("4 星");
   await expect(palRow.locator('[data-label="资质"]')).toContainText("稀有度 1");
   await expect(palRow.locator('[data-label="工作适应性"]')).toContainText("手工作业Lv.1");
-  await expect(palRow.locator(".pal-work-summary em svg")).toHaveCount(2);
-  await expect(palRow.locator(".pal-work-summary em svg").first()).toHaveAttribute("width", "12");
-  await expect(palRow.locator(".pal-work-summary em svg").first()).toHaveAttribute("aria-hidden", "true");
+  await expect(palRow.locator(".pal-work-summary em img")).toHaveCount(2);
+  await expect(palRow.locator(".pal-work-summary em img").first()).toHaveAttribute("src", "/assets/work-suitabilities/T_icon_palwork_04.png");
+  await expect(palRow.locator(".pal-work-summary em img").nth(1)).toHaveAttribute("src", "/assets/work-suitabilities/T_icon_palwork_11.png");
+  await expect(palRow.locator(".pal-work-summary em img").first()).toHaveAttribute("width", "12");
+  await expect(palRow.locator(".pal-work-summary em img").first()).toHaveAttribute("alt", "");
+  await expect(palRow.locator(".pal-work-summary em img").first()).toHaveAttribute("aria-hidden", "true");
   await expect(page.getByLabel("工作技能筛选").locator('option[value="Handcraft"]')).toHaveText("手工作业");
   await expect(palRow.locator('[data-label="个体标记"]')).toHaveText("闪光");
   await expect(palRow.locator('[data-label="归属"]')).toContainText("据点一号");
@@ -469,6 +472,9 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   expect(await palDrawer.locator(".pal-iv-list > div, .pal-vitals > section").evaluateAll((cells) => cells.every((cell) => cell.scrollWidth <= cell.clientWidth))).toBe(true);
 
   await expect(palDrawer).toContainText("工作适应性技能");
+  await expect(palDrawer.locator(".pal-detail-section.work img")).toHaveCount(2);
+  await expect(palDrawer.locator(".pal-detail-section.work img").first()).toHaveAttribute("src", "/assets/work-suitabilities/T_icon_palwork_04.png");
+  await expect(palDrawer.locator(".pal-detail-section.work img").nth(1)).toHaveAttribute("src", "/assets/work-suitabilities/T_icon_palwork_11.png");
   await expect(palDrawer).toContainText("被动特性词条");
   await expect(palDrawer).toContainText("配备主动战斗技能");
   await expect(palDrawer).toContainText("传说");
@@ -614,10 +620,11 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
 });
 
-test("UX-04：未知工作技能保留原标识和等级，并使用主题化 SVG 兜底", async ({ page }, testInfo) => {
+test("UX-04：游戏原始工作图标在明暗主题加载，未知技能使用 SVG 兜底", async ({ page }, testInfo) => {
+  const types = ["EmitFlame", "Watering", "Seeding", "GenerateElectricity", "Handcraft", "Collection", "Deforest", "Mining", "OilExtraction", "ProductMedicine", "Cool", "Transport", "MonsterFarm", "FutureWork"];
   await setupWorld(page);
   await page.route("**/api/world/pals/roster?*", (route) => route.fulfill({ json: {
-    items: [{ ...pal, locationType: "base", aptitude: { ...aptitude, workSuitabilities: [{ type: "FutureWork", level: 2 }] } }],
+    items: [{ ...pal, locationType: "base", aptitude: { ...aptitude, workSuitabilities: types.map((type) => ({ type, level: 2 })) } }],
     snapshotId: new URL(route.request().url()).searchParams.get("snapshotId"), page: 1, pageSize: 60, total: 1,
     careSummary: { total: 1, critical: 1, warning: 0, attention: 1, unavailable: 0 },
     passiveSkills: [], passiveCatalog: [], metadata: { status: "ready" },
@@ -625,16 +632,59 @@ test("UX-04：未知工作技能保留原标识和等级，并使用主题化 SV
   await page.goto("/");
   await page.getByRole("button", { name: "世界", exact: true }).click();
   await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
-  const work = page.locator(".pal-work-summary em");
+  const summary = page.locator(".pal-work-summary");
+  const images = summary.locator("img");
+  await expect(images).toHaveCount(13);
+  const work = summary.locator("em").last();
   await expect(work).toHaveText("FutureWorkLv.2");
   await expect(work.locator("svg.lucide-settings")).toHaveCount(1);
   await expect(work.locator("svg")).toHaveAttribute("stroke", "currentColor");
   await expect(page.getByLabel("工作技能筛选").locator("option")).toHaveCount(14);
   for (const theme of ["light", "dark"]) {
     await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+    await expect.poll(() => images.evaluateAll((elements) => elements.every((element) => {
+      const image = element as HTMLImageElement;
+      const bounds = image.getBoundingClientRect();
+      const size = image.src.endsWith("T_icon_palwork_09.png") ? 40 : 64;
+      return image.complete && image.naturalWidth === size && image.naturalHeight === size && bounds.width === 12 && bounds.height === 12 && getComputedStyle(image).filter === "none";
+    }))).toBeTruthy();
     await expect.poll(() => work.evaluate((element) => getComputedStyle(element.querySelector("svg")!).stroke === getComputedStyle(element).color)).toBeTruthy();
-    await work.screenshot({ path: testInfo.outputPath(`work-fallback-${theme}.png`) });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    await page.locator(".pal-roster-row").screenshot({ path: testInfo.outputPath(`work-original-${theme}.png`) });
   }
+});
+
+test("UX-04：详情工作技能复用原图，在明暗主题完整加载并换行", async ({ page }, testInfo) => {
+  const types = ["EmitFlame", "Watering", "Seeding", "GenerateElectricity", "Handcraft", "Collection", "Deforest", "Mining", "OilExtraction", "ProductMedicine", "Cool", "Transport", "MonsterFarm"];
+  await setupWorld(page);
+  await page.route("**/api/world/pals/pal-1?*", (route) => route.fulfill({ json: {
+    ...pal, aptitude: { ...aptitude, workSuitabilities: types.map((type) => ({ type, level: 2 })) },
+    snapshotId: new URL(route.request().url()).searchParams.get("snapshotId"), owner: player, base,
+    container: { id: "container-1", kind: "base_workers", slotCount: 20 },
+    metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null },
+  } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  await page.locator(".pal-roster-row").first().click();
+  const dialog = page.getByRole("dialog", { name: "帕鲁详情" });
+  const section = dialog.locator(".pal-detail-section.work");
+  await expect(section.locator("img")).toHaveCount(13);
+  await expect(section).not.toContainText("FutureWork");
+  for (const theme of ["light", "dark"]) {
+    await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+    await section.scrollIntoViewIfNeeded();
+    await expect.poll(() => section.locator("img").evaluateAll((elements) => elements.every((element) => {
+      const image = element as HTMLImageElement;
+      const bounds = image.getBoundingClientRect();
+      const size = image.src.endsWith("T_icon_palwork_09.png") ? 40 : 64;
+      return image.complete && image.naturalWidth === size && image.naturalHeight === size && bounds.width === 16 && bounds.height === 16 && getComputedStyle(image).filter === "none" && image.alt === "" && image.getAttribute("aria-hidden") === "true";
+    }))).toBeTruthy();
+    expect(await section.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBeTruthy();
+    await section.screenshot({ path: testInfo.outputPath(`detail-work-${theme}.png`) });
+  }
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
 });
 
 test("UX-04：帕鲁卡片从 1024px 起显示三列，保留手机布局与间距", async ({ page }, testInfo) => {

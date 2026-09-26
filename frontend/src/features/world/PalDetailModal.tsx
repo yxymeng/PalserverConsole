@@ -1,4 +1,4 @@
-import { Briefcase, Flame, Gauge, Heart, MapPin, Search, Shield, Sparkles, Swords, X, Zap } from "lucide-react";
+import { Briefcase, Flame, Gauge, Heart, MapPin, Search, Settings, Shield, Sparkles, Swords, X, Zap } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 
 import type { WorldPalDetail, WorldPalRosterItem, WorldPalSkill } from "../../api/contracts";
@@ -79,7 +79,10 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
 
       <section className="pal-detail-section passive"><h3><Sparkles size={15} />被动特性词条 ({data.skills.passive.length}/4)</h3>{data.skills.passive.length ? <div className="pal-passive-grid">{data.skills.passive.map((skill) => <article key={skill.id} className={skill.rank !== null && skill.rank >= 3 ? "god-tier" : ""}><span><strong>{skill.name || skill.sourceName || "技能名称未收录"}</strong>{skill.rank !== null && <em>{skill.rank} 阶</em>}</span><p>{formatPassiveDescription(skill.description) || "该词条暂无说明。"}</p></article>)}</div> : <p className="pal-detail-empty">无任何被动特性词条</p>}</section>
 
-      <section className="pal-detail-section work"><h3><Briefcase size={15} />工作适应性技能</h3>{data.aptitude.workSuitabilities.length ? <div>{data.aptitude.workSuitabilities.map((work) => <span key={work.type}>{workSuitabilities[workTypeAliases[work.type] || work.type]?.label || "工作类型未收录"}<strong>Lv.{work.level}</strong></span>)}</div> : <p className="pal-detail-empty">{data.aptitude.metadataKnown ? "无工作技能（战斗与骑乘专用型）" : "工作适应性资料未收录"}</p>}</section>
+      <section className="pal-detail-section work"><h3><Briefcase size={15} />工作适应性技能</h3>{data.aptitude.workSuitabilities.length ? <div>{data.aptitude.workSuitabilities.map((work) => {
+        const { label, icon } = workSuitabilities[workTypeAliases[work.type] || work.type] || { label: "工作类型未收录", icon: null };
+        return <span key={work.type}>{icon ? <img src={icon} width={16} height={16} alt="" aria-hidden="true" /> : <Settings size={16} aria-hidden="true" />}{label}<strong>Lv.{work.level}</strong></span>;
+      })}</div> : <p className="pal-detail-empty">{data.aptitude.metadataKnown ? "无工作技能（战斗与骑乘专用型）" : "工作适应性资料未收录"}</p>}</section>
 
       <section className="pal-detail-location"><div><span><MapPin size={15} />当前位置</span><strong>{location}</strong></div></section>
     </div>

@@ -416,8 +416,8 @@ function PalAptitudeSummary({ aptitude }: { aptitude: WorldPalAptitude }) {
 
 function PalWorkSummary({ aptitude }: { aptitude: WorldPalAptitude }) {
   return <span className="pal-work-summary" data-label="工作适应性">{aptitude.workSuitabilities.length ? aptitude.workSuitabilities.map((work) => {
-    const { label, icon: Icon } = workSuitabilities[work.type] || { label: work.type, icon: Settings };
-    return <em key={work.type}><Icon size={12} aria-hidden="true" /><span>{label}</span><strong>Lv.{work.level}</strong></em>;
+    const { label, icon } = workSuitabilities[work.type] || { label: work.type, icon: null };
+    return <em key={work.type}>{icon ? <img src={icon} width={12} height={12} alt="" aria-hidden="true" /> : <Settings size={12} aria-hidden="true" />}<span>{label}</span><strong>Lv.{work.level}</strong></em>;
   }) : <small>{aptitude.metadataKnown ? "无工作适应性" : "资料未收录"}</small>}</span>;
 }
 

@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { WorldPalRosterItem } from "../../api/contracts";
 import { PalDetailModal } from "./PalDetailModal";
+import { workSuitabilities } from "./palWorkSuitabilities";
 
 const pal: WorldPalRosterItem = {
   id: "test", characterId: "SheepBall", nickname: null, level: 1, rank: null,
@@ -65,6 +66,24 @@ test("合并工作技能表后保留详情的旧标识翻译及未知类型回�
   const html = render({ ...pal, aptitude: { ...pal.aptitude, workSuitabilities: types.map((type) => ({ type, level: 2 })) } });
   for (const label of ["生火", "播种", "采集", "伐木", "制药", "冷却", "牧场", "工作类型未收录"]) expect(html).toContain(label);
   for (const type of types) expect(html).not.toContain(type);
+  const section = html.match(/<section class="pal-detail-section work">.*?<\/section>/)?.[0] || "";
+  for (const number of ["00", "02", "05", "06", "08", "10", "12"]) expect(section).toContain(`/assets/work-suitabilities/T_icon_palwork_${number}.png`);
+  expect(section.match(/<img /g)).toHaveLength(7);
+  expect(section).toContain("lucide-settings");
+  expect(section).toContain("Lv.2");
+});
+
+test("详情的全部已知工作技能使用共享原图，空状态不伪造图标", () => {
+  const html = render({ ...pal, aptitude: { ...pal.aptitude, workSuitabilities: Object.keys(workSuitabilities).map((type) => ({ type, level: 3 })) } });
+  const section = html.match(/<section class="pal-detail-section work">.*?<\/section>/)?.[0] || "";
+  expect(section.match(/<img /g)).toHaveLength(13);
+  for (const { label, icon } of Object.values(workSuitabilities)) {
+    expect(section).toContain(`src="${icon}" width="16" height="16" alt="" aria-hidden="true"`);
+    expect(section).toContain(`${label}<strong>Lv.3</strong>`);
+  }
+  expect(section).not.toContain("lucide-settings");
+  expect(render(pal)).toContain("工作适应性资料未收录");
+  expect(render({ ...pal, aptitude: { ...pal.aptitude, metadataKnown: true } })).toContain("无工作技能（战斗与骑乘专用型）");
 });
 
 test("稀有词条不显示 None 内部标记，保留三项加成", () => {
