@@ -1,4 +1,4 @@
-export type PaletteCode = 'ORIGINAL' | 'OCEAN' | 'KLEIN' | 'ULTRAVIOLET' | 'CHROME' | 'PLUS' | 'CELADON' | 'ROSE' | 'MOONSAND' | 'PINE' | 'PAL_TIDE' | 'PAL_GROVE' | 'PAL_CORAL' | 'PAL_MIST';
+export type PaletteCode = 'ORIGINAL' | 'OCEAN' | 'KLEIN' | 'ULTRAVIOLET' | 'CHROME' | 'PLUS' | 'CELADON' | 'ROSE' | 'MOONSAND' | 'PINE' | 'PAL_TIDE';
 export interface Palette {
   readonly code: PaletteCode; readonly name: string; readonly colors: readonly [string,string,string,string];
   readonly accentCut: number; readonly shadeStrength: number; readonly lightStrength: number;

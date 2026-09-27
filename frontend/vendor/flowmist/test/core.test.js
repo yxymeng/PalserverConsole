@@ -24,7 +24,7 @@ test('public values, palette stability and validation',()=>{
   assert.equal(normalizeOptions({value:-10}).value,0);assert.equal(normalizeOptions({value:120}).value,100);
   assert.throws(()=>normalizeOptions({value:NaN}),TypeError);assert.throws(()=>normalizeOptions({palette:'MISSING'}),RangeError);
   assert.equal(palettes.filter(p=>!p.code.startsWith('PAL_')).length,10);
-  assert.equal(palettes.filter(p=>p.code.startsWith('PAL_') && p.transparent).length,4);
+  assert.equal(palettes.filter(p=>p.code.startsWith('PAL_') && p.transparent).length,1);
   assert.equal(getPalette('OCEAN').name,'蓝汐');assert.ok(Object.isFrozen(palettes[0].colors));
 });
 test('project palettes enable transparency without changing upstream rendering',()=>{

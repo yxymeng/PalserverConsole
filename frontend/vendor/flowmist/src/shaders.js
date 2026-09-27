@@ -88,7 +88,8 @@ export const fragment = `
         }
         if(transparentBackground>.5){
           // Keep the cloud pigment; let CSS supply the light/island/dark track.
-          float fade=.22+.78*smoothstep(.0,.30,uv.x);
+          // A short, gentle fade keeps the pigment visible at low progress.
+          float fade=.88+.12*smoothstep(.0,.04,uv.x);
           gl_FragColor=vec4(pow(clamp(col/max(opacity,.0001),0.,1.),vec3(.94)),opacity*fade);
           return;
         }
