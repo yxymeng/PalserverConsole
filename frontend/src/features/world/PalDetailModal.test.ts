@@ -15,6 +15,17 @@ const pal: WorldPalRosterItem = {
 };
 const render = (data: WorldPalRosterItem) => renderToStaticMarkup(createElement(PalDetailModal, { data, onClose: () => {} }));
 
+test("未收录物种显示未知帕鲁和占位头像，保留真实昵称", () => {
+  for (const nickname of [null, "小龙"]) {
+    const html = render({ ...pal, characterId: "MyMod_Dragon", nickname });
+    expect(html).toContain("<h2>未知帕鲁</h2>");
+    expect(html).toContain('/assets/pals/T_icon_unknown.webp');
+    expect(html).not.toContain("MyMod_Dragon");
+    if (nickname) expect(html).toContain("“小龙”");
+    else expect(html).not.toContain("pal-detail-nickname");
+  }
+});
+
 test("详情限制小数精度，并将缺失 Rank 显示为零星", () => {
   const html = render(pal).replace(/<[^>]*>/g, "");
   for (const value of ["50.2%", "59.3", "0%", "个体值（IV）", "星级: 0 星"]) expect(html).toContain(value);

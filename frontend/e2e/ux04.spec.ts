@@ -848,16 +848,16 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.locator(".inventory-context")).toHaveCount(0);
   await tabs.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
 
-  await expect(page.locator(".pal-roster")).toContainText("FuturePal");
+  await expect(page.locator(".pal-roster")).toContainText("未知帕鲁");
   await expect(page.locator(".pal-roster")).toContainText("据点工作");
   const palRow = page.locator(".pal-roster-row").filter({ hasText: "小羊" });
   await expect(palRow.locator(".pal-roster-copy > span > strong")).toHaveText("棉悠悠");
   await expect(palRow.locator(".pal-roster-copy > small")).toHaveText("「小羊」");
   await expect(palRow).toHaveAccessibleName("棉悠悠（昵称：小羊）");
-  const unrenamedPalRow = page.locator(".pal-roster-row").filter({ hasText: "FuturePal" });
-  await expect(unrenamedPalRow.locator(".pal-roster-copy > span > strong")).toHaveText("FuturePal");
+  const unrenamedPalRow = page.locator(".pal-roster-row").filter({ hasText: "未知帕鲁" });
+  await expect(unrenamedPalRow.locator(".pal-roster-copy > span > strong")).toHaveText("未知帕鲁");
   await expect(unrenamedPalRow.locator(".pal-roster-copy > small")).toHaveCount(0);
-  await expect(unrenamedPalRow).toHaveAccessibleName("FuturePal");
+  await expect(unrenamedPalRow).toHaveAccessibleName("未知帕鲁");
   await expect(palRow.locator(".world-pal-gender")).toHaveText("♀");
   await expect(palRow.locator(".world-pal-gender")).toHaveAttribute("title", "雌性");
   await expect(palRow.locator('[data-label="等级 / 星级"]')).toContainText("0 星");
@@ -1398,6 +1398,42 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await expect(page.getByRole("textbox", { name: "搜索帕鲁图鉴花名册" })).toHaveValue("棉悠悠");
 });
 
+
+for (const nickname of ["", "小龙"]) test(`未收录帕鲁：隐藏代码、保留昵称与同种查询（${nickname || "无昵称"}）`, async ({ page }, testInfo) => {
+  await setupWorld(page);
+  const modPal = { ...unknownPal, nickname, locationType: "unassigned", gender: null, rank: null, isBoss: false, isLucky: false };
+  await page.route("**/api/world/pals/roster?*", (route) => {
+    const search = new URL(route.request().url()).searchParams.get("search") || "";
+    const items = !search || modPal.characterId.includes(search) || nickname.includes(search) ? [modPal] : [];
+    return route.fulfill({ json: { items, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, snapshotId: "world", stale: false, errorCode: null } });
+  });
+  await page.route("**/api/world/pals/pal-2?*", (route) => route.fulfill({ json: { ...modPal, snapshotId: "world", owner: null, base: null, container: null } }));
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  const row = page.locator(".pal-roster-row");
+  await expect(row.locator(".pal-roster-copy > span > strong")).toHaveText("未知帕鲁");
+  await expect(row).not.toContainText("FuturePal");
+  await expect(row.locator("img")).toHaveAttribute("src", "/assets/pals/T_icon_unknown.webp");
+  if (nickname) await expect(row.locator(".pal-roster-copy > small")).toHaveText(`「${nickname}」`);
+  else await expect(row.locator(".pal-roster-copy > small")).toHaveCount(0);
+  await row.click();
+  const dialog = page.getByRole("dialog", { name: "帕鲁详情", exact: true });
+  await expect(dialog.getByRole("heading", { name: "未知帕鲁", exact: true })).toBeVisible();
+  await expect(dialog).not.toContainText("FuturePal");
+  const avatar = dialog.locator(".pal-detail-icon img");
+  await expect(avatar).toHaveAttribute("src", "/assets/pals/T_icon_unknown.webp");
+  await expect.poll(() => avatar.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true);
+  if (nickname) await expect(dialog.locator(".pal-detail-nickname")).toHaveText(`“${nickname}”`);
+  else await expect(dialog.locator(".pal-detail-nickname")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("unknown-pal-detail.png"), animations: "disabled" });
+  const sameSpeciesRequest = page.waitForRequest((request) => request.url().includes("/api/world/pals/roster?") && new URL(request.url()).searchParams.get("search") === "FuturePal");
+  await dialog.getByRole("button", { name: "查找同种帕鲁", exact: true }).click();
+  await sameSpeciesRequest;
+  await expect(dialog).toBeHidden();
+  await expect(row).toHaveCount(1);
+  await expect(row.locator(".pal-roster-copy > span > strong")).toHaveText("未知帕鲁");
+});
 
 test("据点容量：使用存档当前槽位而非配置最高值", async ({ page }) => {
   await setupWorld(page);

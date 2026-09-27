@@ -352,7 +352,7 @@ export function PalRoster({ detailCache, snapshotId, context, pendingDetail, onP
       {loading ? <PalRosterSkeleton /> : items.length ? items.map((item) => <PalRosterRow item={item} key={item.id} selectedPassiveSkills={appliedAptitude.passiveSkills} onOpen={openDetail} />) : <div className="world-empty-state"><Search size={22} /><strong>{snapshotId ? "未找到符合当前条件的帕鲁" : "当前没有可用世界快照"}</strong>{hasFilters && <button className="quiet-button" type="button" onClick={clearFilters}>清除筛选</button>}</div>}
     </div>
     {canLoadMore && <button className="quiet-button pal-roster-more" type="button" disabled={loadingMore} onClick={() => void loadPage(Math.floor(items.length / PAGE_SIZE) + 1, true)}>{loadingMore ? <><LoaderCircle className="spin" size={17} />正在加载</> : `加载更多（还有 ${total - items.length} 条）`}</button>}
-    <PalRosterDrawer state={drawer} onClose={closeDrawer} onNavigate={(target, id) => { closeDrawer(); onNavigate?.(target, id); }} onFindSameSpecies={(item) => { const species = resolvePal(item).speciesName; closeDrawer(); setSearch(species); setAppliedSearch(species); }} />
+    <PalRosterDrawer state={drawer} onClose={closeDrawer} onNavigate={(target, id) => { closeDrawer(); onNavigate?.(target, id); }} onFindSameSpecies={(item) => { const pal = resolvePal(item); const species = pal.known ? pal.speciesName : item.characterId; closeDrawer(); setSearch(species); setAppliedSearch(species); }} />
   </section>;
 }
 

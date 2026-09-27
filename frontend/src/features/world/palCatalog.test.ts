@@ -13,7 +13,7 @@ describe("Pal catalog presentation", () => {
     });
   });
 
-  it("uses the Chinese species name without a nickname and falls back to an unknown ID", () => {
+  it("uses the Chinese species name without a nickname and labels unknown species without exposing IDs", () => {
     expect(resolvePal({ characterId: "CatMage" }).displayName).toBe("暗巫猫");
     expect(resolvePal({ characterId: "BOSS_ChickenPal" }).displayName).toBe("皮皮鸡");
     expect(resolvePal({ characterId: "Alpaca" }).displayName).toBe("美露帕");
@@ -25,10 +25,15 @@ describe("Pal catalog presentation", () => {
       known: true,
     });
     expect(resolvePal({ characterId: "FuturePal", nickname: "" })).toMatchObject({
-      displayName: "FuturePal",
-      speciesName: "FuturePal",
+      characterId: "FuturePal",
+      displayName: "未知帕鲁",
+      speciesName: "未知帕鲁",
       icon: "/assets/pals/T_icon_unknown.webp",
       known: false,
+    });
+    expect(resolvePal({ characterId: "FuturePal", nickname: "小龙" })).toMatchObject({
+      characterId: "FuturePal", displayName: "小龙", speciesName: "未知帕鲁",
+      icon: "/assets/pals/T_icon_unknown.webp", known: false,
     });
   });
 

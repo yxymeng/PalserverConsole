@@ -45,7 +45,7 @@ export function resolvePal(source: PalSource): PalPresentation {
   const characterId = textValue(source.characterId);
   const nickname = textValue(source.nickname);
   const catalogEntry = PAL_CATALOG[characterId] || PAL_CATALOG_CASE_INSENSITIVE[characterId.toLocaleLowerCase("en-US")];
-  const speciesName = catalogEntry?.name || characterId || "未知帕鲁";
+  const speciesName = catalogEntry?.name || "未知帕鲁";
   return {
     characterId: characterId || "未知",
     displayName: nickname || speciesName,
