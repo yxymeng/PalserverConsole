@@ -207,6 +207,390 @@ test("帕鲁星级筛选按显示星数请求，过期详情会刷新快照", as
   await expect.poll(() => worldDetailUrls.at(-1)?.searchParams.get("snapshotId")).toBe("world-next");
 });
 
+test("同快照重复打开详情复用缓存，快照变化后重新请求", async ({ page }) => {
+  const { worldDetailUrls, worldListUrls, switchSnapshot } = await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const trigger = page.getByRole("button", { name: "查看完整训练家档案" });
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await trigger.click();
+    await expect(dialog).toContainText("已探索区域");
+    await dialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+    await expect(trigger).toBeFocused();
+  }
+  expect(worldDetailUrls.filter(url => url.pathname === "/api/world/players/player-1")).toHaveLength(1);
+  switchSnapshot("world-cache-next");
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  await expect.poll(() => worldListUrls.filter(url => url.pathname === "/api/world/players").at(-1)?.searchParams.get("snapshotId")).toBe("world-cache-next");
+  await trigger.click();
+  await expect(dialog).toContainText("已探索区域");
+  expect(worldDetailUrls.filter(url => url.pathname === "/api/world/players/player-1").map(url => url.searchParams.get("snapshotId"))).toEqual(["world", "world-cache-next"]);
+});
+
+test("预加载与点击共享同一个慢请求，完成后重复打开无需等待", async ({ page }, info) => {
+  await setupWorld(page);
+  let release = () => {};
+  const responseGate = new Promise<void>(resolve => { release = resolve; });
+  let requests = 0;
+  await page.route("**/api/world/players/player-1?*", async route => {
+    requests += 1;
+    await responseGate;
+    await route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const trigger = page.getByRole("button", { name: "查看完整训练家档案" });
+  if (info.project.name === "desktop") await trigger.hover();
+  else await trigger.scrollIntoViewIfNeeded();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  try {
+    await expect.poll(() => requests).toBe(1);
+    await expect(dialog).toHaveCount(0);
+    await trigger.click();
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    expect(requests).toBe(1);
+  } finally {
+    release();
+  }
+  await expect(dialog).toContainText("已探索区域");
+  await dialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await expect(trigger).toBeFocused();
+  await trigger.click();
+  await expect(dialog).toContainText("已探索区域");
+  await expect(dialog.getByRole("status")).toHaveCount(0);
+  expect(requests).toBe(1);
+});
+
+test("帕鲁名册和关联帕鲁详情共享缓存", async ({ page }) => {
+  const { worldDetailUrls } = await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "帕鲁图鉴花名册" }).click();
+  await page.getByRole("button", { name: "小羊" }).click();
+  const rosterDialog = page.getByRole("dialog", { name: "帕鲁详情" });
+  await expect(rosterDialog).toBeVisible();
+  await expect(rosterDialog.locator(".pal-detail-notice")).toHaveCount(0);
+  await rosterDialog.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  await page.locator(".world-community-card").filter({ hasText: "据点一号" }).getByRole("button", { name: /小羊/ }).click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  await expect(dialog.locator(".pal-detail-header")).toContainText("小羊");
+  await expect(dialog.getByRole("status")).toHaveCount(0);
+  expect(worldDetailUrls.filter(url => url.pathname === "/api/world/pals/pal-1")).toHaveLength(1);
+});
+
+test("完整训练家档案在详情请求完成前立即打开", async ({ page }, info) => {
+  await setupWorld(page);
+  let release = () => {};
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  await page.route("**/api/world/players/player-1?*", async (route) => {
+    await responseGate;
+    await route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const trigger = page.locator(".world-player-card").filter({ hasText: "Alice" }).getByRole("button", { name: "查看完整训练家档案" });
+  await trigger.evaluate((element) => element.addEventListener("click", () => {
+    performance.mark("detail-click");
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector('[role="dialog"][aria-label="世界实体详情"]')) return;
+      observer.disconnect();
+      requestAnimationFrame(() => performance.measure("detail-open-frame", "detail-click"));
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  }, { once: true }));
+  await trigger.click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  try {
+    await expect(dialog).toBeVisible({ timeout: 1000 });
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    await expect(dialog.getByRole("button", { name: "关闭详情", exact: true })).toBeFocused();
+    console.log(`Detail opening frame (${info.project.name}): ${await page.evaluate(() => performance.getEntriesByName("detail-open-frame")[0].duration.toFixed(1))}ms before response`);
+    if (info.project.name === "mobile") {
+      await expect(dialog.getByRole("button", { name: "关闭详情", exact: true })).toBeInViewport();
+      await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
+    }
+    await page.screenshot({ path: info.outputPath("detail-loading.png") });
+  } finally {
+    release();
+  }
+  await expect(dialog).toContainText("已探索区域");
+  await dialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await expect(trigger).toBeFocused();
+});
+
+test("加载中关闭档案后，迟到响应不会重开详情或干扰重新打开", async ({ page }) => {
+  await setupWorld(page);
+  let release = () => {};
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  let requests = 0;
+  await page.route("**/api/world/players/player-1?*", async (route) => {
+    if (++requests === 1) await responseGate;
+    await route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const trigger = page.getByRole("button", { name: "查看完整训练家档案" });
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  try {
+    await trigger.click();
+    await expect.poll(() => requests).toBe(1);
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(trigger).toBeFocused();
+    expect(await page.evaluate(() => document.getElementById("root")!.inert)).toBe(false);
+    await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+    await trigger.click();
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    expect(requests).toBe(1);
+  } finally {
+    release();
+  }
+  await expect(dialog).toContainText("已探索区域");
+  await expect(dialog).toHaveAttribute("aria-busy", "false");
+  await dialog.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("关闭详情后的迟到409不会重置新筛选", async ({ page }) => {
+  const { switchSnapshot, worldListUrls } = await setupWorld(page);
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let finished = false;
+  await page.route("**/api/world/players/player-1?*", async route => { await gate; await route.fallback(); finished = true; });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const trigger = page.getByRole("button", { name: "查看完整训练家档案" });
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  try {
+    await trigger.click();
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+    await page.getByRole("textbox", { name: "搜索训练家档案" }).fill("Alice");
+    await page.locator(".world-player-archive").getByRole("button", { name: "搜索", exact: true }).click();
+    await expect.poll(() => worldListUrls.at(-1)?.searchParams.get("search")).toBe("Alice");
+    switchSnapshot("world-canceled-next");
+  } finally { release(); }
+  await expect.poll(() => finished).toBe(true);
+  // Allow a canceled consumer's potential status refresh to reach React before asserting absence.
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("textbox", { name: "搜索训练家档案" })).toHaveValue("Alice");
+  expect(worldListUrls.at(-1)?.searchParams.get("snapshotId")).toBe("world");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("快照刷新途中关闭详情不会提交迟到状态", async ({ page }) => {
+  const { switchSnapshot } = await setupWorld(page);
+  let releaseDetail = () => {};
+  let releaseStatus = () => {};
+  const detailGate = new Promise<void>(resolve => { releaseDetail = resolve; });
+  const statusGate = new Promise<void>(resolve => { releaseStatus = resolve; });
+  let blockStatus = false;
+  let refreshStarted = false;
+  let refreshFinished = false;
+  await page.route("**/api/world/players/player-1?*", async route => { await detailGate; await route.fallback(); });
+  await page.route("**/api/world/snapshots/current", async route => {
+    if (blockStatus) { refreshStarted = true; await statusGate; }
+    await route.fallback();
+    if (blockStatus) refreshFinished = true;
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  try {
+    await page.getByRole("button", { name: "查看完整训练家档案" }).click();
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    blockStatus = true;
+    switchSnapshot("world-refresh-next");
+    releaseDetail();
+    await expect.poll(() => refreshStarted).toBe(true);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toHaveCount(0);
+    await page.getByRole("textbox", { name: "搜索训练家档案" }).fill("Alice");
+  } finally { releaseDetail(); releaseStatus(); }
+  await expect.poll(() => refreshFinished).toBe(true);
+  await page.waitForTimeout(500);
+  await expect(page.getByRole("textbox", { name: "搜索训练家档案" })).toHaveValue("Alice");
+  await expect(dialog).toHaveCount(0);
+});
+
+test("返回详情后的迟到409不会清空上一详情上下文", async ({ page }) => {
+  const { switchSnapshot } = await setupWorld(page);
+  let release = () => {};
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let finished = false;
+  await page.route("**/api/world/pals/pal-2-64?*", async route => {
+    await gate;
+    await route.fulfill({ status: 409, json: { errorCode: "SNAPSHOT_REPLACED", message: "测试迟到响应" } });
+    finished = true;
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  await page.locator(".world-community-card").filter({ hasText: "大名单据点" }).getByRole("button", { name: "查看全部 64 只" }).click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  const query = dialog.getByRole("textbox", { name: "查找据点打工帕鲁" });
+  try {
+    await query.fill("打工帕鲁2-64");
+    await dialog.getByRole("button", { name: /打工帕鲁2-64/ }).click();
+    await expect(dialog.getByRole("status")).toContainText("正在读取");
+    await dialog.getByRole("button", { name: "返回上一详情" }).click();
+    await expect(query).toHaveValue("打工帕鲁2-64");
+    switchSnapshot("world-return-next");
+  } finally { release(); }
+  await expect.poll(() => finished).toBe(true);
+  await page.waitForTimeout(500);
+  await expect(query).toHaveValue("打工帕鲁2-64");
+  await expect(dialog).toHaveAttribute("data-resource", "bases");
+});
+
+test("手机抽屉内部滚动只预加载真正可见的两个入口", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "Mobile-only idle prefetch");
+  const { worldDetailUrls } = await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  await page.locator(".world-community-card").filter({ hasText: "大名单据点" }).getByRole("button", { name: "查看全部 64 只" }).click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  await expect(dialog.getByRole("textbox", { name: "查找据点打工帕鲁" })).toBeVisible();
+  await page.waitForTimeout(1000);
+  const previous = new Set(worldDetailUrls.map(url => url.pathname));
+  await dialog.evaluate(element => { element.scrollTop = element.scrollHeight; });
+  const targets = await dialog.evaluate(element => {
+    const bounds = element.getBoundingClientRect();
+    const handle = element.querySelector(".mobile-sheet-handle")!.getBoundingClientRect();
+    return Array.from(element.querySelectorAll<HTMLElement>("button[data-detail-resource][data-detail-id]")).filter(button => {
+      const rect = button.getBoundingClientRect();
+      return rect.top < bounds.bottom && rect.bottom > Math.max(bounds.top, handle.bottom);
+    }).slice(0, 2).map(button => `/api/world/${button.dataset.detailResource}/${button.dataset.detailId}`);
+  });
+  expect(targets).toHaveLength(2);
+  expect(targets.every(path => !previous.has(path))).toBe(true);
+  await expect.poll(() => targets.every(path => worldDetailUrls.some(url => url.pathname === path))).toBe(true);
+  const added = worldDetailUrls.filter(url => !previous.has(url.pathname)).map(url => url.pathname);
+  expect(added.sort()).toEqual([...targets].sort());
+});
+
+test("据点和关联帕鲁立即打开原面板，公会已读取详情直接复用", async ({ page }, info) => {
+  const { worldDetailUrls } = await setupWorld(page);
+  const gates = new Map<string, () => void>();
+  for (const path of ["bases/base-1", "pals/pal-1"]) {
+    const gate = new Promise<void>(resolve => { gates.set(path, resolve); });
+    await page.route(`**/api/world/${path}?*`, async route => { await gate; await route.fallback(); });
+  }
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  const card = page.locator(".world-community-card").filter({ hasText: "据点一号" });
+  const targets = [
+    { resource: "bases", id: "base-1", trigger: card.getByRole("button", { name: "查看全部 1 只" }) },
+    { resource: "pals", id: "pal-1", trigger: card.getByRole("button", { name: /小羊/ }) },
+  ];
+  try { for (const target of targets) {
+    await target.trigger.click();
+    const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+    try {
+      await expect(dialog.getByRole("status")).toContainText("正在读取");
+      await expect(dialog).toHaveAttribute("data-resource", target.resource);
+      await expect(page.getByRole("dialog")).toHaveCount(1);
+      if (info.project.name === "mobile") {
+        await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
+        await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(506.4, 0);
+      }
+      if (target.resource === "pals") await page.screenshot({ path: info.outputPath("pal-loading.png") });
+    } finally {
+      gates.get(`${target.resource}/${target.id}`)!();
+    }
+    const panel = await dialog.elementHandle();
+    await expect(dialog).toHaveAttribute("aria-busy", "false");
+    expect(await panel!.evaluate(element => element.isConnected)).toBe(true);
+    await dialog.getByRole("button", { name: target.resource === "pals" ? "关闭帕鲁详情" : "关闭详情", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(target.trigger).toBeFocused();
+  } } finally { gates.forEach(release => release()); }
+  const guildNav = page.locator(".world-community-guild-nav");
+  await guildNav.locator("summary").click();
+  await guildNav.getByRole("button", { name: /测试工会/ }).click();
+  await page.getByRole("button", { name: "查看成员（64）" }).click();
+  const guildDialog = page.getByRole("dialog", { name: "世界实体详情" });
+  await expect(guildDialog).toHaveAttribute("data-resource", "guilds");
+  await expect(guildDialog.getByRole("status")).toHaveCount(0);
+  expect(worldDetailUrls.filter(url => url.pathname === "/api/world/guilds/guild-1")).toHaveLength(1);
+});
+
+test("详情请求失败在原面板内重试", async ({ page }) => {
+  await setupWorld(page);
+  let requests = 0;
+  await page.route("**/api/world/players/player-1?*", (route) => ++requests === 1
+    ? route.fulfill({ status: 503, json: { errorCode: "WORLD_CACHE_UNAVAILABLE", message: "测试慢请求失败" } })
+    : route.fallback());
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "训练家档案" }).click();
+  await page.getByRole("button", { name: "查看完整训练家档案" }).click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  await expect(dialog.getByRole("alert")).toContainText("WORLD_CACHE_UNAVAILABLE");
+  const panel = await dialog.elementHandle();
+  await dialog.getByRole("button", { name: "重新尝试" }).click();
+  await expect(dialog).toContainText("已探索区域");
+  expect(await panel!.evaluate(element => element.isConnected)).toBe(true);
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.locator(".world-request-failure")).toHaveCount(0);
+});
+
+test("关联详情加载中返回保留原筛选、滚动和抽屉高度", async ({ page }, info) => {
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  await page.locator(".world-community-card").filter({ hasText: "大名单据点" }).getByRole("button", { name: "查看全部 64 只" }).click();
+  const dialog = page.getByRole("dialog", { name: "世界实体详情" });
+  await expect(dialog.getByRole("textbox", { name: "查找据点打工帕鲁" })).toBeVisible();
+  if (info.project.name === "mobile") {
+    await expect(dialog.getByRole("button", { name: "关闭详情", exact: true })).toBeFocused();
+    await dialog.getByRole("button", { name: "调整抽屉高度" }).press("ArrowUp");
+    await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
+    await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(832, 0);
+  }
+  await dialog.getByRole("textbox", { name: "查找据点打工帕鲁" }).fill("打工帕鲁2-64");
+  const palTrigger = dialog.getByRole("button", { name: /打工帕鲁2-64/ });
+  await palTrigger.scrollIntoViewIfNeeded();
+  const scrollTop = await dialog.evaluate(element => element.scrollTop);
+  let release = () => {};
+  const responseGate = new Promise<void>((resolve) => { release = resolve; });
+  let responseFinished = false;
+  await page.route("**/api/world/pals/pal-2-64?*", async (route) => {
+    await responseGate;
+    await route.fallback();
+    responseFinished = true;
+  });
+  try {
+    await palTrigger.click();
+    await expect(dialog.getByRole("status")).toContainText("正在读取帕鲁详情");
+    await expect(page.getByRole("dialog")).toHaveCount(1);
+    await dialog.getByRole("button", { name: "返回上一详情" }).click();
+    await expect(dialog.getByRole("textbox", { name: "查找据点打工帕鲁" })).toHaveValue("打工帕鲁2-64");
+    await expect.poll(() => dialog.evaluate(element => element.scrollTop)).toBeCloseTo(scrollTop, 0);
+    if (info.project.name === "mobile") expect((await dialog.boundingBox())!.height).toBeCloseTo(832, 0);
+  } finally {
+    release();
+  }
+  await expect.poll(() => responseFinished).toBe(true);
+  await expect(dialog).toHaveAttribute("data-resource", "bases");
+  await expect(dialog.getByRole("button", { name: "返回上一详情" })).toHaveCount(0);
+});
+
 test("跨实体详情遇到 SNAPSHOT_REPLACED 后按新快照重试", async ({ page }) => {
   const { worldDetailUrls, switchSnapshot } = await setupWorld(page);
   await page.goto("/");
@@ -221,6 +605,141 @@ test("跨实体详情遇到 SNAPSHOT_REPLACED 后按新快照重试", async ({ p
   await expect(page.locator(".world-player-card").filter({ hasText: "Alice" })).toBeVisible();
   await expect(page.getByRole("dialog", { name: "世界实体详情" })).toBeVisible();
   await expect(page.locator(".world-request-failure")).toHaveCount(0);
+});
+
+test("详情抽屉跨类型导航保持手势，下甩退出完整详情流程", async ({ page }, testInfo) => {
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  const guildNav = page.locator(".world-community-guild-nav");
+  await guildNav.locator("summary").click();
+  await guildNav.getByRole("button", { name: /测试工会/ }).click();
+  const trigger = page.getByRole("button", { name: "查看成员（64）" });
+  await trigger.click();
+  const drawer = page.getByRole("dialog", { name: "世界实体详情" });
+  await drawer.getByRole("button", { name: /Alice/ }).click();
+  await expect(drawer.locator(".section-heading")).toContainText("Alice");
+  const handle = drawer.getByRole("button", { name: "调整抽屉高度" });
+  if (testInfo.project.name === "mobile") {
+    await expect(handle).toBeVisible();
+    await handle.press("ArrowUp");
+    await expect(drawer).not.toHaveAttribute("data-sheet-moving", "true");
+    await expect.poll(async () => (await drawer.boundingBox())!.height).toBeCloseTo(832, 0);
+    await handle.press("ArrowDown");
+    await expect.poll(async () => (await drawer.boundingBox())!.height).toBeCloseTo(506.4, 0);
+  } else await expect(handle).toBeHidden();
+  await page.screenshot({ path: testInfo.outputPath("player-detail-navigation.png") });
+  await drawer.getByRole("button", { name: "返回上一详情" }).click();
+  await drawer.getByRole("button", { name: /据点一号/ }).click();
+  await expect(drawer.locator(".section-heading")).toContainText("据点一号");
+  if (testInfo.project.name === "mobile") {
+    await drawer.evaluate(element => { element.scrollTop = 0; });
+    const box = (await handle.boundingBox())!;
+    const client = await page.context().newCDPSession(page);
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (let step = 1; step <= 5; step++) {
+      await page.waitForTimeout(10);
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + step * 48 }] });
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await client.detach();
+    await expect(drawer).toBeHidden();
+  } else {
+    await drawer.getByRole("button", { name: "返回上一详情" }).click();
+    await page.screenshot({ path: testInfo.outputPath("guild-detail-return.png") });
+    await drawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  }
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+  expect(await page.evaluate(() => document.getElementById("root")!.inert)).toBe(false);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+});
+
+test("关联帕鲁复用当前详情抽屉并保留高度与返回上下文", async ({ page }, testInfo) => {
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  const card = page.locator(".world-community-card").filter({ hasText: "大名单据点" });
+  const trigger = card.getByRole("button", { name: "查看全部 64 只" });
+  await trigger.click();
+  const drawer = page.getByRole("dialog", { name: "世界实体详情", exact: true });
+  const mobile = testInfo.project.name === "mobile";
+  if (mobile) {
+    await expect.poll(async () => (await drawer.boundingBox())!.height).toBeCloseTo(506.4, 0);
+    await drawer.getByRole("button", { name: "调整抽屉高度" }).press("ArrowUp");
+    await expect(drawer).not.toHaveAttribute("data-sheet-moving", "true");
+    await expect.poll(async () => (await drawer.boundingBox())!.height).toBeCloseTo(832, 0);
+  }
+  await drawer.getByLabel("查找据点打工帕鲁").fill("打工帕鲁2-64");
+  const worker = drawer.getByRole("button", { name: /打工帕鲁2-64/ });
+  await worker.scrollIntoViewIfNeeded();
+  const savedTop = await drawer.evaluate(element => element.scrollTop);
+  await worker.click();
+  await expect(drawer.locator(".pal-detail-header")).toContainText("棉悠悠");
+  await expect(page.getByRole("dialog")).toHaveCount(1);
+  await expect(page.locator(".world-drawer-backdrop, .pal-roster-backdrop")).toHaveCount(1);
+  const back = drawer.getByRole("button", { name: "返回上一详情", exact: true });
+  await expect(back).toBeFocused();
+  if (mobile) {
+    await expect(page.getByRole("button", { name: "调整抽屉高度" })).toHaveCount(1);
+    await expect(drawer).toHaveAttribute("data-sheet-snap", "expanded");
+    await expect.poll(async () => (await drawer.boundingBox())!.height).toBeCloseTo(832, 0);
+    await expect.poll(() => drawer.evaluate(element => element.scrollTop)).toBe(0);
+  }
+  await page.screenshot({ path: testInfo.outputPath("linked-pal-single-panel.png") });
+  await back.click();
+  await expect(drawer.getByLabel("查找据点打工帕鲁")).toHaveValue("打工帕鲁2-64");
+  await expect.poll(() => drawer.evaluate(element => element.scrollTop)).toBe(savedTop);
+  if (mobile) await expect(drawer).toHaveAttribute("data-sheet-snap", "expanded");
+  await page.screenshot({ path: testInfo.outputPath("base-detail-return.png") });
+  await drawer.getByRole("button", { name: "关闭详情", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(await page.evaluate(() => document.getElementById("root")!.inert)).toBe(false);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+});
+
+for (const action of ["关闭按钮", "遮罩", "Escape", "下甩"] as const) test(`关联详情的${action}退出整个抽屉，返回仍保留上一详情`, async ({ page }, testInfo) => {
+  test.skip(action === "下甩" && testInfo.project.name !== "mobile", "下甩只适用于手机");
+  await setupWorld(page);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  const card = page.locator(".world-community-card").filter({ hasText: "据点一号" });
+  const trigger = card.getByRole("button", { name: "查看全部 1 只" });
+  await trigger.click();
+  const drawer = page.getByRole("dialog", { name: "世界实体详情", exact: true });
+  await drawer.getByRole("button", { name: /小羊/ }).click();
+  await expect(drawer.getByRole("button", { name: "返回上一详情", exact: true })).toBeFocused();
+  await expect(drawer.getByRole("button", { name: "关闭帕鲁详情", exact: true })).toHaveCount(1);
+  if (action === "关闭按钮") await drawer.getByRole("button", { name: "关闭帕鲁详情", exact: true }).click();
+  else if (action === "遮罩") await page.getByRole("button", { name: "关闭详情遮罩", exact: true }).click({ position: { x: 5, y: 5 } });
+  else if (action === "Escape") await page.keyboard.press("Escape");
+  else {
+    await expect(drawer).not.toHaveAttribute("data-sheet-moving", "true");
+    const box = (await drawer.getByRole("button", { name: "调整抽屉高度" }).boundingBox())!;
+    const client = await page.context().newCDPSession(page);
+    const x = box.x + box.width / 2;
+    const y = box.y + box.height / 2;
+    await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+    for (let step = 1; step <= 5; step++) {
+      await page.waitForTimeout(8);
+      await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + step * 48 }] });
+    }
+    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    await client.detach();
+  }
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(await page.evaluate(() => document.getElementById("root")!.inert)).toBe(false);
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+  await trigger.click();
+  await expect(drawer.getByRole("button", { name: "返回上一详情", exact: true })).toHaveCount(0);
+  await drawer.getByRole("button", { name: "关闭详情", exact: true }).click();
 });
 
 test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", async ({ page }, testInfo) => {
@@ -318,7 +837,7 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(linkedPalDrawer).toContainText("个体值（IV）");
   await expect(linkedPalDrawer).toContainText("当前位置");
   await expect(linkedPalDrawer).toContainText("据点工作 · 据点一号");
-  await linkedPalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await linkedPalDrawer.getByRole("button", { name: "返回上一详情" }).click();
   await expect(drawer).toContainText("队伍帕鲁");
   await drawer.getByRole("button", { name: "在仓库中查看" }).click();
   await expect(page.locator(".inventory-context")).toContainText("玩家库存：Alice");
@@ -566,7 +1085,7 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await drawer.getByRole("button", { name: /小羊/ }).click();
   const basePalDrawer = page.locator(".pal-detail-modal");
   await expect(basePalDrawer).toContainText("棉悠悠");
-  await basePalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await basePalDrawer.getByRole("button", { name: "返回上一详情" }).click();
   await expect(drawer).toContainText("完整打工帕鲁");
   await drawer.getByRole("button", { name: "关闭详情" }).click();
   const largeBaseCard = baseWorkspace.locator(".world-community-card").filter({ hasText: "大名单据点" });
@@ -587,14 +1106,14 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   expect(savedDetailScrollTop).toBeGreaterThan(0);
   await drawer.getByRole("button", { name: /打工帕鲁2-13/ }).click();
   await expect(basePalDrawer).toContainText("棉悠悠");
-  await basePalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await basePalDrawer.getByRole("button", { name: "返回上一详情" }).click();
   await expect(drawer.locator(".world-community-detail-list .audit-footer")).toContainText("第 2/6 页");
   await expect.poll(() => drawer.evaluate((element) => element.scrollTop)).toBe(savedDetailScrollTop);
   const workerSearch = drawer.getByLabel("查找据点打工帕鲁");
   await workerSearch.fill("打工帕鲁2-64");
   await expect(drawer).toContainText("打工帕鲁2-64");
   await drawer.getByRole("button", { name: /打工帕鲁2-64/ }).click();
-  await basePalDrawer.getByRole("button", { name: "关闭帕鲁详情" }).click();
+  await basePalDrawer.getByRole("button", { name: "返回上一详情" }).click();
   await expect(workerSearch).toHaveValue("打工帕鲁2-64");
   await drawer.getByRole("button", { name: "关闭详情" }).click();
   await baseWorkspace.getByRole("button", { name: "查看成员（64）" }).click();
@@ -847,6 +1366,10 @@ test("帕鲁弹窗：数值精度、布局与详情交互", async ({ page }, tes
   await trigger.click();
   const dialog = page.getByRole("dialog", { name: "帕鲁详情", exact: true });
   await expect(dialog.getByRole("button", { name: "关闭帕鲁详情" })).toBeFocused();
+  if (testInfo.project.name === "mobile") {
+    await expect(dialog.getByRole("button", { name: "调整抽屉高度" })).toBeVisible();
+    await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(506.4, 0);
+  }
   await expect(dialog.getByRole("button", { name: "查找同种帕鲁", exact: true })).toHaveCount(1);
   await expect(dialog).not.toContainText("编号:");
   await expect(dialog.locator(".pal-iv-summary")).toContainText("59.3");

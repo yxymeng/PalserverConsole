@@ -79,10 +79,10 @@ test("公会导航按完整详情筛选据点，并在详情中保留完整成�
   const pagePath = fileURLToPath(new URL("./WorldDataPage.tsx", import.meta.url));
   const pageSource = readFileSync(pagePath, "utf8");
 
-  expect(pageSource).toContain("/api/world/guilds/${encodeURIComponent(guild.id)}${suffix}");
+  expect(pageSource).toContain('detailCache.load("guilds", guild.id, snapshotId)');
   expect(pageSource).toContain("当前不会改用已加载的 50 条据点做不完整筛选");
   expect(pageSource).toContain("function baseWorkerCapacity(value: unknown): number | null");
-  expect(pageSource).toContain("/api/world/bases/${encodeURIComponent(id)}${suffix}");
+  expect(pageSource).toContain('detailCache.load("bases", id, snapshotId)');
   expect(pageSource).toContain('capacityState: hasLoadedCapacity || hasDetailCapacity ? undefined : baseCapacityErrors[base.id] ? "error" : "loading"');
   expect(pageSource).not.toContain("maxWorkerCount: base.maxWorkerCount");
   expect(pageSource).toContain("无法判断当前范围是否有据点");

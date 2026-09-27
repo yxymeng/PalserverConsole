@@ -24,7 +24,8 @@ export function MobileSheetHandle({ onDismiss }: { onDismiss: () => void }) {
       handle.disabled = !media.matches;
       if (!media.matches) return;
       const naturalHeight = panel.scrollHeight + 44;
-      panel.classList.add("mobile-bottom-sheet");
+      // React owns className and may replace it when navigating between entity types.
+      panel.dataset.sheetMobile = "true";
       if (locks++ === 0) {
         previousOverflow = document.body.style.overflow;
         document.body.style.overflow = "hidden";
@@ -35,32 +36,50 @@ export function MobileSheetHandle({ onDismiss }: { onDismiss: () => void }) {
       let anchor: "compact" | "expanded" = "compact";
       let animation: ReturnType<typeof animate> | undefined;
       let openingFrame = 0;
+      let dismissFrame = 0;
       let drag: { id: number; y: number; height: number; samples: { y: number; time: number }[] } | null = null;
       const write = (value: number) => {
         height = value;
+        panel.style.setProperty("--sheet-transform", `translate3d(0, ${expanded - value}px, 0)`);
+      };
+      const commit = (value: number) => {
+        height = value;
         panel.style.setProperty("--sheet-height", `${value}px`);
+        panel.style.removeProperty("--sheet-transform");
+        panel.style.removeProperty("--sheet-tail");
+        delete panel.dataset.sheetMoving;
+      };
+      const prepare = (target: number) => {
+        // Keep content layout stable while the surface follows the finger or spring.
+        panel.style.setProperty("--sheet-height", `${expanded}px`);
+        panel.style.setProperty("--sheet-tail", `${Math.max(0, expanded - target)}px`);
+        panel.dataset.sheetMoving = "true";
+        write(height);
       };
       const finishDismiss = () => {
         dismissRef.current();
-        requestAnimationFrame(() => {
-          // Controlled dialogs may reject dismissal while busy.
-          if (panel.isConnected && panel.hasAttribute("data-open")) {
-            delete panel.dataset.sheetClosing;
-            settle(compact);
+        dismissFrame = requestAnimationFrame(() => {
+          // Returning to a previous detail or rejecting a close leaves the panel mounted.
+          if (panel.isConnected && !panel.hasAttribute("data-closed")) {
+            settle(anchor === "expanded" ? expanded : compact);
           }
         });
       };
       const settle = (target: number, velocity = 0) => {
         animation?.stop();
+        cancelAnimationFrame(openingFrame);
+        cancelAnimationFrame(dismissFrame);
+        velocity = Math.max(-2400, Math.min(2400, velocity));
         if (target === 0) {
           panel.dataset.sheetClosing = "true";
           if (matchMedia("(prefers-reduced-motion: reduce)").matches) {
-            write(0);
+            commit(0);
             finishDismiss();
             return;
           }
+          prepare(height);
           animation = animate(height, 0, {
-            type: "spring", stiffness: 420, damping: 40, mass: 0.8, velocity,
+            type: "spring", stiffness: 700, damping: 44, mass: 0.65, velocity, restDelta: 0.5, restSpeed: 10,
             onUpdate: write,
             onComplete: finishDismiss,
           });
@@ -69,15 +88,22 @@ export function MobileSheetHandle({ onDismiss }: { onDismiss: () => void }) {
         delete panel.dataset.sheetClosing;
         anchor = target === expanded ? "expanded" : "compact";
         panel.dataset.sheetSnap = anchor;
-        if (matchMedia("(prefers-reduced-motion: reduce)").matches) { write(target); return; }
+        if (matchMedia("(prefers-reduced-motion: reduce)").matches) { commit(target); return; }
+        prepare(target);
         animation = animate(height, target, {
-          type: "spring", stiffness: 420, damping: 36, mass: 0.8, velocity,
+          type: "spring", stiffness: 620, damping: 42, mass: 0.7, velocity, restDelta: 0.5, restSpeed: 10,
           onUpdate: write,
+          onComplete: () => commit(target),
         });
       };
       const layout = (enter: boolean) => {
         animation?.stop();
+        cancelAnimationFrame(openingFrame);
+        cancelAnimationFrame(dismissFrame);
+        if (drag && handle.hasPointerCapture(drag.id)) handle.releasePointerCapture(drag.id);
         drag = null;
+        delete panel.dataset.sheetClosing;
+        delete panel.dataset.sheetDragging;
         const viewport = window.visualViewport;
         const available = viewport?.height ?? window.innerHeight;
         expanded = Math.max(120, available - 12);
@@ -85,15 +111,24 @@ export function MobileSheetHandle({ onDismiss }: { onDismiss: () => void }) {
         panel.style.setProperty("--sheet-bottom", `${Math.max(0, window.innerHeight - available - (viewport?.offsetTop ?? 0))}px`);
         const target = anchor === "expanded" ? expanded : compact;
         if (enter && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
-          write(0);
+          height = 0;
+          prepare(target);
           openingFrame = requestAnimationFrame(() => settle(target));
-        } else write(target);
+        } else commit(target);
         panel.dataset.sheetSnap = anchor;
       };
       const resize = () => layout(false);
       const down = (event: PointerEvent) => {
         if (!event.isPrimary || event.button !== 0) return;
+        const target = event.target instanceof Element ? event.target : null;
+        const area = target?.closest(".mobile-sheet-handle, header");
+        if (!area || area.parentElement !== panel) return;
+        const control = target?.closest("button, input, textarea, select, a, summary, [role='button']");
+        if (control && control !== handle) return;
         animation?.stop();
+        cancelAnimationFrame(openingFrame);
+        cancelAnimationFrame(dismissFrame);
+        prepare(height);
         drag = { id: event.pointerId, y: event.clientY, height, samples: [{ y: event.clientY, time: event.timeStamp }] };
         handle.setPointerCapture(event.pointerId);
         panel.dataset.sheetDragging = "true";
@@ -125,28 +160,32 @@ export function MobileSheetHandle({ onDismiss }: { onDismiss: () => void }) {
             : anchor === "compact" ? expanded : compact);
       };
       layout(true);
-      handle.addEventListener("pointerdown", down);
-      handle.addEventListener("pointermove", move);
-      handle.addEventListener("pointerup", finish);
-      handle.addEventListener("pointercancel", finish);
-      handle.addEventListener("lostpointercapture", finish);
+      panel.addEventListener("pointerdown", down);
+      panel.addEventListener("pointermove", move);
+      panel.addEventListener("pointerup", finish);
+      panel.addEventListener("pointercancel", finish);
+      panel.addEventListener("lostpointercapture", finish);
       handle.addEventListener("keydown", keydown);
       window.visualViewport?.addEventListener("resize", resize);
       window.addEventListener("resize", resize);
       dispose = () => {
         animation?.stop();
         cancelAnimationFrame(openingFrame);
-        handle.removeEventListener("pointerdown", down);
-        handle.removeEventListener("pointermove", move);
-        handle.removeEventListener("pointerup", finish);
-        handle.removeEventListener("pointercancel", finish);
-        handle.removeEventListener("lostpointercapture", finish);
+        cancelAnimationFrame(dismissFrame);
+        panel.removeEventListener("pointerdown", down);
+        panel.removeEventListener("pointermove", move);
+        panel.removeEventListener("pointerup", finish);
+        panel.removeEventListener("pointercancel", finish);
+        panel.removeEventListener("lostpointercapture", finish);
         handle.removeEventListener("keydown", keydown);
         window.visualViewport?.removeEventListener("resize", resize);
         window.removeEventListener("resize", resize);
-        panel.classList.remove("mobile-bottom-sheet");
+        delete panel.dataset.sheetMobile;
         panel.style.removeProperty("--sheet-height");
         panel.style.removeProperty("--sheet-bottom");
+        panel.style.removeProperty("--sheet-transform");
+        panel.style.removeProperty("--sheet-tail");
+        delete panel.dataset.sheetMoving;
         delete panel.dataset.sheetSnap;
         delete panel.dataset.sheetDragging;
         delete panel.dataset.sheetClosing;

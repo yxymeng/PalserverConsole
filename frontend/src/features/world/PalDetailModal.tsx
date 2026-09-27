@@ -1,4 +1,4 @@
-import { Briefcase, Flame, Gauge, Heart, MapPin, Search, Settings, Shield, Sparkles, Swords, X, Zap } from "lucide-react";
+import { ArrowLeft, Briefcase, Flame, Gauge, Heart, MapPin, Search, Settings, Shield, Sparkles, Swords, X, Zap } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 
 import type { WorldPalDetail, WorldPalRosterItem, WorldPalSkill } from "../../api/contracts";
@@ -17,15 +17,23 @@ const workTypeAliases: Record<string, string> = {
   Medicine: "ProductMedicine", Cooling: "Cool", Farming: "MonsterFarm",
 };
 
-export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, closeRef, ariaLabel = "帕鲁详情", notice }: {
+type PalDetailContentProps = {
   data: PalData;
   onClose: () => void;
   onFindSameSpecies?: (data: PalData) => void;
-  panelRef?: Ref<HTMLElement>;
   closeRef?: Ref<HTMLButtonElement>;
-  ariaLabel?: string;
   notice?: ReactNode;
-}) {
+  onBack?: () => void;
+};
+
+export function PalDetailModal({ panelRef, ariaLabel = "帕鲁详情", ...props }: PalDetailContentProps & { panelRef?: Ref<HTMLElement>; ariaLabel?: string }) {
+  return <aside ref={panelRef} className="pal-detail-modal" role="dialog" aria-modal="true" aria-label={ariaLabel}>
+    <MobileSheetHandle onDismiss={props.onClose} />
+    <PalDetailContent {...props} />
+  </aside>;
+}
+
+export function PalDetailContent({ data, onClose, onFindSameSpecies, closeRef, notice, onBack }: PalDetailContentProps) {
   const pal = resolvePal(data);
   const ownerName = data.ownerName || ("owner" in data ? data.owner?.name : null);
   const baseName = data.baseName || ("base" in data ? data.base?.name : null);
@@ -47,16 +55,16 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
   ] as const;
   const sameSpecies = () => onFindSameSpecies?.(data);
 
-  return <aside ref={panelRef} className="pal-detail-modal" role="dialog" aria-modal="true" aria-label={ariaLabel}>
-    <MobileSheetHandle onDismiss={onClose} />
+  return <>
     <header className="pal-detail-header">
+      {onBack && <button ref={closeRef} className="pal-detail-close" type="button" aria-label="返回上一详情" title="返回上一详情" onClick={onBack}><ArrowLeft size={20} /></button>}
       <div className="pal-detail-identity">
         <span className="pal-detail-icon"><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span>
         <div><div className="pal-detail-title"><h2>{pal.speciesName}</h2>{data.nickname && <span className="pal-detail-nickname">“{data.nickname}”</span>}{pal.isBoss && <span className="pal-detail-badge boss"><Flame size={14} />巨型头目</span>}{pal.isLucky && <span className="pal-detail-badge lucky"><Sparkles size={14} />稀有闪光</span>}</div>
           <p><span>性别: <b className={pal.gender || "unknown"}>{pal.gender === "male" ? "♂ 雄性" : pal.gender === "female" ? "♀ 雌性" : "无性别"}</b></span><i>·</i><span>等级: <strong>Lv.{data.level ?? "—"}</strong></span><i>·</i><span>星级: <em>{pal.rank === null ? "不可用" : pal.rank === 0 ? "0 星" : `★ x${pal.rank}`}</em></span><i>·</i><span>物种稀有度: <strong>{formatValue(data.aptitude.speciesRarity)}</strong></span></p>
         </div>
       </div>
-      <div className="pal-detail-header-actions"><button ref={closeRef} className="pal-detail-close" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={20} /></button></div>
+      <div className="pal-detail-header-actions"><button ref={onBack ? undefined : closeRef} className="pal-detail-close" type="button" aria-label="关闭帕鲁详情" title="关闭详情" onClick={onClose}><X size={20} /></button></div>
     </header>
 
     <div className="pal-detail-body">
@@ -88,7 +96,7 @@ export function PalDetailModal({ data, onClose, onFindSameSpecies, panelRef, clo
     </div>
 
     {onFindSameSpecies && <footer className="pal-detail-footer"><button className="pal-detail-same" type="button" onClick={sameSpecies}><Search size={16} />查找同种帕鲁</button></footer>}
-  </aside>;
+  </>;
 }
 
 function Vital({ label, value, percent, tone }: { label: string; value: string; percent: number | null; tone: "san" | "hunger" }) {

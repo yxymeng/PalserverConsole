@@ -24,7 +24,7 @@ function App() {
   return h('main', {},
     ...['card', 'dialog', 'sheet', 'confirm'].map(kind => h('button', {key:kind, onClick:()=>setOpen(kind)}, kind)),
     open==='card' && h('section', {role:'dialog', 'aria-label':'详情卡片', style:{position:'fixed',inset:'10% 10%',zIndex:50,display:'flex',flexDirection:'column',background:'var(--surface)'}},
-      h(MobileSheetHandle, {onDismiss:()=>{if(!busy)setOpen('');}}), h('h2', {}, '详情卡片'), h('input', {'aria-label':'测试输入'}),
+      h(MobileSheetHandle, {onDismiss:()=>{if(!busy)setOpen('');}}), h('header', {}, h('h2', {}, '详情卡片')), h('input', {'aria-label':'测试输入'}),
       h('button', {onClick:()=>setBusy(!busy)}, busy?'解除忙碌':'模拟忙碌'),
       h('button', {onClick:()=>setOpen('')}, '关闭详情'), h('div', {style:{height:900,flexShrink:0}}, '可滚动内容'), h('button', {}, '内容末尾')),
     h(Dialog, {open:open==='dialog', onOpenChange:value=>{if(!value)setOpen('');}},
@@ -65,30 +65,33 @@ test("详情卡片：真实触摸速度吸附、阻尼、取消、滚动、忙�
   const handle = dialog.getByRole("button", { name: "调整抽屉高度" });
   if (info.project.name === "desktop") {
     await expect(handle).toBeHidden();
-    await expect(dialog).not.toHaveClass(/mobile-bottom-sheet/);
+    await expect(dialog).not.toHaveAttribute("data-sheet-mobile", "true");
     await page.screenshot({ path: info.outputPath("dialog-desktop.png") });
     await page.getByRole("button", { name: "关闭详情" }).click();
     await expect(dialog).toBeHidden();
     return;
   }
   await expect(dialog).toHaveAttribute("data-sheet-snap", "compact");
+  await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(506.4, 0);
   await swipe(page, -90, 85);
   await expect(dialog).toHaveAttribute("data-sheet-snap", "compact");
   await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(506.4, 0);
   await swipe(page, -90, 8);
   await expect(dialog).toHaveAttribute("data-sheet-snap", "expanded");
+  await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
   await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(832, 0);
   const box = (await handle.boundingBox())!;
   await page.mouse.move(195, box.y + 22);
   await page.mouse.down();
   await page.mouse.move(195, box.y + 2);
-  const overshoot = (await dialog.boundingBox())!.height;
+  const overshoot = 844 - (await dialog.boundingBox())!.y;
   expect(overshoot).toBeGreaterThan(832);
   expect(overshoot).toBeLessThan(852);
   await page.mouse.up();
   await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(832, 0);
   await swipe(page, 100, 20, true);
   await expect(dialog).toHaveAttribute("data-sheet-snap", "expanded");
+  await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
   await dialog.getByRole("button", { name: "内容末尾" }).scrollIntoViewIfNeeded();
   await expect.poll(() => dialog.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
   await expect(handle).toBeInViewport();
@@ -100,8 +103,10 @@ test("详情卡片：真实触摸速度吸附、阻尼、取消、滚动、忙�
   await dialog.getByRole("button", { name: "模拟忙碌" }).click();
   await swipe(page, 160, 8);
   await expect(dialog).toBeVisible();
+  await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(506.4, 0);
+  await expect(dialog).not.toHaveAttribute("data-sheet-closing", "true");
   await expect(dialog).toHaveAttribute("data-sheet-snap", "compact");
-  await dialog.getByRole("button", { name: "解除忙碌" }).evaluate((button: HTMLButtonElement) => button.click());
+  await dialog.getByRole("button", { name: "解除忙碌" }).click();
   await swipe(page, 200, 8);
   expect(await dialog.isVisible()).toBe(true);
   expect((await dialog.boundingBox())!.height).toBeGreaterThan(0);
@@ -115,7 +120,7 @@ test("操作确认、广播和普通侧栏保持原样并限制在手机视口�
     const dialog = page.getByRole(kind === "confirm" ? "alertdialog" : "dialog");
     if (info.project.name === "mobile") {
       await expect(dialog.getByRole("button", { name: "调整抽屉高度" })).toHaveCount(0);
-      await expect(dialog).not.toHaveClass(/mobile-bottom-sheet/);
+      await expect(dialog).not.toHaveAttribute("data-sheet-mobile", "true");
       await expect.poll(async () => {
         const box = (await dialog.boundingBox())!;
         return box.x + box.width;
@@ -135,4 +140,105 @@ test("操作确认、广播和普通侧栏保持原样并限制在手机视口�
     await expect(dialog).toBeHidden();
     expect(await page.evaluate(() => document.body.dataset.confirmed)).toBeUndefined();
   }
+});
+
+test("视口变化和减少动态效果不会让关闭中的详情卡片失去交互", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "只验证手机手势和视口变化");
+  await page.getByRole("button", { name: "card", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "详情卡片" });
+  await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(506.4, 0);
+  await dialog.getByRole("button", { name: "模拟忙碌" }).click();
+  await swipe(page, 200, 8);
+  await expect(dialog).toHaveAttribute("data-sheet-closing", "true");
+  await page.setViewportSize({ width: 390, height: 700 });
+  await expect(dialog).not.toHaveAttribute("data-sheet-closing", "true");
+  await expect(dialog).toHaveCSS("pointer-events", "auto");
+  await expect.poll(async () => (await dialog.boundingBox())!.height).toBeCloseTo(420, 0);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await expect(dialog).not.toHaveAttribute("data-sheet-mobile", "true");
+  await page.setViewportSize({ width: 390, height: 700 });
+  await expect(dialog.getByRole("button", { name: "调整抽屉高度" })).toBeVisible();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await dialog.getByRole("button", { name: "调整抽屉高度" }).press("ArrowUp");
+  expect((await dialog.boundingBox())!.height).toBeCloseTo(688, 0);
+  await swipe(page, 420, 8);
+  await expect(dialog).not.toHaveAttribute("data-sheet-closing", "true");
+  expect((await dialog.boundingBox())!.height).toBeCloseTo(688, 0);
+  await dialog.getByRole("button", { name: "解除忙碌" }).click();
+  await dialog.getByRole("button", { name: "关闭详情" }).click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(() => page.evaluate(() => document.body.style.overflow)).not.toBe("hidden");
+});
+
+test("拖动跟随手指且连续移动不逐帧重新布局", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "只验证手机拖动性能");
+  await page.getByRole("button", { name: "card", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "详情卡片" });
+  const handle = dialog.getByRole("button", { name: "调整抽屉高度" });
+  await expect.poll(async () => (await dialog.boundingBox())!.y).toBeCloseTo(337.6, 0);
+  const box = (await handle.boundingBox())!;
+  const client = await page.context().newCDPSession(page);
+  await client.send("Performance.enable");
+  await client.send("Emulation.setCPUThrottlingRate", { rate: 4 });
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y - 2 }] });
+  await page.waitForTimeout(40);
+  const metrics = async () => Object.fromEntries((await client.send("Performance.getMetrics")).metrics.map(({ name, value }) => [name, value]));
+  const before = await metrics();
+  for (let step = 1; step <= 20; step++) {
+    await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y - 2 - step * 6 }] });
+    await page.waitForTimeout(16);
+  }
+  const after = await metrics();
+  const layoutCount = after.LayoutCount - before.LayoutCount;
+  console.log(`Sheet drag: layouts=${layoutCount}, layoutMs=${((after.LayoutDuration - before.LayoutDuration) * 1000).toFixed(2)}, scriptMs=${((after.ScriptDuration - before.ScriptDuration) * 1000).toFixed(2)}`);
+  expect((await dialog.boundingBox())!.y).toBeCloseTo(337.6 - 122, 0);
+  await client.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  await client.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+  await client.detach();
+  expect(layoutCount).toBeLessThanOrEqual(2);
+});
+
+test("标题区可以拖动，输入和按钮保留各自操作", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "只验证手机标题手势");
+  await page.getByRole("button", { name: "card", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "详情卡片" });
+  await expect.poll(async () => (await dialog.boundingBox())!.y).toBeCloseTo(337.6, 0);
+  const title = (await dialog.locator("header").boundingBox())!;
+  await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(title.x + title.width / 2, title.y + title.height / 2 - 100);
+  expect((await dialog.boundingBox())!.y).toBeCloseTo(237.6, 0);
+  await page.mouse.up();
+  await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
+  await dialog.getByRole("textbox", { name: "测试输入" }).fill("保留输入操作");
+  await expect(dialog).not.toHaveAttribute("data-sheet-dragging", "true");
+  await dialog.getByRole("button", { name: "关闭详情" }).click();
+  await expect(dialog).toBeHidden();
+});
+
+test("新的触摸立即接管正在吸附的动画", async ({ page }, info) => {
+  test.skip(info.project.name !== "mobile", "只验证手机动画中断");
+  await page.getByRole("button", { name: "card", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "详情卡片" });
+  const handle = dialog.getByRole("button", { name: "调整抽屉高度" });
+  await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
+  await handle.press("ArrowUp");
+  await expect.poll(async () => (await dialog.boundingBox())!.y, { intervals: [8] }).toBeLessThan(30);
+  await expect(dialog).toHaveAttribute("data-sheet-moving", "true");
+  const client = await page.context().newCDPSession(page);
+  const box = (await handle.boundingBox())!;
+  const x = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  await client.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
+  const startTop = (await dialog.boundingBox())!.y;
+  await client.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x, y: y + 60 }] });
+  await page.waitForTimeout(40);
+  expect((await dialog.boundingBox())!.y).toBeCloseTo(startTop + 60, 0);
+  await client.send("Input.dispatchTouchEvent", { type: "touchCancel", touchPoints: [] });
+  await client.detach();
+  await expect(dialog).not.toHaveAttribute("data-sheet-moving", "true");
+  expect((await dialog.boundingBox())!.height).toBeCloseTo(832, 0);
 });

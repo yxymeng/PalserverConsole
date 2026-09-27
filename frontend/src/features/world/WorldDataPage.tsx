@@ -10,19 +10,17 @@ import { useIsMobile } from "../../hooks/use-mobile";
 import { formatWorldTime, type PrimaryWorldResource } from "./worldTable";
 import { playerInitial, resolvePal, UNKNOWN_PAL_ICON } from "./palCatalog";
 import { PalRoster, type PalRosterContext } from "./PalRoster";
-import { PalDetailModal } from "./PalDetailModal";
+import { PalDetailContent } from "./PalDetailModal";
 import { InventoryWorkspace, type InventoryContext } from "./InventoryWorkspace";
 import { PLAYER_PROGRESS_GROUPS, PLAYER_PROGRESS_LABELS, playerProgressCoverage, playerProgressOf, playerProgressPercent, playerProgressTotal, playerProgressUnavailable, playerProgressValue } from "./playerProgress";
 import { presentWorldSnapshot } from "./worldSnapshotPresentation";
 import { waitForWorldReparse } from "./worldReparse";
 import { ensureWorldContract } from "./worldContract";
+import { createWorldDetailCache, type EntityDetail, type WorldDetailCache } from "./worldDetailCache";
+import { useDetailPrefetch } from "./useDetailPrefetch";
 
-type EntityDetail =
-  | { resource: "players"; data: WorldPlayerDetail & WorldSnapshotContext }
-  | { resource: "pals"; data: WorldPalDetail & WorldSnapshotContext }
-  | { resource: "guilds"; data: WorldGuildDetail & WorldSnapshotContext }
-  | { resource: "bases"; data: WorldBaseDetail & WorldSnapshotContext };
 type WorldEntityDetailData = EntityDetail["data"];
+type DetailRequest = { resource: EntityDetail["resource"]; id: string; preserveCurrent: boolean; error: string };
 type RelationshipItem = WorldPlayerListItem | WorldPalListItem | WorldGuildListItem | WorldBaseListItem | WorldContainerReference;
 type SortKey = "name" | "level-desc" | "id";
 type StatusFilter = "all" | "guilded" | "unguilded";
@@ -66,6 +64,7 @@ const PLAYER_SORT_OPTIONS = [{ value: "name", label: "名称" }, { value: "level
 
 export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [status, setStatus] = useState<WorldStatus | null>(null);
+  const [detailCache] = useState(createWorldDetailCache);
   const [onlinePlayerCount, setOnlinePlayerCount] = useState<number | null>(null);
   const [workspace, setWorkspace] = useState<WorkspaceKey>("overview");
   const [resource, setResource] = useState<PrimaryWorldResource>("players");
@@ -81,6 +80,8 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [selected, setSelected] = useState<EntityDetail | null>(null);
+  const [detailRequest, setDetailRequest] = useState<DetailRequest | null>(null);
+  const detailController = useRef<AbortController | null>(null);
   const [pendingPalDetail, setPendingPalDetail] = useState<{ id: string; snapshotId: string } | null>(null);
   const [detailHistory, setDetailHistory] = useState<EntityDetail[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -97,10 +98,19 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   const scrollPositions = useRef<Partial<Record<WorkspaceKey, number>>>({});
   const previousSnapshotId = useRef<string | null | undefined>(undefined);
   const detailReturnFocusRef = useRef<HTMLElement | null>(null);
+  const detailOpen = Boolean(selected || detailRequest);
+  useEffect(() => {
+    if (detailOpen || !detailReturnFocusRef.current) return;
+    const frame = window.requestAnimationFrame(() => detailReturnFocusRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [detailOpen]);
+  useEffect(() => () => detailController.current?.abort(), []);
   const snapshotId = status?.snapshotId;
+  useDetailPrefetch(detailCache, snapshotId);
 
-  const refreshSnapshot = useCallback(async () => {
-    const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current");
+  const refreshSnapshot = useCallback(async (signal?: AbortSignal) => {
+    const nextStatus = await requestJson<WorldStatus>("/api/world/snapshots/current", { signal });
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
     ensureWorldContract(nextStatus.contract);
     setStatus(nextStatus);
     return nextStatus.snapshotId;
@@ -255,8 +265,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   }
 
   function chooseWorkspace(next: WorkspaceKey) {
-    setSelected(null);
-    setDetailHistory([]);
+    closeDetail();
     const target = WORKSPACES.find((item) => item.key === next);
     if (target?.resource) {
       chooseResource(target.resource);
@@ -268,8 +277,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
   function openInventory(context: InventoryContext, pushHistory = true) {
     setInventoryContext(context);
     activateWorkspace("inventories", pushHistory);
-    setSelected(null);
-    setDetailHistory([]);
+    closeDetail();
   }
 
   function openPalSummary(context: Omit<PalRosterContext, "token">) {
@@ -338,34 +346,60 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
 
   const openDetail = useCallback(async (nextResource: EntityDetail["resource"], id: string, preserveCurrent = false, trigger?: HTMLElement) => {
     if (!selected) detailReturnFocusRef.current = trigger || (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-    setDetailLoading(true);
+    detailController.current?.abort();
+    const controller = new AbortController();
+    detailController.current = controller;
+    const cached = detailCache.peek(nextResource, id, snapshotId);
+    setDetailRequest(cached ? null : { resource: nextResource, id, preserveCurrent, error: "" });
+    setDetailLoading(!cached);
     setError("");
     try {
       let requestedSnapshotId = snapshotId;
       let nextDetail: EntityDetail;
       try {
-        nextDetail = await loadEntityDetail(nextResource, id, requestedSnapshotId);
+        nextDetail = { resource: nextResource, data: cached || await detailCache.load(nextResource, id, requestedSnapshotId) } as EntityDetail;
       } catch (caught) {
+        if (controller.signal.aborted) return;
         if (!(caught instanceof ApiRequestError) || caught.code !== "SNAPSHOT_REPLACED") throw caught;
-        requestedSnapshotId = await refreshSnapshot();
+        requestedSnapshotId = await refreshSnapshot(controller.signal);
+        if (controller.signal.aborted) return;
         if (!requestedSnapshotId || requestedSnapshotId === snapshotId) throw caught;
-        nextDetail = await loadEntityDetail(nextResource, id, requestedSnapshotId);
+        nextDetail = { resource: nextResource, data: await detailCache.load(nextResource, id, requestedSnapshotId) } as EntityDetail;
       }
+      if (controller.signal.aborted) return;
       if (requestedSnapshotId && nextDetail.data.snapshotId !== requestedSnapshotId) throw new Error("SNAPSHOT_REPLACED: 详情与当前快照不一致。");
       if (preserveCurrent && selected && selected.data.snapshotId === nextDetail.data.snapshotId) setDetailHistory((current) => [...current, selected]);
       setSelected(nextDetail);
+      setDetailRequest(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "实体详情读取失败");
+      if (controller.signal.aborted) return;
+      if (isAbortError(caught)) { setDetailRequest(null); return; }
+      const message = caught instanceof Error ? caught.message : "实体详情读取失败";
+      setError(message);
+      setDetailRequest({ resource: nextResource, id, preserveCurrent, error: message });
     } finally {
-      setDetailLoading(false);
+      if (!controller.signal.aborted) setDetailLoading(false);
     }
-  }, [refreshSnapshot, selected, snapshotId]);
+  }, [detailCache, refreshSnapshot, selected, snapshotId]);
 
-  function closeDetail() {
+  function returnDetail() {
+    detailController.current?.abort();
+    setDetailLoading(false);
+    if (detailRequest) {
+      setDetailRequest(null);
+      return;
+    }
     const previous = detailHistory.at(-1) || null;
     setDetailHistory((current) => current.slice(0, -1));
     setSelected(previous);
-    if (!previous) window.requestAnimationFrame(() => detailReturnFocusRef.current?.focus());
+  }
+
+  function closeDetail() {
+    detailController.current?.abort();
+    setDetailRequest(null);
+    setDetailLoading(false);
+    setSelected(null);
+    setDetailHistory([]);
   }
 
   const displayedItems = result?.items || [];
@@ -384,7 +418,7 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
     <main className="world-workspace">
       <section id="world-workspace-overview" role="tabpanel" aria-labelledby="world-workspace-tab-overview" hidden={workspace !== "overview"}><WorldOverviewLobby status={status} onlinePlayerCount={onlinePlayerCount} onChooseResource={(target) => chooseResource(target, true)} onShowInventory={(context) => openInventory(context, true)} onShowPals={openPalSummary} /></section>
       <section id="world-workspace-inventories" role="tabpanel" aria-labelledby="world-workspace-tab-inventories" hidden={workspace !== "inventories"}>{visitedWorkspaces.has("inventories") && <InventoryWorkspace key={snapshotId || "none"} snapshotId={snapshotId} context={inventoryContext} onSnapshotReplaced={refreshSnapshot} onContextChange={setInventoryContext} onClearContext={() => setInventoryContext({ scope: "inventory" })} />}</section>
-      <section id="world-workspace-pals" role="tabpanel" aria-labelledby="world-workspace-tab-pals" hidden={workspace !== "pals"}>{visitedWorkspaces.has("pals") && <PalRoster key={snapshotId || "none"} snapshotId={snapshotId} context={palContext} pendingDetail={pendingPalDetail} onPendingDetailHandled={clearPendingPalDetail} onSnapshotReplaced={refreshPalSnapshot} onNavigate={(target, id) => target === "bases" ? chooseResource(target, true) : void openDetail(target, id, true)} />}</section>
+      <section id="world-workspace-pals" role="tabpanel" aria-labelledby="world-workspace-tab-pals" hidden={workspace !== "pals"}>{visitedWorkspaces.has("pals") && <PalRoster detailCache={detailCache} key={snapshotId || "none"} snapshotId={snapshotId} context={palContext} pendingDetail={pendingPalDetail} onPendingDetailHandled={clearPendingPalDetail} onSnapshotReplaced={refreshPalSnapshot} onNavigate={(target, id) => target === "bases" ? chooseResource(target, true) : void openDetail(target, id, true)} />}</section>
       <section id="world-workspace-players" role="tabpanel" aria-labelledby="world-workspace-tab-players" hidden={workspace !== "players"}>{workspace === "players" && <div className="world-player-archive">
         <section className="world-list-panel" aria-label="训练家档案列表">
           <form className="world-toolbar world-player-toolbar" onSubmit={submitSearch}>
@@ -400,9 +434,9 @@ export function WorldDataPage({ auth }: { auth: AuthStatus }) {
           <WorldPagination result={result} page={page} totalPages={totalPages} onPage={setPage} />
         </section>
       </div>}</section>
-      <section id="world-workspace-community" role="tabpanel" aria-labelledby="world-workspace-tab-community" hidden={workspace !== "community"}><CommunityWorkspace guildResult={communityResults.guilds} baseResult={communityResults.bases} loading={showListLoading} snapshotId={snapshotId} onGuildSearch={(nextSearch) => { setResource("guilds"); setPage(1); setSearch(nextSearch); setAppliedSearch(nextSearch); setStatusFilter("all"); setSortKey("name"); }} onGuildPage={(nextPage) => changeCommunityPage("guilds", nextPage)} onShowAllBases={() => { setResource("bases"); setPage(1); setSearch(""); setAppliedSearch(""); setStatusFilter("all"); setSortKey("name"); }} onBasePage={(nextPage) => changeCommunityPage("bases", nextPage)} onOpenDetail={(target, id, trigger) => void openDetail(target, id, false, trigger)} onOpenPal={(id, trigger) => void openDetail("pals", id, false, trigger)} /></section>
+      <section id="world-workspace-community" role="tabpanel" aria-labelledby="world-workspace-tab-community" hidden={workspace !== "community"}><CommunityWorkspace detailCache={detailCache} guildResult={communityResults.guilds} baseResult={communityResults.bases} loading={showListLoading} snapshotId={snapshotId} onGuildSearch={(nextSearch) => { setResource("guilds"); setPage(1); setSearch(nextSearch); setAppliedSearch(nextSearch); setStatusFilter("all"); setSortKey("name"); }} onGuildPage={(nextPage) => changeCommunityPage("guilds", nextPage)} onShowAllBases={() => { setResource("bases"); setPage(1); setSearch(""); setAppliedSearch(""); setStatusFilter("all"); setSortKey("name"); }} onBasePage={(nextPage) => changeCommunityPage("bases", nextPage)} onOpenDetail={(target, id, trigger) => void openDetail(target, id, false, trigger)} onOpenPal={(id, trigger) => void openDetail("pals", id, false, trigger)} /></section>
     </main>
-    {selected && <EntityDetailLayer detail={selected} loading={detailLoading} canGoBack={detailHistory.length > 0} onClose={closeDetail} onNavigate={(target, id) => void openDetail(target, id, true)} onShowInventory={openInventory} />}
+    {detailOpen && <EntityDetailLayer detail={selected} pending={detailRequest} loading={detailLoading} canGoBack={Boolean(detailRequest && selected) || detailHistory.length > 0} onBack={returnDetail} onClose={closeDetail} onRetry={() => detailRequest && void openDetail(detailRequest.resource, detailRequest.id, detailRequest.preserveCurrent, detailReturnFocusRef.current || undefined)} onNavigate={(target, id) => void openDetail(target, id, true)} onShowInventory={openInventory} />}
   </div>;
 }
 
@@ -411,15 +445,6 @@ function createWorldListQuery(state: Pick<EntityBrowserSnapshot, "page" | "appli
   if (state.appliedSearch) query.set("search", state.appliedSearch);
   if (state.statusFilter !== "all") query.set("status", state.statusFilter);
   return query;
-}
-
-async function loadEntityDetail(resource: EntityDetail["resource"], id: string, snapshotId: string | null | undefined): Promise<EntityDetail> {
-  const suffix = snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : "";
-  const url = `/api/world/${resource}/${encodeURIComponent(id)}${suffix}`;
-  if (resource === "players") return { resource, data: await requestJson<WorldPlayerDetail & WorldSnapshotContext>(url) };
-  if (resource === "pals") return { resource, data: await requestJson<WorldPalDetail & WorldSnapshotContext>(url) };
-  if (resource === "guilds") return { resource, data: await requestJson<WorldGuildDetail & WorldSnapshotContext>(url) };
-  return { resource, data: await requestJson<WorldBaseDetail & WorldSnapshotContext>(url) };
 }
 
 function WorldSnapshotUtility({ status, message, reparseError, reparsing, onReparse }: { status: WorldStatus | null; message: string; reparseError: string; reparsing: boolean; onReparse: () => void }) {
@@ -468,7 +493,7 @@ function PlayerArchiveCard({ item, selected, onOpen }: { item: WorldPlayerListIt
       <div className="world-player-progress-grid">{metrics.map((metric) => <PlayerProgressMetric progress={progress} {...metric} key={metric.field} />)}</div>
     </section>
     <dl className="world-player-metadata"><div><dt>所属公会</dt><dd>{item.guildName || (item.guildId ? "公会资料不可用" : "未加入公会")}</dd></div><div><dt>最后记录</dt><dd>{formatPlayerRecordedAt(item.lastRecordedAt)}</dd></div><div><dt>Player ID</dt><dd><code>{item.id}</code></dd></div></dl>
-    <button className="world-player-detail-button" type="button" aria-current={selected ? "true" : undefined} onClick={(event) => onOpen(event.currentTarget)}><FileText size={16} />查看完整训练家档案</button>
+    <button className="world-player-detail-button" data-detail-resource="players" data-detail-id={item.id} type="button" aria-current={selected ? "true" : undefined} onClick={(event) => onOpen(event.currentTarget)}><FileText size={16} />查看完整训练家档案</button>
   </article>;
 }
 
@@ -478,7 +503,8 @@ function PlayerProgressMetric({ progress, label, field, icon: Icon, detail }: { 
   return <span className="world-player-progress-item"><small>{label}<Icon size={13} /></small><strong>{value ?? "—"}{total !== null && <em> / {total.toLocaleString()}</em>}</strong><b>{detail || (value === null ? "数据不可用" : PLAYER_PROGRESS_LABELS[field])}</b></span>;
 }
 
-function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGuildSearch, onGuildPage, onShowAllBases, onBasePage, onOpenDetail, onOpenPal }: {
+function CommunityWorkspace({ detailCache, guildResult, baseResult, loading, snapshotId, onGuildSearch, onGuildPage, onShowAllBases, onBasePage, onOpenDetail, onOpenPal }: {
+  detailCache: WorldDetailCache;
   guildResult: WorldEntityListResponse | null;
   baseResult: WorldEntityListResponse | null;
   loading: boolean;
@@ -541,12 +567,10 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
   useEffect(() => {
     if (!selectedGuildDetailId || !snapshotId || !pendingGuildBaseKey) return;
     let active = true;
-    const controller = new AbortController();
-    const suffix = `?snapshotId=${encodeURIComponent(snapshotId)}`;
     const baseIds = pendingGuildBaseKey.split("\u0000");
     void Promise.all(baseIds.map(async (id) => {
       try {
-        const detail = await requestJson<WorldBaseDetail & WorldSnapshotContext>(`/api/world/bases/${encodeURIComponent(id)}${suffix}`, { signal: controller.signal });
+        const detail = await detailCache.load("bases", id, snapshotId);
         return detail.snapshotId === snapshotId ? { id, capacity: baseWorkerCapacity(detail.maxWorkerCount) } : null;
       } catch (caught) {
         return isAbortError(caught) ? null : { id, error: true as const };
@@ -560,9 +584,8 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
     });
     return () => {
       active = false;
-      controller.abort();
     };
-  }, [pendingGuildBaseKey, selectedGuildDetailId, snapshotId]);
+  }, [detailCache, pendingGuildBaseKey, selectedGuildDetailId, snapshotId]);
 
   async function selectGuild(guild: WorldGuildListItem) {
     const request = ++guildRequest.current;
@@ -575,8 +598,7 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
     setBaseCapacityErrors({});
     window.requestAnimationFrame(() => guildSelectorRef.current?.focus());
     try {
-      const suffix = snapshotId ? `?snapshotId=${encodeURIComponent(snapshotId)}` : "";
-      const detail = await requestJson<WorldGuildDetail & WorldSnapshotContext>(`/api/world/guilds/${encodeURIComponent(guild.id)}${suffix}`);
+      const detail = await detailCache.load("guilds", guild.id, snapshotId);
       if (request !== guildRequest.current) return;
       if (snapshotId && detail.snapshotId !== snapshotId) throw new Error("SNAPSHOT_REPLACED");
       setBaseCapacities(Object.fromEntries(detail.bases.flatMap((base) => hasOwnKey(base, "maxWorkerCount") ? [[base.id, baseWorkerCapacity(base.maxWorkerCount)]] : [])));
@@ -632,7 +654,7 @@ function CommunityWorkspace({ guildResult, baseResult, loading, snapshotId, onGu
         </details>
       </aside>
       <section className="world-community-base-workspace" aria-labelledby="world-community-bases-heading">
-        <header className="world-community-base-heading"><div><span className="world-detail-type">据点</span><h2 id="world-community-bases-heading">{baseTitle}</h2><p>{baseDescription}</p></div>{guildDetail && <button className="quiet-button" type="button" onClick={(event) => onOpenDetail("guilds", guildDetail.id, event.currentTarget)}><Users size={16} />查看成员（{guildDetail.memberCount.toLocaleString()}）</button>}</header>
+        <header className="world-community-base-heading"><div><span className="world-detail-type">据点</span><h2 id="world-community-bases-heading">{baseTitle}</h2><p>{baseDescription}</p></div>{guildDetail && <button className="quiet-button" data-detail-resource="guilds" data-detail-id={guildDetail.id} type="button" onClick={(event) => onOpenDetail("guilds", guildDetail.id, event.currentTarget)}><Users size={16} />查看成员（{guildDetail.memberCount.toLocaleString()}）</button>}</header>
         {selectedGuild && <section className="world-community-guild-summary" aria-label={`${selectedGuild.name}摘要`}><div><strong>{selectedGuild.name}</strong><span>{guildDetail ? `${guildDetail.members.length.toLocaleString()} 名已解析成员 · ${guildBases.length.toLocaleString()} 个已解析据点` : "正在确认完整关联范围"}</span></div>{guildDetail?.missingMemberIds.length ? <p>{guildDetail.missingMemberIds.length.toLocaleString()} 名成员资料暂不可用，不会按“无成员”显示。</p> : null}{guildDetail?.missingBaseIds.length ? <p>{guildDetail.missingBaseIds.length.toLocaleString()} 个关联据点资料暂不可用，不会计入已解析据点。</p> : null}</section>}
         {!snapshotId ? <section className="world-empty-state world-community-base-empty"><Database size={24} /><strong>当前没有可用世界快照</strong><p>无法判断当前范围是否有据点；完成一次只读解析后再试。</p></section> : guildDetailLoading ? <CommunityBaseGrid loading onOpenDetail={() => undefined} onOpenPal={() => undefined} /> : guildDetailError ? <section className="world-empty-state world-community-selection-error"><CircleAlert size={24} /><strong>无法安全读取该公会的完整关联据点</strong><p>当前不会改用已加载的 50 条据点做不完整筛选。</p><code>{guildDetailError}</code><button className="quiet-button" type="button" onClick={() => selectedGuild && void selectGuild(selectedGuild)}>重新尝试</button></section> : scope.kind === "guild" && !guildDetail ? <section className="world-empty-state"><RefreshCw className="spin" size={24} /><strong>正在读取公会完整关联数据</strong><p>成员与据点均绑定到当前存档快照。</p></section> : <>
           <CommunityBaseGrid bases={scope.kind === "guild" ? shownGuildBases : bases} loading={loading} onOpenDetail={onOpenDetail} onOpenPal={onOpenPal} />
@@ -660,10 +682,10 @@ function CommunityBaseCard({ base, onOpenDetail, onOpenPal }: { base: CommunityB
     <header><div><h3 title={base.name}>{base.name}</h3><p>{association}</p></div><span title="存档中的打工帕鲁数量；容量仅在同快照的据点详情提供时显示">{capacityLabel || `${base.workerCount.toLocaleString()} 名打工帕鲁`}</span></header>
     <p className="world-community-card-location"><MapPin size={14} /><strong>{coordinates}</strong></p>
     <div className="world-community-worker-preview" aria-label={`${base.name}打工帕鲁预览`}>
-      {workers.slice(0, COMMUNITY_CARD_PREVIEW_LIMIT).map((worker) => <button type="button" key={worker.id} onClick={(event) => onOpenPal(worker.id, event.currentTarget)}><PawPrint size={12} />{worker.nickname || resolvePal(worker).name}{worker.level !== null ? ` (Lv.${worker.level})` : ""}</button>)}
+      {workers.slice(0, COMMUNITY_CARD_PREVIEW_LIMIT).map((worker) => <button data-detail-resource="pals" data-detail-id={worker.id} type="button" key={worker.id} onClick={(event) => onOpenPal(worker.id, event.currentTarget)}><PawPrint size={12} />{worker.nickname || resolvePal(worker).name}{worker.level !== null ? ` (Lv.${worker.level})` : ""}</button>)}
       {workers.length ? <span>预览 {Math.min(workers.length, COMMUNITY_CARD_PREVIEW_LIMIT)}/{base.workerCount.toLocaleString()} 只</span> : <span>当前没有打工帕鲁</span>}
     </div>
-    <footer><small>{capacityNote}</small><button className="quiet-button" type="button" onClick={(event) => onOpenDetail("bases", base.id, event.currentTarget)}>查看全部 {base.workerCount.toLocaleString()} 只</button></footer>
+    <footer><small>{capacityNote}</small><button className="quiet-button" data-detail-resource="bases" data-detail-id={base.id} type="button" onClick={(event) => onOpenDetail("bases", base.id, event.currentTarget)}>查看全部 {base.workerCount.toLocaleString()} 只</button></footer>
   </article>;
 }
 
@@ -734,24 +756,29 @@ function WorldRequestFailure({ error, onRetry }: { error: string; onRetry: () =>
   return <section className="world-request-failure" role="alert"><CircleAlert size={18} aria-hidden="true" /><div><strong>世界数据请求失败</strong><p>当前页面没有写入任何存档；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={onRetry}>重新尝试</button></section>;
 }
 
-type EntityDrawerProps = { detail: EntityDetail | null; loading: boolean; canGoBack: boolean; onClose: () => void; onNavigate: DetailNavigate; onShowInventory: (context: InventoryContext) => void; drawerRef?: { current: HTMLElement | null }; closeButtonRef?: { current: HTMLButtonElement | null }; modal?: boolean; communityViews?: Record<string, CommunityDetailView>; onCommunityView?: (key: string, patch: Partial<CommunityDetailView>) => void };
+type EntityDrawerProps = { detail: EntityDetail | null; pending?: DetailRequest | null; loading: boolean; canGoBack: boolean; onBack?: () => void; onClose: () => void; onRetry?: () => void; onNavigate: DetailNavigate; onShowInventory: (context: InventoryContext) => void; drawerRef?: { current: HTMLElement | null }; closeButtonRef?: { current: HTMLButtonElement | null }; modal?: boolean; communityViews?: Record<string, CommunityDetailView>; onCommunityView?: (key: string, patch: Partial<CommunityDetailView>) => void };
 
-function EntityDrawer({ detail, loading, canGoBack, onClose, onNavigate, onShowInventory, drawerRef, closeButtonRef, modal = false, communityViews, onCommunityView }: EntityDrawerProps) {
-  if (!detail) return <aside className="world-entity-drawer empty" aria-label="世界实体详情"><Database size={24} /><h2>{loading ? "正在读取详情..." : "选择一个实体"}</h2><p>选择训练家或帕鲁，查看属性和可用关联。</p></aside>;
-
-  const { data, resource } = detail;
-  if (resource === "pals") return <PalDetailModal data={data} onClose={onClose} panelRef={drawerRef} closeRef={closeButtonRef} ariaLabel="世界实体详情" />;
-  const communityKey = `${resource}:${data.id}`;
+function EntityDrawer({ detail, pending, loading, canGoBack, onBack, onClose, onRetry, onNavigate, onShowInventory, drawerRef, closeButtonRef, modal = false, communityViews, onCommunityView }: EntityDrawerProps) {
+  const resource = pending?.resource || detail?.resource;
+  if (!resource) return null;
+  const communityKey = detail ? `${detail.resource}:${detail.data.id}` : "";
   const communityView = communityViews?.[communityKey] || { query: "", page: 1 };
   const updateCommunityView = (patch: Partial<CommunityDetailView>) => onCommunityView?.(communityKey, patch);
-  return <aside ref={drawerRef} className={`world-entity-drawer${resource === "players" ? " world-player-profile-modal" : ""}${resource === "guilds" || resource === "bases" ? " world-community-detail-modal" : ""}`} data-resource={resource} role="dialog" aria-modal={modal} aria-label="世界实体详情">
+  return <aside ref={drawerRef} className={resource === "pals" ? "pal-detail-modal" : `world-entity-drawer${resource === "players" ? " world-player-profile-modal" : ""}${resource === "guilds" || resource === "bases" ? " world-community-detail-modal" : ""}`} data-resource={resource} data-detail-pending={pending ? "true" : undefined} role="dialog" aria-modal={modal} aria-busy={loading} aria-label="世界实体详情">
     <MobileSheetHandle onDismiss={onClose} />
-    <header className="section-heading"><div className="world-drawer-title"><EntityMarker resource={resource} item={data} /><div><div className="world-entity-name"><h2>{entityName(data, resource)}</h2>{"level" in data && data.level !== null && <em className="world-player-profile-level">Lv.{data.level}</em>}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{resource === "players" ? playerProgressCoverage(playerProgressOf(data)) : "当前存档快照关联详情"}</p></div></div><button ref={closeButtonRef} className="icon-button bordered" type="button" title={canGoBack ? "返回上一详情" : "关闭详情"} aria-label={canGoBack ? "返回上一详情" : "关闭详情"} onClick={onClose}>{canGoBack ? <ArrowLeft size={18} /> : <X size={18} />}</button></header>
+    {pending ? <>
+      <header className="section-heading world-detail-loading-header">{canGoBack && <button ref={closeButtonRef} className="icon-button bordered" type="button" aria-label="返回上一详情" onClick={onBack}><ArrowLeft size={18} /></button>}<h2>{RESOURCE_LABELS[resource]}详情</h2><button ref={canGoBack ? undefined : closeButtonRef} className="icon-button bordered" type="button" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
+      <section className="world-empty-state world-detail-loading" role={pending.error ? "alert" : "status"}>
+        {pending.error ? <><CircleAlert size={24} /><strong>详情读取失败</strong><code>{pending.error}</code><button className="quiet-button" type="button" onClick={onRetry}>重新尝试</button></> : <><RefreshCw className="spin" size={24} /><strong>正在读取{RESOURCE_LABELS[resource]}详情</strong></>}
+      </section>
+    </> : detail && (detail.resource === "pals" ? <PalDetailContent data={detail.data} onClose={onClose} closeRef={closeButtonRef} onBack={canGoBack ? onBack : undefined} /> : <>
+    <header className="section-heading">{canGoBack && <button ref={closeButtonRef} className="icon-button bordered" type="button" title="返回上一详情" aria-label="返回上一详情" onClick={onBack}><ArrowLeft size={18} /></button>}<div className="world-drawer-title"><EntityMarker resource={resource} item={detail.data} /><div><div className="world-entity-name"><h2>{entityName(detail.data, resource)}</h2>{"level" in detail.data && detail.data.level !== null && <em className="world-player-profile-level">Lv.{detail.data.level}</em>}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{detail.resource === "players" ? playerProgressCoverage(playerProgressOf(detail.data)) : "当前存档快照关联详情"}</p></div></div><button ref={canGoBack ? undefined : closeButtonRef} className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
     <div className="world-detail-properties">
       {detail.resource === "players" && <PlayerDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
       {detail.resource === "guilds" && <GuildCommunityDetail data={detail.data} onNavigate={onNavigate} view={communityView} onViewChange={updateCommunityView} />}
       {detail.resource === "bases" && <BaseCommunityDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} view={communityView} onViewChange={updateCommunityView} />}
     </div>
+    </>)}
   </aside>;
 }
 
@@ -809,7 +836,7 @@ function GuildCommunityDetail({ data, onNavigate, view, onViewChange }: { data: 
   return <>
     <PropertyGrid entries={[["成员", data.memberCount], ["已解析据点", data.assetSummary.baseCount], ["关联帕鲁", data.assetSummary.palCount], ["公会库存物品种类", data.assetSummary.inventory.itemTypeCount]]} />
     <section className="world-relation-section world-community-detail-notice"><strong>成员与据点均来自当前公会详情的完整关联数据。</strong>{unavailableMembers || unavailableBases ? <p>{unavailableMembers ? `${unavailableMembers} 名成员资料不可用` : ""}{unavailableMembers && unavailableBases ? "；" : ""}{unavailableBases ? `${unavailableBases} 个关联据点资料不可用` : ""}，不会被当作零值或已解析关联。</p> : <p>当前没有缺失的成员或据点关联资料。</p>}</section>
-    <section className="world-relation-section world-community-detail-list"><header><h3>完整成员名单 <small>{members.length.toLocaleString()} / {data.memberCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找公会成员" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找成员名称或稳定 ID" maxLength={100} /></label></header>{shownMembers.length ? <div className="world-relation-list">{shownMembers.map((member) => <button className="world-relation-link" type="button" key={member.id} onClick={() => onNavigate("players", member.id)}><span className="world-relation-name">{member.name}{member.role === "leader" && <><Crown size={13} aria-label="会长" />会长</>}</span><small>{member.level === null ? "等级不可用" : `Lv.${member.level}`} · {member.id}</small></button>)}</div> : <p className="muted">没有符合条件的成员。</p>}<LocalPagination total={members.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整成员" /></section>
+    <section className="world-relation-section world-community-detail-list"><header><h3>完整成员名单 <small>{members.length.toLocaleString()} / {data.memberCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找公会成员" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找成员名称或稳定 ID" maxLength={100} /></label></header>{shownMembers.length ? <div className="world-relation-list">{shownMembers.map((member) => <button className="world-relation-link" data-detail-resource="players" data-detail-id={member.id} type="button" key={member.id} onClick={() => onNavigate("players", member.id)}><span className="world-relation-name">{member.name}{member.role === "leader" && <><Crown size={13} aria-label="会长" />会长</>}</span><small>{member.level === null ? "等级不可用" : `Lv.${member.level}`} · {member.id}</small></button>)}</div> : <p className="muted">没有符合条件的成员。</p>}<LocalPagination total={members.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整成员" /></section>
     <RelationList title="已解析关联据点" rows={data.bases} resource="bases" onNavigate={onNavigate} />
   </>;
 }
@@ -825,7 +852,7 @@ function BaseCommunityDetail({ data, onNavigate, onShowInventory, view, onViewCh
     <PropertyGrid entries={[["关联公会", association], ["打工帕鲁", data.workerCount], ["当前可用槽位", capacity], ["需关注", data.careSummary.attention]]} />
     <section className="world-relation-section world-community-detail-notice"><strong>完整打工帕鲁名单来自此据点详情。</strong><p>其中危急 {data.careSummary.critical.toLocaleString()} 只、需关注 {data.careSummary.attention.toLocaleString()} 只；单只照护字段在帕鲁详情中查看。</p></section>
     {data.guildAssociation === "linked" && data.guild ? <RelationButton title="所属公会" value={data.guild} resource="guilds" onNavigate={onNavigate} /> : <section className="world-relation-section"><h3>所属公会</h3><p className="muted">{data.guildAssociation === "unassigned" ? "该据点的公会关联未写入本次快照，无法确认所属公会。" : "据点保存了 guildId，但当前快照没有可用公会资料。"}</p></section>}
-    <section className="world-relation-section world-community-detail-list"><header><h3>完整打工帕鲁 <small>{workers.length.toLocaleString()} / {data.workerCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找据点打工帕鲁" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找名称、物种或稳定 ID" maxLength={100} /></label></header>{shownWorkers.length ? <div className="world-relation-list">{shownWorkers.map((worker) => <button className="world-relation-link" type="button" key={worker.id} onClick={() => onNavigate("pals", worker.id)}><span className="world-relation-name"><PawPrint size={15} aria-hidden="true" />{worker.nickname || resolvePal(worker).name}<PalGenderIcon item={worker} /></span><small>{worker.level === null ? "等级不可用" : `Lv.${worker.level}`} · {worker.id}</small></button>)}</div> : <p className="muted">没有符合条件的打工帕鲁。</p>}<LocalPagination total={workers.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整打工帕鲁" /></section>
+    <section className="world-relation-section world-community-detail-list"><header><h3>完整打工帕鲁 <small>{workers.length.toLocaleString()} / {data.workerCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找据点打工帕鲁" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找名称、物种或稳定 ID" maxLength={100} /></label></header>{shownWorkers.length ? <div className="world-relation-list">{shownWorkers.map((worker) => <button className="world-relation-link" data-detail-resource="pals" data-detail-id={worker.id} type="button" key={worker.id} onClick={() => onNavigate("pals", worker.id)}><span className="world-relation-name"><PawPrint size={15} aria-hidden="true" />{worker.nickname || resolvePal(worker).name}<PalGenderIcon item={worker} /></span><small>{worker.level === null ? "等级不可用" : `Lv.${worker.level}`} · {worker.id}</small></button>)}</div> : <p className="muted">没有符合条件的打工帕鲁。</p>}<LocalPagination total={workers.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整打工帕鲁" /></section>
     <section className="world-relation-section"><h3>据点库存</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ scope: "base", baseId: data.id, label: `据点库存：${data.name}` })}><span className="world-relation-name"><PackageOpen size={16} aria-hidden="true" />在仓库中查看</span><small>{data.inventorySummary.itemTypeCount.toLocaleString()} 种物品 · {data.inventorySummary.totalQuantity.toLocaleString()} 件</small></button></section>
   </>;
 }
@@ -837,9 +864,10 @@ function communityMatches(query: string, ...values: string[]): boolean {
 
 function EntityDetailLayer(props: EntityDrawerProps) {
   const isMobile = useIsMobile();
-  const isPlayerModal = props.detail?.resource === "players";
-  const isPalModal = props.detail?.resource === "pals";
-  const isCommunityModal = props.detail?.resource === "guilds" || props.detail?.resource === "bases";
+  const resource = props.pending?.resource || props.detail?.resource;
+  const isPlayerModal = resource === "players";
+  const isPalModal = resource === "pals";
+  const isCommunityModal = resource === "guilds" || resource === "bases";
   const isModal = isMobile || isPlayerModal || isPalModal || isCommunityModal;
   const drawerRef = useRef<HTMLElement | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -848,7 +876,7 @@ function EntityDetailLayer(props: EntityDrawerProps) {
   const [communityViews, setCommunityViews] = useState<Record<string, CommunityDetailView>>({});
   useEffect(() => { onCloseRef.current = props.onClose; }, [props.onClose]);
   useEffect(() => {
-    if (!props.detail) return;
+    if (!props.detail && !props.pending) return;
     const appRoot = document.getElementById("root");
     const focusableSelector = "button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])";
     const onKeyDown = (event: KeyboardEvent) => {
@@ -872,26 +900,27 @@ function EntityDetailLayer(props: EntityDrawerProps) {
     };
     if (isModal && appRoot) appRoot.inert = true;
     window.addEventListener("keydown", onKeyDown);
-    if (isModal) window.requestAnimationFrame(() => closeButtonRef.current?.focus());
+    const frame = isModal ? window.requestAnimationFrame(() => closeButtonRef.current?.focus()) : 0;
     return () => {
+      window.cancelAnimationFrame(frame);
       if (isModal && appRoot) appRoot.inert = false;
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [isModal, props.detail]);
+  }, [isModal, props.detail, props.pending]);
   useEffect(() => {
     const detail = props.detail;
-    if (!detail || (detail.resource !== "guilds" && detail.resource !== "bases")) return;
-    const savedTop = detailScrollPositions.current[`${detail.resource}:${detail.data.id}`] || 0;
-    window.requestAnimationFrame(() => { if (drawerRef.current) drawerRef.current.scrollTop = savedTop; });
-  }, [props.detail]);
+    const savedTop = !props.pending && detail ? detailScrollPositions.current[`${detail.resource}:${detail.data.id}`] || 0 : 0;
+    const frame = window.requestAnimationFrame(() => { if (drawerRef.current) drawerRef.current.scrollTop = savedTop; });
+    return () => window.cancelAnimationFrame(frame);
+  }, [props.detail, props.pending]);
   const onNavigate: DetailNavigate = (resource, id) => {
     const detail = props.detail;
-    if (detail && (detail.resource === "guilds" || detail.resource === "bases") && drawerRef.current) detailScrollPositions.current[`${detail.resource}:${detail.data.id}`] = drawerRef.current.scrollTop;
+    if (detail && drawerRef.current) detailScrollPositions.current[`${detail.resource}:${detail.data.id}`] = drawerRef.current.scrollTop;
     props.onNavigate(resource, id);
   };
   const updateCommunityView = (key: string, patch: Partial<CommunityDetailView>) => setCommunityViews((current) => ({ ...current, [key]: { ...(current[key] || { query: "", page: 1 }), ...patch } }));
-  const content = <>{props.detail && <button className={`world-drawer-backdrop${isPlayerModal ? " world-player-profile-backdrop" : ""}${isPalModal ? " pal-detail-backdrop" : ""}${isCommunityModal ? " world-community-detail-backdrop" : ""}`} type="button" tabIndex={-1} aria-label="关闭详情遮罩" onClick={props.onClose} />}<EntityDrawer {...props} onNavigate={onNavigate} drawerRef={drawerRef} closeButtonRef={closeButtonRef} modal={isModal} communityViews={communityViews} onCommunityView={updateCommunityView} /></>;
-  return isModal && props.detail ? createPortal(content, document.body) : content;
+  const content = <><button className={`world-drawer-backdrop${isPlayerModal ? " world-player-profile-backdrop" : ""}${isPalModal ? " pal-detail-backdrop" : ""}${isCommunityModal ? " world-community-detail-backdrop" : ""}`} type="button" tabIndex={-1} aria-label="关闭详情遮罩" onClick={props.onClose} /><EntityDrawer {...props} onNavigate={onNavigate} drawerRef={drawerRef} closeButtonRef={closeButtonRef} modal={isModal} communityViews={communityViews} onCommunityView={updateCommunityView} /></>;
+  return isModal ? createPortal(content, document.body) : content;
 }
 
 function formatPlayerRecordedAt(value: unknown): string {
@@ -908,11 +937,11 @@ function PropertyGrid({ entries }: { entries: [string, string | number | null | 
 }
 
 function RelationButton({ title, value, resource, onNavigate }: { title: string; value: RelationshipItem | null; resource?: EntityDetail["resource"]; onNavigate?: DetailNavigate }) {
-  return <section className="world-relation-section"><h3>{title}</h3>{value ? resource && onNavigate ? <button className="world-relation-link" type="button" onClick={() => onNavigate(resource, value.id)}>{entityName(value, resource)}<small>{value.id}</small></button> : <p>{entityName(value, "bases")}</p> : <p className="muted">未关联</p>}</section>;
+  return <section className="world-relation-section"><h3>{title}</h3>{value ? resource && onNavigate ? <button className="world-relation-link" data-detail-resource={resource} data-detail-id={value.id} type="button" onClick={() => onNavigate(resource, value.id)}>{entityName(value, resource)}<small>{value.id}</small></button> : <p>{entityName(value, "bases")}</p> : <p className="muted">未关联</p>}</section>;
 }
 
 function RelationList({ title, rows, resource, onNavigate }: { title: string; rows: RelationshipItem[]; resource: EntityDetail["resource"]; onNavigate: DetailNavigate }) {
-  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item) => <button className="world-relation-link" type="button" key={item.id} onClick={() => onNavigate(resource, item.id)}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && "characterId" in item && <PalGenderIcon item={item} />}</span><small>{item.id}</small></button>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
+  return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item) => <button className="world-relation-link" data-detail-resource={resource} data-detail-id={item.id} type="button" key={item.id} onClick={() => onNavigate(resource, item.id)}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && "characterId" in item && <PalGenderIcon item={item} />}</span><small>{item.id}</small></button>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
 }
 
 function InventoryButton({ title, data, onShowInventory }: { title: string; data: RelationshipItem; onShowInventory: (context: InventoryContext) => void }) {

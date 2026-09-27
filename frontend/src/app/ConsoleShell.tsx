@@ -159,7 +159,7 @@ function ConsoleLayout({
           {active === "world" && (
             <PageLoadBoundary errorTitle="世界界面加载失败" retryLabel="重试加载世界" onRetry={() => retryPage("world")}>
               <Suspense fallback={<PageSkeleton page="world" label="正在加载世界界面" />}>
-                <WorldDataPage auth={auth} />
+                <WorldDataPage key={shell?.instanceId || auth.port} auth={auth} />
               </Suspense>
             </PageLoadBoundary>
           )}

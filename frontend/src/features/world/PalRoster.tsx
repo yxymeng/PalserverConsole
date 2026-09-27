@@ -10,6 +10,7 @@ import { careReasonLabels, careSummaryLabel } from "./palCare";
 import { PalDetailModal } from "./PalDetailModal";
 import { formatPassiveDescription } from "./palSkillDescription";
 import { workSuitabilities } from "./palWorkSuitabilities";
+import type { WorldDetailCache } from "./worldDetailCache";
 
 type Marker = "all" | "lucky" | "boss";
 type CareFilter = "all" | "attention";
@@ -52,7 +53,7 @@ const locationLabels: Record<WorldPalRosterItem["locationType"], string> = {
   unassigned: "未识别归属",
 };
 
-export function PalRoster({ snapshotId, context, pendingDetail, onPendingDetailHandled, onSnapshotReplaced, onNavigate }: { snapshotId: string | null | undefined; context?: PalRosterContext; pendingDetail?: { id: string; snapshotId: string } | null; onPendingDetailHandled?: () => void; onSnapshotReplaced: (detailId?: string) => Promise<string | null>; onNavigate?: (resource: "players" | "bases", id: string) => void }) {
+export function PalRoster({ detailCache, snapshotId, context, pendingDetail, onPendingDetailHandled, onSnapshotReplaced, onNavigate }: { detailCache: WorldDetailCache; snapshotId: string | null | undefined; context?: PalRosterContext; pendingDetail?: { id: string; snapshotId: string } | null; onPendingDetailHandled?: () => void; onSnapshotReplaced: (detailId?: string) => Promise<string | null>; onNavigate?: (resource: "players" | "bases", id: string) => void }) {
   const [search, setSearch] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
   const [marker, setMarker] = useState<Marker>("all");
@@ -76,6 +77,7 @@ export function PalRoster({ snapshotId, context, pendingDetail, onPendingDetailH
   const [aptitudeFiltersOpen, setAptitudeFiltersOpen] = useState(false);
   const requestRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
+  const detailSequence = useRef(0);
   const returnFocusRef = useRef<HTMLButtonElement | null>(null);
 
   const loadPage = useCallback(async (page: number, append: boolean, requestedSnapshotId = snapshotId, retried = false) => {
@@ -160,6 +162,7 @@ export function PalRoster({ snapshotId, context, pendingDetail, onPendingDetailH
   }, [context]);
 
   useEffect(() => {
+    detailSequence.current += 1;
     setItems([]);
     setTotal(0);
     setDrawer(null);
@@ -174,15 +177,12 @@ export function PalRoster({ snapshotId, context, pendingDetail, onPendingDetailH
     void loadPage(1, false);
     return () => requestRef.current?.abort();
   }, [loadPage]);
+  useEffect(() => () => { detailSequence.current += 1; }, []);
 
   useEffect(() => {
     if (!snapshotId || pendingDetail?.snapshotId !== snapshotId) return;
     let active = true;
-    const controller = new AbortController();
-    void requestJson<WorldPalDetail & { snapshotId: string }>(
-      `/api/world/pals/${encodeURIComponent(pendingDetail.id)}?snapshotId=${encodeURIComponent(snapshotId)}`,
-      { signal: controller.signal },
-    ).then((detail) => {
+    void detailCache.load("pals", pendingDetail.id, snapshotId).then((detail) => {
       if (!active) return;
       if (detail.snapshotId !== snapshotId) throw new Error("SNAPSHOT_REPLACED: 详情与当前快照不一致。");
       setDetailRecoveryError("");
@@ -190,24 +190,28 @@ export function PalRoster({ snapshotId, context, pendingDetail, onPendingDetailH
     }).catch((caught) => {
       if (active && !isAbortError(caught)) setDetailRecoveryError(caught instanceof Error ? caught.message : "帕鲁详情重新读取失败");
     }).finally(() => { if (active) onPendingDetailHandled?.(); });
-    return () => { active = false; controller.abort(); };
-  }, [onPendingDetailHandled, pendingDetail, snapshotId]);
+    return () => { active = false; };
+  }, [detailCache, onPendingDetailHandled, pendingDetail, snapshotId]);
 
   const openDetail = useCallback(async (item: WorldPalRosterItem, trigger: HTMLButtonElement) => {
+    const sequence = ++detailSequence.current;
     returnFocusRef.current = trigger;
     setDetailRecoveryError("");
-    setDrawer({ item, detail: null, loading: true, error: "" });
+    const cached = detailCache.peek("pals", item.id, snapshotId);
+    setDrawer({ item, detail: cached || null, loading: !cached, error: "" });
+    if (cached) return;
     try {
       if (!snapshotId) throw new Error("WORLD_CACHE_UNAVAILABLE: 当前没有可用的世界快照。");
-      const detail = await requestJson<WorldPalDetail & { snapshotId: string }>(
-        `/api/world/pals/${encodeURIComponent(item.id)}?snapshotId=${encodeURIComponent(snapshotId)}`,
-      );
+      const detail = await detailCache.load("pals", item.id, snapshotId);
+      if (sequence !== detailSequence.current) return;
       setDrawer((current) => current?.item.id === item.id && detail.snapshotId === snapshotId
         ? { ...current, detail, loading: false } : current);
     } catch (caught) {
+      if (sequence !== detailSequence.current) return;
       if (caught instanceof ApiRequestError && caught.code === "SNAPSHOT_REPLACED") {
         try {
           const nextSnapshotId = await onSnapshotReplaced(item.id);
+          if (sequence !== detailSequence.current) return;
           if (nextSnapshotId && nextSnapshotId !== snapshotId) {
             setDrawer((current) => current?.item.id === item.id ? null : current);
             return;
@@ -217,9 +221,10 @@ export function PalRoster({ snapshotId, context, pendingDetail, onPendingDetailH
       if (!isAbortError(caught)) setDrawer((current) => current?.item.id === item.id
         ? { ...current, loading: false, error: caught instanceof Error ? caught.message : "帕鲁详情读取失败" } : current);
     }
-  }, [onSnapshotReplaced, snapshotId]);
+  }, [detailCache, onSnapshotReplaced, snapshotId]);
 
   const closeDrawer = useCallback(() => {
+    detailSequence.current += 1;
     setDrawer(null);
     window.requestAnimationFrame(() => returnFocusRef.current?.focus());
   }, []);
@@ -397,7 +402,7 @@ function PalRosterRow({ item, selectedPassiveSkills, onOpen }: { item: WorldPalR
   const pal = resolvePal(item);
   const hasNickname = pal.displayName !== pal.speciesName;
   const location = item.locationType === "base" ? item.baseName || locationLabels.base : item.ownerName || locationLabels[item.locationType];
-  return <button className="pal-roster-row" type="button" aria-label={hasNickname ? `${pal.speciesName}（昵称：${pal.displayName}）` : pal.speciesName} onClick={(event) => onOpen(item, event.currentTarget)}>
+  return <button className="pal-roster-row" data-detail-resource="pals" data-detail-id={item.id} type="button" aria-label={hasNickname ? `${pal.speciesName}（昵称：${pal.displayName}）` : pal.speciesName} onClick={(event) => onOpen(item, event.currentTarget)}>
     <span className="pal-roster-top">
       <span className="pal-roster-name"><span className="world-entity-avatar world-pal-avatar" data-icon-key={pal.known ? pal.characterId : "pal-placeholder"}><img src={pal.icon} alt="" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = UNKNOWN_PAL_ICON; }} /></span><span className="pal-roster-copy"><span><strong>{pal.speciesName}</strong><span className="pal-roster-level">Lv.{item.level ?? "—"}</span></span>{hasNickname && <small>「{pal.displayName}」</small>}<span className="pal-roster-stars" data-label="等级 / 星级" aria-label={pal.rank === null ? "星级不可用" : `${pal.rank} 星`}>{Array.from({ length: 4 }, (_, index) => <Star key={index} size={11} fill={pal.rank !== null && index < pal.rank ? "currentColor" : "none"} />)}<small>{pal.rank === null ? "不可用" : `${pal.rank} 星`}</small></span></span>{pal.gender && <span className={`world-pal-gender ${pal.gender}`} title={pal.gender === "male" ? "雄性" : "雌性"} aria-label={pal.gender === "male" ? "雄性" : "雌性"}>{pal.gender === "male" ? "♂" : "♀"}</span>}</span>
       <PalRosterTraits item={item} />
