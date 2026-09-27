@@ -2288,6 +2288,46 @@ def test_world_status_marks_cache_invalid_when_metadata_table_is_missing(
     assert cache.is_file()
 
 
+def test_pal_roster_accepts_all_character_ids_for_a_shared_catalog_name(tmp_path: Path) -> None:
+    catalog_path = (
+        Path(__file__).resolve().parents[2]
+        / "frontend/src/features/world/palCatalogData.json"
+    )
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    character_ids = [key for key, entry in catalog.items() if entry["name"] == "岛民"]
+    assert len(character_ids) > 24
+    settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
+    database = Database(settings.database_path)
+    database.migrate()
+    level, players = _synthetic_properties()
+    cache_root = settings.data_dir / "cache"
+    cache_root.mkdir(parents=True)
+    cache = cache_root / "world-cache.sqlite"
+    build_world_cache(cache, level, players, snapshot_id="fixture", source_observed_at=1)
+    with sqlite3.connect(cache) as connection:
+        rows = connection.execute("SELECT id FROM pals ORDER BY id").fetchall()
+        for row, character_id in zip(rows, (character_ids[0], character_ids[-1]), strict=True):
+            connection.execute(
+                "UPDATE pals SET character_id = ? WHERE id = ?", (character_id, row[0])
+            )
+    database.record_snapshot_version("fixture", str(cache), 1, "success", make_current=True)
+    service = WorldSnapshotService(database, lambda: None, settings.data_dir, poll_seconds=60)
+    with TestClient(
+        create_app(settings, world_service=service),
+        base_url="http://127.0.0.1:8223",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        response = client.get(
+            "/api/world/pals/roster",
+            params={"search": "岛民", "characterId": ",".join(character_ids)},
+        )
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 2
+    assert {item["characterId"] for item in response.json()["items"]} == {
+        character_ids[0], character_ids[-1],
+    }
+
+
 def test_world_api_enforces_page_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
     database = Database(settings.database_path)

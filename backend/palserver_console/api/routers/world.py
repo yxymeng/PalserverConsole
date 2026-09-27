@@ -148,8 +148,7 @@ def router(deps: AppDependencies) -> APIRouter:
             name.strip() for name in (characterId or "").split(",") if name.strip()
         )
         if (
-            len(character_ids) > 24
-            or len(set(character_ids)) != len(character_ids)
+            len(set(character_ids)) != len(character_ids)
             or any(len(name) > 100 for name in character_ids)
         ):
             return error_response(
