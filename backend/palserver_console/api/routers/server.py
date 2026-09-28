@@ -89,39 +89,40 @@ def router(deps: AppDependencies) -> APIRouter:
                 )
             )
             return error_response(422, code, str(error))
-        selected_profile = None
-        if payload.worldId is not None:
-            try:
-                selected_profile = deps.profiles.bind(
-                    executable, payload.worldId, payload.launchArguments
-                )
-            except ProfileError as error:
-                return error_response(422, error.code, str(error))
-        else:
-            try:
-                existing = deps.profiles.profile()
-            except ProfileError:
-                existing = None
-            if existing is not None and existing.executable_path == executable:
+        with deps.lifecycle.control_lock:
+            selected_profile = None
+            if payload.worldId is not None:
                 try:
                     selected_profile = deps.profiles.bind(
-                        executable, existing.world_id, payload.launchArguments
+                        executable, payload.worldId, payload.launchArguments
                     )
                 except ProfileError as error:
                     return error_response(422, error.code, str(error))
-            elif candidates:
-                return error_response(
-                    409,
-                    "WORLD_SELECTION_REQUIRED",
-                    "Select a World ID before saving server settings.",
-                )
             else:
                 try:
-                    deps.profiles.clear()
-                except ProfileError as error:
-                    return error_response(422, error.code, str(error))
-        deps.database.set_setting("server.executable", str(executable))
-        deps.database.set_setting("server.arguments", payload.launchArguments)
+                    existing = deps.profiles.profile()
+                except ProfileError:
+                    existing = None
+                if existing is not None and existing.executable_path == executable:
+                    try:
+                        selected_profile = deps.profiles.bind(
+                            executable, existing.world_id, payload.launchArguments
+                        )
+                    except ProfileError as error:
+                        return error_response(422, error.code, str(error))
+                elif candidates:
+                    return error_response(
+                        409,
+                        "WORLD_SELECTION_REQUIRED",
+                        "Select a World ID before saving server settings.",
+                    )
+                else:
+                    try:
+                        deps.profiles.clear()
+                    except ProfileError as error:
+                        return error_response(422, error.code, str(error))
+            deps.database.set_setting("server.executable", str(executable))
+            deps.database.set_setting("server.arguments", payload.launchArguments)
         deps.audit.record(
             "config.server_settings",
             detail={

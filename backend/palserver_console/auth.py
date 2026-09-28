@@ -10,7 +10,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from dataclasses import dataclass
 from pathlib import Path
 
-from .config import AppSettings
+from .config import AppSettings, ProfileError, ServerProfileService
 from .monitoring import MonitoringConfigError, read_admin_password
 from .persistence import Database
 
@@ -202,6 +202,10 @@ class AuthStore:
         if not executable:
             return None
         try:
-            return read_admin_password(Path(executable).parent)
-        except (MonitoringConfigError, OSError):
+            world = (
+                ServerProfileService(self.database).profile().world_path
+                if self.database.get_server_profile() is not None else None
+            )
+            return read_admin_password(Path(executable).parent, world)
+        except (MonitoringConfigError, ProfileError, OSError):
             return None

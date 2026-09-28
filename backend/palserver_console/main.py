@@ -85,11 +85,13 @@ def _lifespan(deps: AppDependencies) -> Callable[[FastAPI], AbstractAsyncContext
         if deps.database.get_setting("audit.retention_days") is None:
             deps.database.set_setting("audit.retention_days", str(DEFAULT_RETENTION_DAYS))
         deps.audit.start()
+        deps.config.start()
         deps.monitor.start()
         deps.world.start()
         try:
             yield
         finally:
+            deps.config.stop()
             deps.world.stop()
             deps.monitor.stop()
             deps.audit.stop()

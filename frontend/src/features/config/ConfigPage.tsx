@@ -34,7 +34,7 @@ type ConfigOption = { value: string; label: string; description?: string };
 type ConfigFieldMeta = {
   key: string;
   label: string;
-  description: string;
+  description?: string;
   kind: ConfigKind;
   min?: number;
   max?: number;
@@ -47,7 +47,6 @@ const CONFIG_LABELS: Record<string, string> = {
   ServerDescription: "服务器描述",
   AdminPassword: "管理员密码",
   ServerPassword: "服务器密码",
-  Difficulty: "难度",
   PublicIP: "公共 IP",
   PublicPort: "公共端口",
   ServerPlayerMaxNum: "服务器玩家最大数量",
@@ -86,6 +85,7 @@ const CONFIG_LABELS: Record<string, string> = {
   CollectionObjectHpRate: "可采集物品生命值倍率",
   CollectionObjectRespawnSpeedRate: "可采集物品重生间隔倍率",
   EnemyDropItemRate: "道具掉落量倍率",
+  FishingDifficultyRate: "钓鱼难度倍率",
   DeathPenalty: "死亡惩罚",
   bEnablePlayerToPlayerDamage: "启用玩家对玩家伤害",
   bEnableFriendlyFire: "启用友伤",
@@ -99,7 +99,8 @@ const CONFIG_LABELS: Record<string, string> = {
   BaseCampMaxNum: "全地图据点最大数量",
   BaseCampMaxNumInGuild: "公会的据点最大数量",
   BaseCampWorkerMaxNum: "可分配至据点工作的帕鲁数量上限",
-  MaxBuildingLimitNum: "每个玩家的建筑物最大数量",
+  MaxBuildingLimitNum: "建筑物数量上限",
+  MaxBuildingLimitNumPerPlayer: "每个玩家的建筑物数量上限",
   DropItemAliveMaxHours: "掉落物品存活最大小时数",
   bAutoResetGuildNoOnlinePlayers: "自动重置无在线训练家的公会",
   AutoResetGuildTimeNoOnlinePlayers: "自动重置无在线训练家的公会时间（小时）",
@@ -119,6 +120,7 @@ const CONFIG_LABELS: Record<string, string> = {
   bEnableDefenseOtherGuildPlayer: "启用据点内防御其他公会玩家",
   bInvisibleOtherGuildBaseCampAreaFX: "隐藏其他公会据点区域特效",
   bBuildAreaLimit: "建筑区域限制",
+  bAllowEnemyCampSpawnNearBaseCamp: "允许敌方营地在据点附近生成",
   ItemWeightRate: "物品重量倍率",
   ServerReplicatePawnCullDistance: "玩家与帕鲁同步距离",
   bShowPlayerList: "启用服务器内可以查看其他玩家列表",
@@ -163,12 +165,9 @@ const CONFIG_LABELS: Record<string, string> = {
 };
 
 const CONFIG_DESCRIPTIONS: Record<string, string> = {
-  AutoSaveSpan: "服务器自动保存世界的时间间隔。",
-  DeathPenalty: "决定玩家死亡时会掉落哪些物品。",
-  LogFormatType: "选择服务器日志文件的保存格式。",
-  RandomizerType: "决定随机化的作用范围。",
-  CrossplayPlatforms: "选择允许加入本服务器的平台。",
-  DenyTechnologyList: "选择需要从科技树中禁用的项目。",
+  FishingDifficultyRate: "调整钓鱼小游戏的难度，范围 0.1–1.0，默认 1.0。",
+  MaxBuildingLimitNumPerPlayer: "限制每位玩家可以建造的建筑物数量；0 表示不限制。",
+  bAllowEnemyCampSpawnNearBaseCamp: "开启后，敌方营地可以在玩家据点附近生成；默认关闭。",
 };
 
 type ConfigCategoryGroup = { id: ConfigCategoryId; tab: "panel" | "world"; label: string; description: string; keys: string[] };
@@ -184,8 +183,8 @@ const CONFIG_CATEGORY_GROUPS: ConfigCategoryGroup[] = [
   { id: "progression", tab: "world", label: "时间与成长", description: "昼夜、经验、捕捉、出现数量与工作速度", keys: ["DayTimeSpeedRate", "NightTimeSpeedRate", "ExpRate", "PalCaptureRate", "PalSpawnNumRate", "WorkSpeedRate"] },
   { id: "combat", tab: "world", label: "战斗", description: "玩家和帕鲁伤害、PvP、袭击与死亡惩罚", keys: ["PlayerDamageRateAttack", "PlayerDamageRateDefense", "PalDamageRateAttack", "PalDamageRateDefense", "bEnablePlayerToPlayerDamage", "bEnableFriendlyFire", "bIsPvP", "DeathPenalty", "bEnableInvaderEnemy", "EnablePredatorBossPal", "bHardcore", "bPalLost", "bCharacterRecreateInHardcore", "bCanPickupOtherGuildDeathPenaltyDrop", "bAdditionalDropItemWhenPlayerKillingInPvPMode", "AdditionalDropItemWhenPlayerKillingInPvPMode", "AdditionalDropItemNumWhenPlayerKillingInPvPMode"] },
   { id: "survival", tab: "world", label: "生存", description: "饱食度、耐力、生命恢复、孵化与重生", keys: ["PlayerStomachDecreaceRate", "PlayerStaminaDecreaceRate", "PlayerAutoHPRegeneRate", "PlayerAutoHpRegeneRateInSleep", "PalStomachDecreaceRate", "PalStaminaDecreaceRate", "PalAutoHPRegeneRate", "PalAutoHpRegeneRateInSleep", "PalEggDefaultHatchingTime", "bEnableNonLoginPenalty", "bExistPlayerAfterLogout", "BlockRespawnTime", "RespawnPenaltyDurationThreshold", "RespawnPenaltyTimeScale"] },
-  { id: "resources", tab: "world", label: "资源与掉落", description: "采集、掉落、重量、空投与耐久度", keys: ["CollectionDropRate", "CollectionObjectHpRate", "CollectionObjectRespawnSpeedRate", "EnemyDropItemRate", "ItemWeightRate", "DropItemMaxNum", "DropItemMaxNum_UNKO", "DropItemAliveMaxHours", "SupplyDropSpan", "EquipmentDurabilityDamageRate", "ItemContainerForceMarkDirtyInterval", "ItemCorruptionMultiplier", "PhysicsActiveDropItemMaxNum", "bActiveUNKO"] },
-  { id: "building", tab: "world", label: "建造与据点", description: "建筑耐久、建造限制、据点与防御规则", keys: ["BuildObjectHpRate", "BuildObjectDamageRate", "BuildObjectDeteriorationDamageRate", "MaxBuildingLimitNum", "bBuildAreaLimit", "BaseCampMaxNum", "BaseCampMaxNumInGuild", "BaseCampWorkerMaxNum", "bEnableDefenseOtherGuildPlayer", "bInvisibleOtherGuildBaseCampAreaFX", "bEnableBuildingPlayerUIdDisplay", "BuildingNameDisplayCacheTTLSeconds"] },
+  { id: "resources", tab: "world", label: "资源与掉落", description: "采集、钓鱼、掉落、重量、空投与耐久度", keys: ["CollectionDropRate", "CollectionObjectHpRate", "CollectionObjectRespawnSpeedRate", "EnemyDropItemRate", "FishingDifficultyRate", "ItemWeightRate", "DropItemMaxNum", "DropItemMaxNum_UNKO", "DropItemAliveMaxHours", "SupplyDropSpan", "EquipmentDurabilityDamageRate", "ItemContainerForceMarkDirtyInterval", "ItemCorruptionMultiplier", "PhysicsActiveDropItemMaxNum", "bActiveUNKO"] },
+  { id: "building", tab: "world", label: "建造与据点", description: "建筑耐久、建造限制、据点与防御规则", keys: ["BuildObjectHpRate", "BuildObjectDamageRate", "BuildObjectDeteriorationDamageRate", "MaxBuildingLimitNum", "MaxBuildingLimitNumPerPlayer", "bBuildAreaLimit", "bAllowEnemyCampSpawnNearBaseCamp", "BaseCampMaxNum", "BaseCampMaxNumInGuild", "BaseCampWorkerMaxNum", "bEnableDefenseOtherGuildPlayer", "bInvisibleOtherGuildBaseCampAreaFX", "bEnableBuildingPlayerUIdDisplay", "BuildingNameDisplayCacheTTLSeconds"] },
   { id: "guild", tab: "world", label: "公会与玩家", description: "公会人数、自动重置、归属转移与地图显示", keys: ["GuildPlayerMaxNum", "bAutoResetGuildNoOnlinePlayers", "AutoResetGuildTimeNoOnlinePlayers", "GuildRejoinCooldownMinutes", "AutoTransferMasterCheckIntervalSeconds", "AutoTransferMasterThresholdDays", "MaxGuildsPerFrame", "bDisplayPvPItemNumOnWorldMap_BaseCamp", "bDisplayPvPItemNumOnWorldMap_Player"] },
   { id: "worldRules", tab: "world", label: "世界规则", description: "传送、复活位置、瞄准辅助与其他规则", keys: ["bEnableFastTravel", "bEnableFastTravelOnlyBaseCamp", "bIsStartLocationSelectByMap", "bEnableAimAssistPad", "bEnableAimAssistKeyboard"] },
   { id: "performance", tab: "world", label: "高级性能", description: "同步距离、放牧和数据更新策略", keys: ["ServerReplicatePawnCullDistance", "PlayerDataPalStorageUpdateCheckTickInterval", "MonsterFarmActionSpeedRate"] },
@@ -241,11 +240,13 @@ const CONFIG_NUMERIC_RANGES: Record<string, { min: number; max: number; step: nu
   CollectionObjectHpRate: { min: 0.5, max: 3, step: 0.1 },
   CollectionObjectRespawnSpeedRate: { min: 0.5, max: 5, step: 0.1 },
   EnemyDropItemRate: { min: 0.5, max: 5, step: 0.1 },
+  FishingDifficultyRate: { min: 0.1, max: 1, step: 0.1 },
   PalEggDefaultHatchingTime: { min: 0, max: 240, step: 0.1 },
   GuildPlayerMaxNum: { min: 1, max: 100, step: 1 },
   BaseCampMaxNumInGuild: { min: 1, max: 50, step: 1 },
   BaseCampWorkerMaxNum: { min: 1, max: 50, step: 1 },
   MaxBuildingLimitNum: { min: 0, max: 10000, step: 1 },
+  MaxBuildingLimitNumPerPlayer: { min: 0, max: 10000, step: 1 },
   SupplyDropSpan: { min: 0, max: 1000, step: 1 },
   ChatPostLimitPerMinute: { min: 0, max: 100, step: 1 },
   EquipmentDurabilityDamageRate: { min: 0.1, max: 5, step: 0.1 },
@@ -341,7 +342,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: "密码不会回显。保存后会按 PalServer 运行状态立即或延后应用。",
+      description: "密码不会回显。",
       kind: "password",
     };
   }
@@ -350,7 +351,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: CONFIG_DESCRIPTIONS[key] || "可直接输入数值，也可以拖动进度条调整。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "number",
       ...range,
     };
@@ -359,7 +360,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: CONFIG_DESCRIPTIONS[key] || "从预设选项中选择配置值。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "select",
       options: CONFIG_SELECT_OPTIONS[key],
     };
@@ -368,7 +369,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: CONFIG_DESCRIPTIONS[key] || "可以同时选择多个配置项。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "multi-select",
       options: CONFIG_MULTI_OPTIONS[key],
     };
@@ -377,14 +378,14 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: "开启或关闭这项服务器规则。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "boolean",
     };
   }
   return {
     key,
     label: configLabelFor(key),
-    description: "按原文本保存此配置值。",
+    description: CONFIG_DESCRIPTIONS[key],
     kind: "text",
   };
 }
@@ -493,7 +494,7 @@ function ConfigFieldEditor({
           <code>{meta.key}</code>
           {modified && <span className="config-changed-badge">已修改</span>}
         </div>
-        <p>{meta.description}</p>
+        {meta.description && <p>{meta.description}</p>}
       </div>
       <div className={`config-field-control config-kind-${meta.kind}`}>
         {meta.kind === "number" && meta.min !== undefined && meta.max !== undefined && meta.step !== undefined && (
@@ -655,7 +656,7 @@ export function ConfigPage({
   const allKeys = [
     ...activeSchema,
     ...Object.keys(fields).filter((key) => !activeSchema.includes(key)),
-  ];
+  ].filter((key) => key !== "Difficulty");
   const configOrder = new Map<string, number>();
   CONFIG_CATEGORY_GROUPS.forEach((group, groupIndex) => group.keys.forEach((key, keyIndex) => configOrder.set(key, groupIndex * 1000 + keyIndex)));
   const orderedKeys = [...allKeys].sort((left, right) => (configOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (configOrder.get(right) ?? Number.MAX_SAFE_INTEGER));
@@ -711,7 +712,7 @@ export function ConfigPage({
           <div className="config-law-title"><div><span aria-hidden="true">⚙️</span><h2>世界法则配置 (PalWorldSettings.ini &amp; WorldOption.sav)</h2></div><p>生效目标：<strong>{targetLabel}</strong><span className={document.worldOptionPresent ? "is-present" : ""}>WorldOption.sav {document.worldOptionPresent ? "已存在" : "未生成"}</span>{auth.local && <button type="button" title={activePath} onClick={() => void openFolder()}><FolderSearch size={13} />打开目录</button>}{modifiedKeys.length > 0 && <em>（{modifiedKeys.length} 项已暂存修改）</em>}</p></div>
           <div className="config-law-actions">
             <div className="config-law-view-toggle" role="tablist" aria-label="配置查看方式"><button className={viewMode === "visual" ? "is-active" : ""} type="button" role="tab" aria-selected={viewMode === "visual"} onClick={() => setViewMode("visual")}>可视化调节</button><button className={viewMode === "raw" ? "is-active" : ""} type="button" role="tab" aria-selected={viewMode === "raw"} onClick={() => setViewMode("raw")}>原始配置文本</button></div>
-            {modifiedKeys.length > 0 && <button className="config-law-reset" type="button" disabled={busy} onClick={discardWorkingChanges}><RotateCcw size={15} />撤销修改</button>}
+            <button className="config-law-reset" type="button" disabled={busy || modifiedKeys.length === 0} onClick={discardWorkingChanges}><RotateCcw size={15} />撤销修改</button>
             {document.pendingApply && <button className="config-law-restart" type="button" disabled={busy} onClick={() => void restartForConfig()}><RotateCw size={15} />立即重启并应用</button>}
             <button className="config-law-save" disabled={busy || modifiedKeys.length === 0} type="submit"><Save size={15} />{busy ? "正在保存…" : "保存并应用法则"}</button>
           </div>
@@ -734,7 +735,7 @@ export function ConfigPage({
         <section className="config-law-panel">
           <header><h3><SelectedSectionIcon size={17} />{normalizedQuery ? "匹配的配置" : selectedConfigSection.title}</h3>{normalizedQuery && <span>{visibleKeys.length} 项</span>}</header>
           <div className="config-law-field-grid">
-            {visibleKeys.map((key) => { const baseMeta = configMetaFor(key, fields[key] || ""); const meta = isWorldOption && key === "AdminPassword" ? { ...baseMeta, description: "密码不会回显。保存后按当前 PalServer 状态立即或延后应用。" } : baseMeta; const sourceValue = key === "AdminPassword" ? (activePasswordConfigured ? "已配置" : "未配置") : baselineFields[key] || ""; return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} modified={modifiedKeySet.has(key)} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} />; })}
+            {visibleKeys.map((key) => { const meta = configMetaFor(key, fields[key] || ""); const sourceValue = key === "AdminPassword" ? (activePasswordConfigured ? "已配置" : "未配置") : baselineFields[key] || ""; return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} modified={modifiedKeySet.has(key)} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} />; })}
             {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>没有找到匹配的配置。</p>{normalizedQuery && <button className="quiet-button" type="button" onClick={() => setQuery("")}>清除搜索</button>}</div>}
           </div>
         </section>

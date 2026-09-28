@@ -20,6 +20,7 @@ import httpx
 import psutil
 
 from .config import redact_sensitive_text
+from .world_option import default_world_option_fields, read_world_option
 
 logger = logging.getLogger(__name__)
 
@@ -65,27 +66,37 @@ class ServerConnectionConfig:
     admin_password: SensitiveValue
 
 
-def read_connection_config(install_path: Path) -> ServerConnectionConfig:
+def _connection_text(install_path: Path, world_path: Path | None = None) -> str:
+    if world_path is not None and (world_path / "WorldOption.sav").is_file():
+        try:
+            _, _, saved = read_world_option(world_path / "WorldOption.sav")
+        except ValueError as error:
+            raise MonitoringConfigError(
+                "WORLD_OPTION_READ_FAILED", "Unable to read WorldOption.sav."
+            ) from error
+        fields = default_world_option_fields()
+        fields.update(saved)
+        values = ",".join(f"{key}={value}" for key, value in fields.items())
+        return f"OptionSettings=({values})"
     ini_path = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
     try:
-        text = ini_path.read_text(encoding="utf-8-sig")
+        return ini_path.read_text(encoding="utf-8-sig")
     except OSError as error:
         raise MonitoringConfigError(
             "INI_UNAVAILABLE", f"PalWorldSettings.ini: {type(error).__name__}"
         ) from error
-    return parse_connection_config(text)
 
 
-def read_admin_password(install_path: Path) -> str | None:
+def read_connection_config(
+    install_path: Path, world_path: Path | None = None,
+) -> ServerConnectionConfig:
+    return parse_connection_config(_connection_text(install_path, world_path))
+
+
+def read_admin_password(install_path: Path, world_path: Path | None = None) -> str | None:
     """Read the game administrator password without exposing it in a response or log."""
 
-    ini_path = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
-    try:
-        text = ini_path.read_text(encoding="utf-8-sig")
-    except OSError as error:
-        raise MonitoringConfigError(
-            "INI_UNAVAILABLE", f"PalWorldSettings.ini: {type(error).__name__}"
-        ) from error
+    text = _connection_text(install_path, world_path)
     password = _ini_value(text, "AdminPassword")
     return password or None
 
@@ -138,7 +149,7 @@ def parse_connection_config(text: str) -> ServerConnectionConfig:
 
 def _ini_value(text: str, key: str) -> str | None:
     match = re.search(
-        rf"(?i)(?:^|[,(\rn])\s*{re.escape(key)}\s*=\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|([^,)\rn]+))",
+        rf'(?i)(?:^|[,(\rn])\s*{re.escape(key)}\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^,)\rn]+))',
         text,
     )
     if match is None:

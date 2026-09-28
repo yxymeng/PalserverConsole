@@ -11,7 +11,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 - 在同一个“服务器管理”页面完成服务器生命周期操作，并查看 REST/RCON 状态、在线玩家、进程指标和实时数据新鲜度。
 - 读取世界快照，查看玩家、帕鲁名册、仓库、据点与公会；可按公会筛选据点，并通过统一的“当前位置”识别帕鲁是在随身队伍、帕鲁终端还是据点工作。
 - 管理官方 `backup\world` 备份，设置保留数量、删除备份和在停服后恢复。
-- 查看运营审计记录，并在配置页编辑 `PalWorldSettings.ini` 草稿。
+- 查看运营审计记录，并在配置页编辑 `PalWorldSettings.ini` 或当前世界的 `WorldOption.sav`。
 - 在检测到外部修改或服务器运行时，阻止高风险覆盖操作。
 - 在“维护 → 服务运维与告警”检查控制台更新，并配置服务器启动、保存、停止和重启等操作的 HTTPS Webhook 告警推送。
 - 可选配置通用 HTTPS Webhook，只发送维护计划、开始、完成、取消和失败事件；Webhook 密钥不会回显到页面、日志或审计导出。
@@ -51,11 +51,11 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 ## 第一次设置
 
 1. 打开“服务器管理”，点击“扫描 Steam”，或填写实际的 `PalServer.exe` 完整路径。
-2. 检查启动参数和 `PalWorldSettings.ini` 中的 REST/RCON 端口是否一致。
-3. 打开“服务器配置 → 面板设置 → 基本信息”，在“管理员密码”输入框中输入或更改游戏 `AdminPassword`，保存草稿并按提示停服应用；不输入新密码则保留原值。
+2. 检查启动参数和当前有效配置中的 REST/RCON 端口是否一致；当前世界存在 `WorldOption.sav` 时，优先读取它。
+3. 打开“配置 → 世界法则配置 → 基础与连接”，在“管理员密码”输入框中输入或更改游戏 `AdminPassword`。停止时保存立即应用；运行时保存会在关闭、重启或下次启动前应用，不输入新密码则保留原值。
 4. 在“总览”页确认控制台监听端口；修改后重启控制台。在 Windows Firewall 中将规则限制为 `LocalSubnet`，不要把 `8223` 转发到公网。
 
-本机访问默认免登录；局域网访问需要 `PalWorldSettings.ini` 中的游戏管理员密码。控制台启动时根据是否已配置 `AdminPassword` 决定监听地址；首次设置并应用密码后，需重启 PalServerConsole 才会开放 LAN。LAN 模式只适合可信内网，不是公网管理方案。
+本机访问默认免登录；局域网访问使用当前有效 INI/SAV 中的游戏管理员密码。控制台启动时根据是否已配置 `AdminPassword` 决定监听地址；首次设置并应用密码后，需重启 PalServerConsole 才会开放 LAN。密码应用变更后原 LAN 会话失效，本机会话保留。LAN 模式只适合可信内网，不是公网管理方案。
 
 ## 安全边界
 
@@ -64,7 +64,9 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 - 生命周期操作、配置应用和备份写操作由同一控制边界串行执行；存在未完成的恢复事务时，启动、保存、重启和“重启并应用”会被阻止，必须先安全地 resume 或 rollback。
 - 带 `Idempotency-Key` 的生命周期请求只有在操作类型、倒计时、消息和父操作完全一致时才会重放；同一 key 被用于不同请求时会返回 `IDEMPOTENCY_KEY_CONFLICT`，不会静默执行错误操作。
 - 备份操作只接受官方 `backup\world` 下的直接子目录；活动世界没有删除 API。
-- 配置先保存为草稿。检测到 `CONFIG_CONFLICT` 时不会自动覆盖外部修改。
+- 配置页读取磁盘最新版；待应用内容仅记录明确修改的字段，停服后重新读取最新文件并合并这些字段。未修改的外部变更、未知字段与 INI 注释保留，明确保存的同名字段以控制台修改为准；写入前备份，原子替换后回读校验。
+- 待应用配置绑定保存时的文件路径和世界；切换目标后不会写入新目标。切回原世界可继续应用，在新目标明确重新保存则只保留新目标的修改。
+- 控制台重启会在新进程启动前应用并校验已保存配置；在控制台外关闭服务器后，后台每秒检查停服状态并尝试应用。外部脚本无间隔重启无法保证赶在新进程启动前应用，应通过控制台重启。未保存的页面修改不会自动应用。
 - 真实服务器的恢复、配置应用和强制停止只应在用户批准的维护窗口执行。
 - 控制台版本正常每 24 小时检查一次，失败或结果过期时每 15 分钟重试；自动安装仅支持 Windows portable，需要本机确认。
 - 命名实例使用各自的 `data\instances\<实例名>` 数据目录和跨进程操作锁；同一根数据目录会登记并拒绝交叉的 `PalServer.exe`/世界写目标，以及重复的 PalServer 游戏/查询端口。
@@ -76,11 +78,12 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 
 | 页面提示 | 处理方式 |
 | --- | --- |
-| `GAME_ADMIN_PASSWORD_REQUIRED` | 在 `PalWorldSettings.ini` 配置游戏 `AdminPassword`，应用后重启控制台以开放可信 LAN 访问；未配置时仅监听 `127.0.0.1`。 |
+| `GAME_ADMIN_PASSWORD_REQUIRED` | 在当前有效 INI/SAV 配置游戏 `AdminPassword`，应用后重启控制台以开放可信 LAN 访问；未配置时仅监听 `127.0.0.1`。 |
 | `SERVER_NOT_CONFIGURED` | 在“服务器管理”页选择有效的 `PalServer.exe`。 |
 | `REST_CONNECTION_REFUSED` | 检查 PalServer 是否运行、REST 是否启用，以及端口是否与 `PalWorldSettings.ini` 一致。 |
 | `SNAPSHOT_PENDING` | 保存文件变化后等待稳定窗口；成功缓存前世界页面会显示过期状态。 |
-| `CONFIG_CONFLICT` | 在配置页查看差异，确认目标文件确实应被覆盖后再应用。 |
+| `CONFIG_PENDING_RESAVE_REQUIRED` | 旧版待应用文件缺少修改项或目标记录，不自动覆盖磁盘最新版；重新读取配置并保存需要修改的字段后再启动。 |
+| `CONFIG_PENDING_TARGET_MISMATCH` | 待应用配置属于其他世界或安装目录，未执行写入；切回原世界应用，或在当前目标重新保存。 |
 | `RESTORE_RECOVERY_REQUIRED` | 存在未完成的备份恢复；保持 PalServer 停止，先在备份恢复页面执行 resume 或 rollback。 |
 | `IDEMPOTENCY_KEY_CONFLICT` | 请求 key 已用于不同操作；刷新页面后重新提交，客户端会生成新的 key。 |
 | `ROLLBACK_FAILED` | 停止相关操作，保留英文错误详情，按维护清单使用安全副本人工回滚。 |
@@ -94,7 +97,7 @@ PalServerConsole 是一个运行在 PalServer 同一台 Windows 主机上的中�
 1. **P0 生产收口**：完成真实只读运行验证、干净环境发布复现和日志/事件数据源边界确认。
 2. **P1 便携交付**：构建机固定使用 64 位 CPython 3.13；交付内置 Python runtime 的 Windows 便携版，最终用户无需安装 Python/Node.js，并保证升级不覆盖 `data/`。
 3. **P2 可选实时 bridge**：只有 REST 和存档数据不足时，才提供独立、只读、可禁用的 UE4SS bridge。
-4. **P3 配置与网络安全**：先做 `WorldOption.sav` 只读解释和迁移预览，再考虑 HTTPS、反向代理和角色权限。
+4. **P3 配置与网络安全**：按实际游戏版本核实 INI/SAV 新增参数与默认值，再考虑 HTTPS、反向代理和角色权限。
 
 任意 RCON、存档编辑、地图坐标、受控远程访问和 UE4SS bridge 仍属于高风险后续方向，暂不承诺时间表。控制台更新与多实例/多世界提供受限的本机工作流；尚未执行真实 PalServer 或物理隔离的多实例主机写入验证。
 

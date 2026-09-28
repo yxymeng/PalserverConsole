@@ -33,6 +33,7 @@ WORLD_OPTION_INTS = frozenset(
         "BaseCampMaxNumInGuild",
         "BaseCampWorkerMaxNum",
         "MaxBuildingLimitNum",
+        "MaxBuildingLimitNumPerPlayer",
         "GuildPlayerMaxNum",
         "SupplyDropSpan",
         "ChatPostLimitPerMinute",
@@ -66,6 +67,7 @@ WORLD_OPTION_FLOATS = frozenset(
         "CollectionObjectHpRate",
         "CollectionObjectRespawnSpeedRate",
         "EnemyDropItemRate",
+        "FishingDifficultyRate",
         "ItemWeightRate",
         "EquipmentDurabilityDamageRate",
         "ItemContainerForceMarkDirtyInterval",
@@ -119,6 +121,7 @@ WORLD_OPTION_BOOLS = frozenset(
         "bEnableDefenseOtherGuildPlayer",
         "bInvisibleOtherGuildBaseCampAreaFX",
         "bBuildAreaLimit",
+        "bAllowEnemyCampSpawnNearBaseCamp",
         "bShowPlayerList",
         "bEnablePlayerToPlayerDamage",
         "bEnableFriendlyFire",
@@ -151,6 +154,9 @@ WORLD_OPTION_KEYS = frozenset(
 # Bluefissure/pal-conf main, commit a0f75513 (2026-07-11). Values intentionally
 # keep pal-conf's source representation; default_world_option_fields() converts
 # them to this backend's canonical INI-style representation.
+# 1.0.3/1.0.4 additions use the game's DefaultPalWorldSettings.ini defaults:
+# bAllowEnemyCampSpawnNearBaseCamp=False, FishingDifficultyRate=1.000000,
+# MaxBuildingLimitNumPerPlayer=0. Keep the same sparse pal-conf serialization.
 WORLD_OPTION_DEFAULTS = {
     "AdditionalDropItemNumWhenPlayerKillingInPvPMode": "1",
     "AdditionalDropItemWhenPlayerKillingInPvPMode": "PlayerDropItem",
@@ -181,6 +187,7 @@ WORLD_OPTION_DEFAULTS = {
     "EnemyDropItemRate": "1.000000",
     "EquipmentDurabilityDamageRate": "1.000000",
     "ExpRate": "1.000000",
+    "FishingDifficultyRate": "1.000000",
     "GuildPlayerMaxNum": "20",
     "GuildRejoinCooldownMinutes": "0",
     "ItemContainerForceMarkDirtyInterval": "1.000000",
@@ -188,6 +195,7 @@ WORLD_OPTION_DEFAULTS = {
     "ItemWeightRate": "1.000000",
     "LogFormatType": "Text",
     "MaxBuildingLimitNum": "0",
+    "MaxBuildingLimitNumPerPlayer": "0",
     "NightTimeSpeedRate": "1.000000",
     "PalAutoHPRegeneRate": "1.000000",
     "PalAutoHpRegeneRateInSleep": "1.000000",
@@ -225,6 +233,7 @@ WORLD_OPTION_DEFAULTS = {
     "bActiveUNKO": "False",
     "bAdditionalDropItemWhenPlayerKillingInPvPMode": "False",
     "bAllowClientMod": "True",
+    "bAllowEnemyCampSpawnNearBaseCamp": "False",
     "bAllowEnhanceStat_Attack": "True",
     "bAllowEnhanceStat_Health": "True",
     "bAllowEnhanceStat_Stamina": "True",

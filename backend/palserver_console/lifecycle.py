@@ -248,6 +248,18 @@ class LifecycleManager:
             config = self.load_configuration()
         except LifecycleError as error:
             raw_executable = self.database.get_setting("server.executable")
+            if raw_executable:
+                try:
+                    executable = validate_executable(Path(raw_executable))
+                except (OSError, ValueError):
+                    pass
+                else:
+                    pids = self.process.matching_pids(executable)
+                    if pids:
+                        return {
+                            "configured": True, "state": "running", "pids": pids,
+                            "executablePath": str(executable), "errorCode": error.code,
+                        }
             if raw_executable and error.code in PROFILE_ERROR_CODES:
                 return {
                     "configured": True,
@@ -272,13 +284,16 @@ class LifecycleManager:
             "errorCode": None,
         }
 
-    def load_configuration(self) -> ServerConfiguration:
+    def _configuration_paths(self) -> tuple[Path, Path | None]:
         raw_executable = self.database.get_setting("server.executable")
         if not raw_executable:
             raise LifecycleError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
+        world_path: Path | None = None
         if self.profile_provider is not None:
             try:
-                executable = self.profile_provider().executable_path
+                profile = self.profile_provider()
+                executable = profile.executable_path
+                world_path = profile.world_path
             except ProfileError as error:
                 raise LifecycleError(error.code, str(error)) from error
         else:
@@ -286,7 +301,11 @@ class LifecycleManager:
                 executable = validate_executable(Path(raw_executable))
             except (OSError, ValueError) as error:
                 raise LifecycleError("INVALID_SERVER_PATH", str(error)) from error
-        derived_url, password = _read_rest_configuration(executable.parent)
+        return executable, world_path
+
+    def load_configuration(self) -> ServerConfiguration:
+        executable, world_path = self._configuration_paths()
+        derived_url, password = _read_rest_configuration(executable.parent, world_path)
         return ServerConfiguration(
             executable=executable,
             arguments=parse_arguments(self.database.get_setting("server.arguments") or ""),
@@ -425,18 +444,19 @@ class LifecycleManager:
                 "RESTORE_RECOVERY_REQUIRED",
                 "未完成的备份恢复必须先 resume 或 rollback，未执行服务器操作。",
             )
-        config = self.load_configuration()
         if kind == "start":
-            self._start(operation_id, config)
-        elif kind == "save":
-            self._save(operation_id, config)
-        elif kind == "force_stop":
-            self._force_stop(operation_id, config)
-            self._complete_force_parent(operation_id, succeeded=True)
+            self._start(operation_id)
         else:
-            self._stop_or_restart(
-                operation_id, config, kind == "restart", countdown_seconds, message, cancel
-            )
+            config = self.load_configuration()
+            if kind == "save":
+                self._save(operation_id, config)
+            elif kind == "force_stop":
+                self._force_stop(operation_id, config)
+                self._complete_force_parent(operation_id, succeeded=True)
+            else:
+                self._stop_or_restart(
+                    operation_id, config, kind == "restart", countdown_seconds, message, cancel
+                )
         final = self.database.operation(operation_id)
         result = "success"
         if final and final["state"] == "cancelled":
@@ -522,10 +542,12 @@ class LifecycleManager:
             # A console restart or another recovery path may have closed the parent.
             return
 
-    def _start(self, operation_id: str, config: ServerConfiguration) -> None:
-        if self.process.matching_pids(config.executable):
+    def _start(self, operation_id: str) -> None:
+        executable, _ = self._configuration_paths()
+        if self.process.matching_pids(executable):
             raise LifecycleError("ALREADY_RUNNING", "该安装路径的 PalServer 已在运行。")
         self._apply_pending_config(operation_id)
+        config = self.load_configuration()
         self._transition(operation_id, "running", "starting")
         handle = self.process.start(config.executable, config.arguments)
         time.sleep(0.2)
@@ -671,9 +693,11 @@ def _operation_request_fingerprint(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _read_rest_configuration(install_path: Path) -> tuple[str, SensitiveValue]:
+def _read_rest_configuration(
+    install_path: Path, world_path: Path | None = None,
+) -> tuple[str, SensitiveValue]:
     try:
-        connection = read_connection_config(install_path)
+        connection = read_connection_config(install_path, world_path)
     except MonitoringConfigError as error:
         raise LifecycleError(error.code, str(error)) from error
     if not connection.rest_enabled:

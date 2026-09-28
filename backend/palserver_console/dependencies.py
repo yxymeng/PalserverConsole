@@ -87,7 +87,9 @@ class DefaultDependencyFactory:
         def monitor_config() -> tuple[Path, ServerConnectionConfig]:
             try:
                 profile = profiles.profile()
-                return profile.executable_path, read_connection_config(profile.install_path)
+                return profile.executable_path, read_connection_config(
+                    profile.install_path, profile.world_path
+                )
             except ProfileError as error:
                 raise MonitoringConfigError(error.code, str(error)) from error
 
