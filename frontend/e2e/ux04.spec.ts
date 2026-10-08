@@ -34,7 +34,7 @@ const communityWorkers = communityBases.flatMap((item) => item.workers);
 const guildDetailBases = communityBases.map(({ id, name, guildId, workerContainerId, x, y, z }) => ({ id, name, guildId, workerContainerId, x, y, z }));
 let reparseRequests = 0;
 
-async function setupWorld(page: Page) {
+async function setupWorld(page: Page, inventoryCategories = ["材料"]) {
   reparseRequests = 0;
   await page.addInitScript(() => window.localStorage.setItem("palserver-console-theme", "island"));
   const worldListUrls: URL[] = [];
@@ -119,7 +119,7 @@ async function setupWorld(page: Page) {
       const metadata = requestUrl.searchParams.get("metadata");
       const scopedItems = scope === "player" ? [wood(3, 1)] : scope === "base" ? [wood(9, 2), unknown] : scope === "world" ? [wood(6, 3)] : scope === "inventory" ? [wood(12, 3), unknown] : [wood(22, 7), unknown];
       const items = metadata === "unknown" ? scopedItems.filter((item) => !item.metadataKnown) : scopedItems;
-      return route.fulfill({ json: { items, categories: ["材料"], page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
+      return route.fulfill({ json: { items, categories: inventoryCategories, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     if (path === "/api/world/inventory-items/Wood") {
       const requestUrl = new URL(route.request().url());
@@ -1279,6 +1279,99 @@ test("UX-04：765px 宽度可访问完整公会菜单与响应式物资卡片", 
   expect(search && category && scope && sort && search.y < category.y && category.y < scope.y && scope.y < sort.y).toBeTruthy();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath("inventory-mobile.png"), fullPage: true });
+});
+
+test("UX-04：物资筛选键盘顺序与视觉一致，长分类不撑宽页面", async ({ page }, testInfo) => {
+  const longCategory = "Essential / Essential_AdditionalInventory";
+  const { inventoryUrls } = await setupWorld(page, ["材料", longCategory]);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "全服物资检索" }).click();
+  const inventory = page.locator(".inventory-workspace");
+  const category = inventory.getByLabel("物品分类筛选");
+  await expect(inventory.locator(".inventory-item-summary")).toHaveCount(2);
+  await category.selectOption(longCategory);
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("category")).toBe(longCategory);
+  await expect(inventory.locator(".inventory-item-summary")).toHaveCount(2);
+  await expect(category).toHaveValue(longCategory);
+  await expect(category).toHaveAttribute("title", longCategory);
+
+  for (const width of [1440, 1024, 768, 390, 320]) {
+    await page.setViewportSize({ width, height: 960 });
+    await inventory.getByLabel("搜索物品").focus();
+    for (const control of [inventory.getByRole("button", { name: "搜索", exact: true }), category, ...["全部持有", "玩家背包", "据点箱子"].map((name) => inventory.getByRole("group", { name: "仓库范围" }).getByRole("button", { name })), inventory.getByLabel("仓库排序方式"), inventory.getByRole("button", { name: "清除筛选", exact: true })]) {
+      await page.keyboard.press("Tab");
+      await expect(control).toBeFocused();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
+    expect(await category.evaluate((element) => {
+      const control = element.getBoundingClientRect();
+      const label = element.parentElement!.getBoundingClientRect();
+      return control.left >= label.left && control.right <= label.right;
+    })).toBeTruthy();
+    if (width === 1024 || width === 320) await page.screenshot({ path: testInfo.outputPath(`inventory-long-category-${width}.png`), fullPage: true });
+  }
+  await inventory.getByRole("button", { name: "清除筛选", exact: true }).click();
+  await expect(category).toHaveValue("");
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.has("category")).toBe(false);
+});
+
+test("UX-04：物资加载骨架保持参考尺寸、主题和横向扫光", async ({ page }, testInfo) => {
+  await setupWorld(page);
+  let releaseInventory!: () => void;
+  const pendingInventory = new Promise<void>((resolve) => { releaseInventory = resolve; });
+  await page.route("**/api/world/inventory-items?*", async (route) => {
+    await pendingInventory;
+    await route.fallback();
+  });
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: "全服物资检索" }).click();
+  const skeletons = page.locator(".inventory-skeleton");
+  await expect(skeletons).toHaveCount(8);
+  await expect(page.getByRole("status", { name: "正在聚合仓库" })).toHaveCount(1);
+  const first = skeletons.first();
+  const fills = { island: "rgba(224, 242, 254, 0.6)", light: "rgb(226, 232, 240)", dark: "rgb(52, 59, 57)" };
+  for (const theme of ["island", "light", "dark"] as const) {
+    await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(200);
+    expect(await page.evaluate(() => document.documentElement.dataset.theme)).toBe(theme);
+    const background = await first.evaluate((element) => getComputedStyle(element).backgroundColor);
+    await first.hover();
+    await page.waitForTimeout(200);
+    expect(await first.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(background);
+    expect(await first.locator("i").first().evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(fills[theme]);
+    expect(await first.locator("i").first().evaluate((element) => {
+      const bar = getComputedStyle(element);
+      const shine = getComputedStyle(element, "::after");
+      return { animation: bar.animationName, opacity: bar.opacity, name: shine.animationName, duration: shine.animationDuration, timing: shine.animationTimingFunction };
+    })).toEqual({ animation: "none", opacity: "1", name: "inventory-shimmer", duration: "1.6s", timing: "ease-in-out" });
+  }
+  await page.evaluate(() => { document.documentElement.dataset.theme = "island"; });
+  await expect.poll(() => first.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(255, 255, 255, 0.92)");
+  expect(await first.evaluate((element) => ({ padding: getComputedStyle(element).padding, height: getComputedStyle(element).height, bars: [...element.querySelectorAll("i")].map((bar) => { const style = getComputedStyle(bar); return [style.width, style.height, style.borderRadius]; }) }))).toEqual({ padding: "20px", height: "167px", bars: [["38px", "38px", "12px"], ["60px", "18px", "999px"], ["100px", "16px", "6px"], ["140px", "12px", "4px"], ["70px", "12px", "4px"], ["50px", "14px", "6px"]] });
+  expect(await first.evaluate((element) => {
+    const animation = element.getAnimations({ subtree: true }).find((item) => item instanceof CSSAnimation && item.animationName === "inventory-shimmer")!;
+    animation.pause();
+    const bar = element.querySelector("i")!;
+    animation.currentTime = 0;
+    const start = new DOMMatrixReadOnly(getComputedStyle(bar, "::after").transform).m41;
+    animation.currentTime = 1599;
+    const end = new DOMMatrixReadOnly(getComputedStyle(bar, "::after").transform).m41;
+    return start < 0 && end > 0;
+  })).toBeTruthy();
+  await page.evaluate(() => { document.getAnimations().filter((animation) => animation instanceof CSSAnimation && animation.animationName === "inventory-shimmer").forEach((animation) => { animation.pause(); animation.currentTime = 800; }); });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 960 });
+    const preview = width === 390 ? first : page.locator(".inventory-results");
+    await preview.screenshot({ path: testInfo.outputPath(`inventory-skeleton-${width}.png`), style: "header, nav { visibility: hidden; }" });
+  }
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect.poll(() => first.locator("i").first().evaluate((element) => getComputedStyle(element, "::after").animationName)).toBe("none");
+  releaseInventory();
+  await expect(skeletons).toHaveCount(0);
+  await expect(page.locator(".inventory-item-summary")).toHaveCount(2);
 });
 
 test("UX-04：仓库位置请求不会让旧响应覆盖当前展开项", async ({ page }) => {
