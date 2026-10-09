@@ -5,7 +5,7 @@ import { playerText } from "../../utils/format";
 export type PlayerDataState = "loading" | "error" | "empty" | "ready";
 export type PlayerPingTone = "good" | "medium" | "high" | "unavailable";
 
-const GAME_ACTIVITY_TYPES = new Set(["player.joined", "player.left", "chat.message"]);
+export const GAME_ACTIVITY_TYPES = new Set(["player.joined", "player.left", "chat.message"]);
 
 export function isGameActivity(item: AuditItem): boolean {
   return GAME_ACTIVITY_TYPES.has(item.eventType);

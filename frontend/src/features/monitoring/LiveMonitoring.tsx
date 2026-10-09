@@ -13,7 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { useLiveEvents } from "../../hooks/useLiveEvents";
 import { formatBytes, playerId, playerText } from "../../utils/format";
-import { gameActivityPresentation, gameActivityTime, isGameActivity, playerDataState, playerLevelText, playerPingPresentation, playerSyncPresentation, processMemoryPercent, serverFrameSummary, worldPlayerId, worldStatusAfterResponse } from "./livePresentation";
+import { GAME_ACTIVITY_TYPES, gameActivityPresentation, gameActivityTime, isGameActivity, playerDataState, playerLevelText, playerPingPresentation, playerSyncPresentation, processMemoryPercent, serverFrameSummary, worldPlayerId, worldStatusAfterResponse } from "./livePresentation";
 import { PlayerExplorationDialog, type PlayerExplorationState } from "./PlayerExplorationDialog";
 
 export function LiveMonitoring({
@@ -305,10 +305,13 @@ function GameActivityCard() {
     const signal = nextRequestSignal();
     try {
       const [events, capabilities] = await Promise.all([
-        requestJson<AuditResponse>("/api/audit?page=1&pageSize=50", { signal }),
+        Promise.all([...GAME_ACTIVITY_TYPES].map((eventType) =>
+          requestJson<AuditResponse>(`/api/audit?page=1&pageSize=5&eventType=${eventType}`, { signal }),
+        )),
         requestJson<{ chatSupported: boolean }>("/api/audit/capabilities", { signal }),
       ]);
-      setItems(events.items.filter(isGameActivity).slice(0, 5));
+      setItems(events.flatMap((response) => response.items).filter(isGameActivity)
+        .sort((left, right) => right.createdAt - left.createdAt || right.id - left.id).slice(0, 5));
       setChatSupported(capabilities.chatSupported);
       setError("");
     } catch (caught) {

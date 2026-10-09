@@ -806,11 +806,7 @@ class ConfigService:
         if row and row["state"] == state:
             pending = Path(str(row["draft_path"]))
             if pending.is_file():
-                try:
-                    return self._read_pending_updates(pending, target, resaved_keys=resaved_keys)
-                except ConfigError as error:
-                    if error.code != "CONFIG_PENDING_TARGET_MISMATCH":
-                        raise
+                return self._read_pending_updates(pending, target, resaved_keys=resaved_keys)
         return {}, {}
 
     def _read_pending_updates(
@@ -859,7 +855,7 @@ class ConfigService:
             raise ConfigError(
                 "CONFIG_PENDING_TARGET_MISMATCH",
                 "待应用配置属于其他世界或安装目录，未写入。"
-                "请切回原世界应用，或在当前世界重新保存。",
+                "请切回原世界应用，再保存当前世界的修改。",
             )
         baseline = payload.pop("baseline", None)
         updates = parse_config_request(json.dumps(payload, ensure_ascii=False).encode("utf-8"))

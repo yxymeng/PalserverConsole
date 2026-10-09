@@ -51,9 +51,34 @@ test("首页控制模块刷新运行状态后，顶栏状态同步更新", async
     return route.fulfill({ json: { message: "广播已发送。" } });
   });
   await page.route("**/api/events", (route) => route.fulfill({ contentType: "text/event-stream", body: "" }));
+  const activityEvents = Array.from({ length: 7 }, (_, index) => ({
+    id: index + 1, eventType: ["player.joined", "player.left", "chat.message"][index % 3],
+    peerIp: null, result: "success", createdAt: 100 + Math.ceil((index + 1) / 2),
+    source: "player-diff", parserVersion: null,
+    detail: { player: { name: `训练家${index + 1}` }, name: `训练家${index + 1}`, message: "出发吧" },
+  })).reverse();
+  const auditEvents = [
+    ...Array.from({ length: 51 }, (_, index) => ({ ...activityEvents[0], id: 100 + index, eventType: "server.operation", createdAt: 1000 - index })),
+    ...activityEvents,
+  ];
+  const auditTypes = new Set<string>();
+  await page.route("**/api/audit?**", (route) => {
+    const query = new URL(route.request().url()).searchParams;
+    const eventType = query.get("eventType");
+    if (eventType) auditTypes.add(eventType);
+    const filtered = eventType ? auditEvents.filter((item) => item.eventType === eventType) : auditEvents;
+    const pageNumber = Number(query.get("page") || 1);
+    const pageSize = Number(query.get("pageSize") || 50);
+    return route.fulfill({ json: { items: filtered.slice((pageNumber - 1) * pageSize, pageNumber * pageSize), page: pageNumber, pageSize, total: filtered.length, observedAt: 1 } });
+  });
+  await page.route("**/api/audit/capabilities", (route) => route.fulfill({ json: { chatSupported: true } }));
 
   await page.goto("/");
   await expect(page.locator(".psc-home-state")).toHaveText("运行中");
+  await expect(page.locator(".psc-activity-item strong")).toHaveText([
+    "训练家7 进入了服务器", "训练家6 发言", "训练家5 离开了服务器", "训练家4 进入了服务器", "训练家3 发言",
+  ]);
+  expect([...auditTypes].sort()).toEqual(["chat.message", "player.joined", "player.left"]);
   await expect(page.getByRole("heading", { name: "当前世界名称", exact: true })).toBeVisible();
   await expect(page.getByLabel("首页服务器控制")).toContainText("当前世界描述");
   await expect(page.getByLabel("首页服务器控制")).not.toContainText("未生效的 INI");

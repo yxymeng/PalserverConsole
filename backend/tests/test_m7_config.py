@@ -862,23 +862,38 @@ def test_pending_apply_is_bound_to_saved_world(tmp_path: Path, kind: str) -> Non
 
 
 @pytest.mark.parametrize("kind", ["ini", "world-option"])
-def test_resaving_after_world_switch_does_not_merge_other_world_pending(
+def test_resaving_after_world_switch_preserves_original_world_pending(
     tmp_path: Path, kind: str,
 ) -> None:
     service, state, world = make_world_service(tmp_path, running=True)
     profiles, other_world = bind_two_test_worlds(service, world)
     save = service.save_ini if kind == "ini" else service.save_world_option
     save({"AutoSaveSpan": "900"})
+    row = service.database.get_config_draft()
+    assert row is not None
+    pending = Path(str(row["draft_path"]))
+    original_pending = pending.read_bytes()
+    original_ini = service.path().read_bytes()
+    original_other_sav = (other_world / "WorldOption.sav").read_bytes()
     profiles.bind(profiles.profile().executable_path, other_world.name)
-    save({"bEnableFastTravel": "False"})
+    with pytest.raises(ConfigError) as error:
+        save({"bEnableFastTravel": "False"})
+    assert error.value.code == "CONFIG_PENDING_TARGET_MISMATCH"
+    assert pending.read_bytes() == original_pending
+    assert service.database.get_config_draft() == row
+    assert service.path().read_bytes() == original_ini
+    assert (other_world / "WorldOption.sav").read_bytes() == original_other_sav
+
+    profiles.bind(profiles.profile().executable_path, world.name)
     state["running"] = False
     service.apply_pending()
-    if kind == "ini":
-        fields = cast(dict[str, str], service.current()["fields"])
-    else:
-        fields = read_world_option(other_world / "WorldOption.sav")[2]
-    assert float(fields["AutoSaveSpan"]) == 600
-    assert fields["bEnableFastTravel"] == "False"
+    fields = cast(
+        dict[str, str], service.current()["fields" if kind == "ini" else "worldOptionFields"]
+    )
+    assert float(fields["AutoSaveSpan"]) == 900
+    assert fields["bEnableFastTravel"] == "True"
+    assert service.database.get_config_draft() is None
+    assert (other_world / "WorldOption.sav").read_bytes() == original_other_sav
 
 
 @pytest.mark.parametrize("kind", ["ini", "world-option"])
