@@ -92,6 +92,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    setPage(1);
     invalidateLocationRequest();
     setExpanded(null);
     setLocations(null);

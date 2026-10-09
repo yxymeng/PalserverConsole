@@ -34,7 +34,7 @@ const communityWorkers = communityBases.flatMap((item) => item.workers);
 const guildDetailBases = communityBases.map(({ id, name, guildId, workerContainerId, x, y, z }) => ({ id, name, guildId, workerContainerId, x, y, z }));
 let reparseRequests = 0;
 
-async function setupWorld(page: Page, inventoryCategories = ["材料"]) {
+async function setupWorld(page: Page, inventoryCategories = ["材料"], inventoryTotal?: number) {
   reparseRequests = 0;
   await page.addInitScript(() => window.localStorage.setItem("palserver-console-theme", "island"));
   const worldListUrls: URL[] = [];
@@ -119,7 +119,11 @@ async function setupWorld(page: Page, inventoryCategories = ["材料"]) {
       const metadata = requestUrl.searchParams.get("metadata");
       const scopedItems = scope === "player" ? [wood(3, 1)] : scope === "base" ? [wood(9, 2), unknown] : scope === "world" ? [wood(6, 3)] : scope === "inventory" ? [wood(12, 3), unknown] : [wood(22, 7), unknown];
       const items = metadata === "unknown" ? scopedItems.filter((item) => !item.metadataKnown) : scopedItems;
-      return route.fulfill({ json: { items, categories: inventoryCategories, page: 1, pageSize: 60, total: items.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
+      const allItems = inventoryTotal && !requestUrl.searchParams.has("guildId")
+        ? Array.from({ length: inventoryTotal }, (_, index) => ({ ...items[0], itemId: `Wood-${index}`, name: `木材 ${index}` }))
+        : items;
+      const inventoryPage = Number(requestUrl.searchParams.get("page") || 1);
+      return route.fulfill({ json: { items: allItems.slice((inventoryPage - 1) * 60, inventoryPage * 60), categories: inventoryCategories, page: inventoryPage, pageSize: 60, total: allItems.length, source: "save-snapshot", observedAt: 1, sourceObservedAt: 1, collectedAt: 1, parsedAt: 1, snapshotId: activeSnapshotId, stale: false, parsing: false, parseStatus: "ready", errorCode: null, dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } }, metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null } } });
     }
     if (path === "/api/world/inventory-items/Wood") {
       const requestUrl = new URL(route.request().url());
@@ -1137,6 +1141,30 @@ test("UX-04：训练家与帕鲁详情、公会据点卡片及关联跳转", asy
   await expect(page.getByText(/SNAPSHOT_PARSE_FAILED/)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: testInfo.outputPath(`ux04-${testInfo.project.name}.png`), fullPage: true });
+});
+
+test("公会详情可按稳定公会 ID 跳转库存并保留快照", async ({ page }) => {
+  const { inventoryUrls } = await setupWorld(page, ["材料"], 61);
+  await page.goto("/");
+  await page.getByRole("button", { name: "世界", exact: true }).click();
+  await page.getByRole("tab", { name: /全服物资检索/ }).click();
+  await page.getByLabel("全服物资检索", { exact: true }).getByTitle("下一页", { exact: true }).click();
+  await expect(page.locator(".inventory-footer")).toContainText("第 2/2 页");
+  await page.getByRole("tab", { name: "公会与据点", exact: true }).click();
+  const guildNav = page.getByLabel("公会选择器");
+  await guildNav.locator("summary").click();
+  await guildNav.getByRole("button", { name: /测试工会/ }).click();
+  await page.getByRole("button", { name: "查看成员（64）" }).click();
+  const drawer = page.getByRole("dialog", { name: "世界实体详情" });
+  await drawer.locator(".world-relation-section").filter({ hasText: "公会关联仓库" }).getByRole("button", { name: "在仓库中查看" }).click();
+  await expect(drawer).toHaveCount(0);
+  await expect(page.locator(".inventory-context")).toContainText("公会关联仓库：测试工会");
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("guildId")).toBe("guild-1");
+  expect(inventoryUrls.at(-1)?.searchParams.get("scope")).toBe("inventory");
+  expect(inventoryUrls.at(-1)?.searchParams.get("snapshotId")).toBe("world");
+  await expect.poll(() => inventoryUrls.at(-1)?.searchParams.get("page")).toBe("1");
+  await expect(page.locator(".inventory-footer")).toContainText("第 1/1 页");
+  await page.screenshot({ path: test.info().outputPath("guild-inventory.png"), fullPage: true });
 });
 
 test("UX-04：游戏原始工作图标在明暗主题加载，未知技能使用 SVG 兜底", async ({ page }, testInfo) => {

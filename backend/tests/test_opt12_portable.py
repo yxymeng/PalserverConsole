@@ -1173,8 +1173,11 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
-    assert "npm >= 11.17" in root_readme
-    assert "npm 11.17.0" in root_readme
+    assert "npm ≥ 11.17" in root_readme
+    workflow = (project_root / ".github" / "workflows" / "windows-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "npm@11.17.0" in workflow
 
 
 def test_application_update_progress_protocol_is_consistent_across_runtimes() -> None:
@@ -1713,7 +1716,10 @@ def test_portable_update_helper_releases_lock_and_prunes_only_after_health(
             f"{completed.stdout}\n{completed.stderr}"
         )
         deadline = time.monotonic() + 5
-        while healthy and len(list((data_directory / "upgrade-backups").glob("*/app.db"))) != 1:
+        while healthy and (
+            len(list((data_directory / "upgrade-backups").glob("*/app.db"))) != 1
+            or len(list((install_root / "program-backups").glob("Program-20*"))) != 1
+        ):
             if time.monotonic() >= deadline:
                 break
             time.sleep(0.05)

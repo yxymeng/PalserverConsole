@@ -720,10 +720,12 @@ class ConfigService:
     def save_ini(self, fields: dict[str, str]) -> dict[str, object]:
         with self.control_lock:
             target, raw, _, original, order = self._read()
-            updates = self._pending_updates("pending-ini", target)
-            updates.update(self._validate_updates(fields, original))
+            changes = self._validate_updates(fields, original)
+            updates, baseline = self._pending_updates("pending-ini", target, set(changes))
+            updates.update(changes)
+            baseline.update({key: original.get(key) for key in changes})
             _render_verified(raw, {**original, **updates}, order)
-            self._save_pending_updates("pending-ini", updates, target)
+            self._save_pending_updates("pending-ini", updates, target, baseline)
             if self.running():
                 return {
                     "message": "配置已保存，PalServer 关闭、重启或下次启动时会自动应用。",
@@ -749,8 +751,10 @@ class ConfigService:
                     "WORLD_OPTION_UNSUPPORTED_FIELD", f"WorldOption.sav 不支持字段 {key}。"
                 )
             gvas, save_type, original = self._world_option_document(target)
-            updates = self._pending_updates("pending-world-option", target)
-            updates.update(self._validate_updates(fields, original))
+            changes = self._validate_updates(fields, original)
+            updates, baseline = self._pending_updates("pending-world-option", target, set(changes))
+            updates.update(changes)
+            baseline.update({key: original.get(key) for key in changes})
             try:
                 update_world_option(gvas, updates)
                 serialize_world_option(gvas, save_type)
@@ -758,7 +762,7 @@ class ConfigService:
                 raise ConfigError(
                     "WORLD_OPTION_WRITE_FAILED", f"生成 WorldOption.sav 失败: {error}"
                 ) from error
-            self._save_pending_updates("pending-world-option", updates, target)
+            self._save_pending_updates("pending-world-option", updates, target, baseline)
             if self.running():
                 return {
                     "message": "配置已保存，PalServer 关闭、重启或下次启动时会自动应用。",
@@ -795,26 +799,45 @@ class ConfigService:
             "worldPath": os.path.normcase(str(world_option.parent)) if world_option else None,
         }
 
-    def _pending_updates(self, state: str, target: Path) -> dict[str, str]:
+    def _pending_updates(
+        self, state: str, target: Path, resaved_keys: set[str],
+    ) -> tuple[dict[str, str], dict[str, str | None]]:
         row = self.database.get_config_draft()
         if row and row["state"] == state:
             pending = Path(str(row["draft_path"]))
-            if pending.is_file() and pending.suffix == ".json":
+            if pending.is_file():
                 try:
-                    return self._read_pending_updates(pending, target)
+                    return self._read_pending_updates(pending, target, resaved_keys=resaved_keys)
                 except ConfigError as error:
-                    if error.code not in {
-                        "CONFIG_PENDING_TARGET_MISMATCH", "CONFIG_PENDING_RESAVE_REQUIRED",
-                    }:
+                    if error.code != "CONFIG_PENDING_TARGET_MISMATCH":
                         raise
-        return {}
+        return {}, {}
 
-    def _read_pending_updates(self, pending: Path, target: Path) -> dict[str, str]:
+    def _read_pending_updates(
+        self, pending: Path, target: Path, *, resaved_keys: set[str] | None = None,
+    ) -> tuple[dict[str, str], dict[str, str | None]]:
         if pending.suffix != ".json":
-            raise ConfigError(
-                "CONFIG_PENDING_RESAVE_REQUIRED",
-                "旧版待应用配置缺少修改项或目标记录，请读取最新配置后重新保存。",
-            )
+            if resaved_keys is None or pending.suffix not in {".ini", ".sav"}:
+                raise ConfigError(
+                    "CONFIG_PENDING_RESAVE_REQUIRED",
+                    "旧版待应用配置缺少修改项或目标记录，请读取最新配置后重新保存。",
+                )
+            if pending.suffix == ".ini":
+                legacy, current = self._read(pending)[3], self._read(target)[3]
+            else:
+                legacy = self._world_option_document(pending)[2]
+                current = self._world_option_document(target)[2]
+            unresolved = {
+                key for key, value in legacy.items()
+                if current.get(key) != value and key not in resaved_keys
+            }
+            if unresolved:
+                raise ConfigError(
+                    "CONFIG_PENDING_RESAVE_REQUIRED",
+                    "旧版待应用配置仍有未重新保存的差异，原草稿已保留。"
+                    f"请读取最新配置后重新保存这些字段：{', '.join(sorted(unresolved))}。",
+                )
+            return {}, {}
         try:
             payload = json.loads(
                 pending.read_text(encoding="utf-8"),
@@ -826,26 +849,52 @@ class ConfigService:
             raise ConfigError(
                 "CONFIG_INVALID_REQUEST", "待应用配置不是有效的 UTF-8 JSON。"
             ) from error
-        if not isinstance(payload, dict) or "target" not in payload:
+        if not isinstance(payload, dict):
             raise ConfigError(
                 "CONFIG_PENDING_RESAVE_REQUIRED",
                 "旧版待应用配置缺少目标记录，请读取最新配置后重新保存。",
             )
-        if payload.pop("target") != self._pending_target(target):
+        binding = payload.pop("target", None)
+        if binding is not None and binding != self._pending_target(target):
             raise ConfigError(
                 "CONFIG_PENDING_TARGET_MISMATCH",
                 "待应用配置属于其他世界或安装目录，未写入。"
                 "请切回原世界应用，或在当前世界重新保存。",
             )
-        return parse_config_request(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        baseline = payload.pop("baseline", None)
+        updates = parse_config_request(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        if (
+            binding is None or not isinstance(baseline, dict) or set(baseline) != set(updates)
+            or any(value is not None and not isinstance(value, str) for value in baseline.values())
+        ):
+            if resaved_keys is None or set(updates) - resaved_keys:
+                raise ConfigError(
+                    "CONFIG_PENDING_RESAVE_REQUIRED",
+                    "旧版待应用配置缺少字段冲突基准或目标记录，原草稿已保留。"
+                    f"请读取最新配置后重新保存全部待应用字段：{', '.join(updates)}。",
+                )
+            baseline = {}
+        return updates, baseline
 
-    def _save_pending_updates(self, state: str, updates: dict[str, str], target: Path) -> None:
+    def _save_pending_updates(
+        self, state: str, updates: dict[str, str], target: Path, baseline: dict[str, str | None],
+    ) -> None:
         row = self.database.get_config_draft()
+        if (
+            row and row["state"] in {"pending-ini", "pending-world-option"}
+            and row["state"] != state
+        ):
+            raise ConfigError(
+                "CONFIG_PENDING_TARGET_CONFLICT",
+                "另一配置文件已有待应用修改，请先关闭或重启服务器应用，再保存此文件。"
+                "原待应用修改已保留。",
+            )
         pending = self.data_dir / "pending" / f"{state}.json"
         pending.parent.mkdir(parents=True, exist_ok=True)
         parse_config_request(json.dumps({"fields": updates}, ensure_ascii=False).encode("utf-8"))
         payload = json.dumps(
-            {"fields": updates, "target": self._pending_target(target)}, ensure_ascii=False,
+            {"fields": updates, "target": self._pending_target(target), "baseline": baseline},
+            ensure_ascii=False,
         ).encode("utf-8")
         temp = pending.with_suffix(".tmp")
         temp.write_bytes(payload)
@@ -875,7 +924,9 @@ class ConfigService:
 
     def _apply_pending_ini(self, pending: Path) -> dict[str, object]:
         target, raw, _, original, order = self._read()
-        updates = self._validate_updates(self._read_pending_updates(pending, target), original)
+        updates, baseline = self._read_pending_updates(pending, target)
+        self._check_pending_conflicts(updates, baseline, original)
+        updates = self._validate_updates(updates, original)
         pending_raw = _render_verified(raw, {**original, **updates}, order)
         password_before = self._effective_admin_password()
         backup = self._backup_path(target)
@@ -911,8 +962,9 @@ class ConfigService:
     def _apply_pending_world_option(self, pending: Path) -> dict[str, object]:
         target = self._world_option_path(required=True)
         assert target is not None
-        updates = self._read_pending_updates(pending, target)
+        updates, baseline = self._read_pending_updates(pending, target)
         gvas, save_type, original = self._world_option_document(target)
+        self._check_pending_conflicts(updates, baseline, original)
         try:
             update_world_option(gvas, self._validate_updates(updates, original))
             payload = serialize_world_option(gvas, save_type)
@@ -950,6 +1002,20 @@ class ConfigService:
             "kind": "world-option",
             "backupPath": str(backup) if backup else None,
         }
+
+    @staticmethod
+    def _check_pending_conflicts(
+        updates: dict[str, str], baseline: dict[str, str | None], original: dict[str, str],
+    ) -> None:
+        conflicts = [
+            key for key, value in updates.items() if original.get(key) not in (baseline[key], value)
+        ]
+        if conflicts:
+            raise ConfigError(
+                "CONFIG_CONFLICT",
+                f"配置项 {', '.join(conflicts)} 在保存后被外部修改，未应用待应用配置。"
+                "请读取最新配置并重新保存这些修改项。",
+            )
 
     def _clear_pending_file(self, row: dict[str, object] | None) -> None:
         if row is None:

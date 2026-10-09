@@ -64,7 +64,8 @@ def test_old_pal_detail_uses_current_passive_description() -> None:
         }
     }
     refreshed = _with_current_passive_descriptions(old)
-    assert refreshed["skills"]["passive"][0]["description"] == "雷属性攻击伤害增加10%"
+    skills = cast(dict[str, list[dict[str, str]]], refreshed["skills"])
+    assert skills["passive"][0]["description"] == "雷属性攻击伤害增加10%"
     assert old["skills"]["passive"][0]["description"] == "雷属性攻击伤害增加{EffectValue1}%"
 
 

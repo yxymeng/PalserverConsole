@@ -24,7 +24,8 @@ async function mountIsland(page: Page) {
 
 test("closing fills once across countdown and shutdown, and resets only for a new operation", async ({ page }) => {
   const startedAt = new Date("2026-09-27T12:00:00Z").getTime();
-  await page.clock.install({ time: startedAt });
+  await page.clock.install({ time: startedAt - 1_000 });
+  await page.clock.pauseAt(startedAt);
   await mountIsland(page);
   const progress = page.getByLabel("当前操作状态").getByRole("progressbar");
   const show = async (state: string, stage: string, operationId = "stop-once") => {

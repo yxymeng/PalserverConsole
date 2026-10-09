@@ -104,7 +104,7 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   }
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("light");
   if (testInfo.project.name === "desktop") {
-    await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "首页" })).toHaveCSS("color", "rgb(61, 105, 115)");
+    await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "首页" })).toHaveCSS("color", "rgb(45, 49, 50)");
   }
   await expect(control.getByRole("button", { name: "保存" })).toHaveCSS("color", "rgb(61, 105, 115)");
   await page.screenshot({ path: testInfo.outputPath(`overview-light-${testInfo.project.name}.png`) });

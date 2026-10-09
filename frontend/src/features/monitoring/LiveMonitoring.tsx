@@ -144,9 +144,14 @@ export function LiveMonitoring({
         const status = await requestJson<WorldStatus>("/api/world/snapshots/current");
         if (!status.snapshotId) throw new Error("当前没有可用的世界存档快照，请先在“世界”页面完成只读解析。");
         try {
-          const query = new URLSearchParams({ page: "1", pageSize: "200", sort: "id", snapshotId: status.snapshotId });
-          const response = await requestJson<WorldEntityListResponse>(`/api/world/players?${query}`);
-          const detail = response.items.find((item): item is WorldPlayerListItem => "progress" in item && (sameStablePlayerId(item.id, playerId) || sameStablePlayerId(item.instanceId, playerId)));
+          let detail: WorldPlayerListItem | undefined;
+          for (let page = 1; ; page += 1) {
+            const query = new URLSearchParams({ page: String(page), pageSize: "200", sort: "id", snapshotId: status.snapshotId });
+            const response = await requestJson<WorldEntityListResponse>(`/api/world/players?${query}`);
+            if (sequence !== explorationSequence.current) return;
+            detail = response.items.find((item): item is WorldPlayerListItem => "progress" in item && (sameStablePlayerId(item.id, playerId) || sameStablePlayerId(item.instanceId, playerId)));
+            if (detail || page * 200 >= response.total) break;
+          }
           if (!detail) throw new ApiRequestError("PLAYER_NOT_FOUND", "在线训练家的 Player ID 未在当前存档快照中找到。可能是玩家刚加入，而存档尚未记录。", true);
           if (sequence === explorationSequence.current) setExploration({ playerId, playerName, status: "ready", detail, error: "" });
           return;

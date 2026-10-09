@@ -775,7 +775,7 @@ function EntityDrawer({ detail, pending, loading, canGoBack, onBack, onClose, on
     <header className="section-heading">{canGoBack && <button ref={closeButtonRef} className="icon-button bordered" type="button" title="返回上一详情" aria-label="返回上一详情" onClick={onBack}><ArrowLeft size={18} /></button>}<div className="world-drawer-title"><EntityMarker resource={resource} item={detail.data} /><div><div className="world-entity-name"><h2>{entityName(detail.data, resource)}</h2>{"level" in detail.data && detail.data.level !== null && <em className="world-player-profile-level">Lv.{detail.data.level}</em>}</div><p><span className="world-detail-type">{RESOURCE_LABELS[resource]}</span>{detail.resource === "players" ? playerProgressCoverage(playerProgressOf(detail.data)) : "当前存档快照关联详情"}</p></div></div><button ref={canGoBack ? undefined : closeButtonRef} className="icon-button bordered" type="button" title="关闭详情" aria-label="关闭详情" onClick={onClose}><X size={18} /></button></header>
     <div className="world-detail-properties">
       {detail.resource === "players" && <PlayerDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} />}
-      {detail.resource === "guilds" && <GuildCommunityDetail data={detail.data} onNavigate={onNavigate} view={communityView} onViewChange={updateCommunityView} />}
+      {detail.resource === "guilds" && <GuildCommunityDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} view={communityView} onViewChange={updateCommunityView} />}
       {detail.resource === "bases" && <BaseCommunityDetail data={detail.data} onNavigate={onNavigate} onShowInventory={onShowInventory} view={communityView} onViewChange={updateCommunityView} />}
     </div>
     </>)}
@@ -826,7 +826,7 @@ function PlayerDetail({ data, onNavigate, onShowInventory }: DetailProps<WorldPl
   </>;
 }
 
-function GuildCommunityDetail({ data, onNavigate, view, onViewChange }: { data: WorldGuildDetail & WorldSnapshotContext; onNavigate: DetailNavigate; view: CommunityDetailView; onViewChange: (patch: Partial<CommunityDetailView>) => void }) {
+function GuildCommunityDetail({ data, onNavigate, onShowInventory, view, onViewChange }: { data: WorldGuildDetail & WorldSnapshotContext; onNavigate: DetailNavigate; onShowInventory: (context: InventoryContext) => void; view: CommunityDetailView; onViewChange: (patch: Partial<CommunityDetailView>) => void }) {
   const members = data.members.filter((member) => communityMatches(view.query, member.name, member.id));
   const totalPages = Math.max(1, Math.ceil(members.length / COMMUNITY_DETAIL_PAGE_SIZE));
   const page = Math.min(view.page, totalPages);
@@ -838,6 +838,7 @@ function GuildCommunityDetail({ data, onNavigate, view, onViewChange }: { data: 
     <section className="world-relation-section world-community-detail-notice"><strong>成员与据点均来自当前公会详情的完整关联数据。</strong>{unavailableMembers || unavailableBases ? <p>{unavailableMembers ? `${unavailableMembers} 名成员资料不可用` : ""}{unavailableMembers && unavailableBases ? "；" : ""}{unavailableBases ? `${unavailableBases} 个关联据点资料不可用` : ""}，不会被当作零值或已解析关联。</p> : <p>当前没有缺失的成员或据点关联资料。</p>}</section>
     <section className="world-relation-section world-community-detail-list"><header><h3>完整成员名单 <small>{members.length.toLocaleString()} / {data.memberCount.toLocaleString()}</small></h3><label className="world-community-detail-search"><Search size={15} aria-hidden="true" /><input aria-label="查找公会成员" value={view.query} onChange={(event) => onViewChange({ query: event.target.value, page: 1 })} placeholder="查找成员名称或稳定 ID" maxLength={100} /></label></header>{shownMembers.length ? <div className="world-relation-list">{shownMembers.map((member) => <button className="world-relation-link" data-detail-resource="players" data-detail-id={member.id} type="button" key={member.id} onClick={() => onNavigate("players", member.id)}><span className="world-relation-name">{member.name}{member.role === "leader" && <><Crown size={13} aria-label="会长" />会长</>}</span><small>{member.level === null ? "等级不可用" : `Lv.${member.level}`} · {member.id}</small></button>)}</div> : <p className="muted">没有符合条件的成员。</p>}<LocalPagination total={members.length} page={page} pageSize={COMMUNITY_DETAIL_PAGE_SIZE} totalPages={totalPages} onPage={(nextPage) => onViewChange({ page: nextPage })} label="完整成员" /></section>
     <RelationList title="已解析关联据点" rows={data.bases} resource="bases" onNavigate={onNavigate} />
+    <InventoryButton title="公会关联仓库" data={data} scope="guild" onShowInventory={onShowInventory} />
   </>;
 }
 
@@ -944,10 +945,13 @@ function RelationList({ title, rows, resource, onNavigate }: { title: string; ro
   return <section className="world-relation-section"><h3>{title}<small>{rows.length}</small></h3>{rows.length ? <div className="world-relation-list">{rows.map((item) => <button className="world-relation-link" data-detail-resource={resource} data-detail-id={item.id} type="button" key={item.id} onClick={() => onNavigate(resource, item.id)}><span className="world-relation-name">{entityName(item, resource)}{resource === "pals" && "characterId" in item && <PalGenderIcon item={item} />}</span><small>{item.id}</small></button>)}</div> : <p className="muted">暂无可关联数据</p>}</section>;
 }
 
-function InventoryButton({ title, data, onShowInventory }: { title: string; data: RelationshipItem; onShowInventory: (context: InventoryContext) => void }) {
+function InventoryButton({ title, data, scope = "player", onShowInventory }: { title: string; data: RelationshipItem; scope?: "player" | "guild"; onShowInventory: (context: InventoryContext) => void }) {
   const id = data.id;
-  const name = entityName(data, "players");
-  return <section className="world-relation-section"><h3>{title}</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory({ scope: "player", ownerId: id, label: `玩家库存：${name}` })}><span className="world-relation-name"><PackageOpen size={16} aria-hidden="true" />在仓库中查看</span><small>仅显示该稳定 ID 的关联范围</small></button></section>;
+  const name = entityName(data, scope === "guild" ? "guilds" : "players");
+  const context: InventoryContext = scope === "guild"
+    ? { scope: "inventory", guildId: id, label: `公会关联仓库：${name}` }
+    : { scope: "player", ownerId: id, label: `玩家库存：${name}` };
+  return <section className="world-relation-section"><h3>{title}</h3><button className="world-relation-link" type="button" onClick={() => onShowInventory(context)}><span className="world-relation-name"><PackageOpen size={16} aria-hidden="true" />在仓库中查看</span><small>仅显示该稳定 ID 的关联范围</small></button></section>;
 }
 
 function displayValue(value: unknown): string {

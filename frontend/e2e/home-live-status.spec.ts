@@ -16,6 +16,11 @@ test("首页控制模块刷新运行状态后，顶栏状态同步更新", async
   });
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: { executablePath: stopped.executablePath, launchArguments: "" } }));
   await page.route("**/api/operations/health", (route) => route.fulfill({ json: { alerts: [] } }));
+  await page.route("**/api/config/current", (route) => route.fulfill({ json: {
+    effectiveSource: "world-option",
+    fields: { ServerName: '"未生效的 INI 名称"', ServerDescription: '"未生效的 INI 描述"' },
+    worldOptionFields: { ServerName: '"当前世界名称"', ServerDescription: '"当前世界描述"' },
+  } }));
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: {
     source: "save-snapshot", observedAt: 1, stale: false, errorCode: null, error: null,
     snapshotId: "world", parsing: false, parseDurationMs: 1, gameTimeTicks: 900_000_000_000,
@@ -49,6 +54,9 @@ test("首页控制模块刷新运行状态后，顶栏状态同步更新", async
 
   await page.goto("/");
   await expect(page.locator(".psc-home-state")).toHaveText("运行中");
+  await expect(page.getByRole("heading", { name: "当前世界名称", exact: true })).toBeVisible();
+  await expect(page.getByLabel("首页服务器控制")).toContainText("当前世界描述");
+  await expect(page.getByLabel("首页服务器控制")).not.toContainText("未生效的 INI");
   await expect(page.locator(".psc-server-status")).toHaveText("运行中");
   await expect(page.locator(".psc-brand-copy > strong")).toHaveText("PalServerConsole");
   await expect(page.locator(".psc-desktop-brand .psc-server-status")).toHaveCount(1);
@@ -142,6 +150,7 @@ test("首页控制模块刷新运行状态后，顶栏状态同步更新", async
 test("在线训练家的探索进度使用 Player ID 关联只读存档并展示真实字段", async ({ page }) => {
   const savePlayerId = "11111111-2222-3333-4444-555555555555";
   let playerListRequest = "";
+  const playerPages: number[] = [];
   await page.route("**/api/auth/status", (route) => route.fulfill({ json: auth }));
   await page.route("**/api/shell/status", (route) => route.fulfill({ json: running }));
   await page.route("**/api/server/settings", (route) => route.fulfill({ json: { executablePath: stopped.executablePath, launchArguments: "" } }));
@@ -149,10 +158,17 @@ test("在线训练家的探索进度使用 Player ID 关联只读存档并展示
   await page.route("**/api/world/snapshots/current", (route) => route.fulfill({ json: {
     source: "save-snapshot", observedAt: 1, stale: false, errorCode: null, error: null,
     snapshotId: "world-real", parsing: false, parseDurationMs: 1, gameTimeTicks: 0,
-    counts: { players: 1, pals: 0, guilds: 0, bases: 0 },
+    counts: { players: 201, pals: 0, guilds: 0, bases: 0 },
   } }));
   await page.route("**/api/world/players?**", (route) => {
     playerListRequest = route.request().url();
+    const page = Number(new URL(playerListRequest).searchParams.get("page"));
+    playerPages.push(page);
+    if (page === 1) return route.fulfill({ json: {
+      items: Array.from({ length: 200 }, (_, index) => ({ id: `earlier-player-${index}`, instanceId: "", progress: {} })),
+      page: 1, pageSize: 200, total: 201, source: "save-snapshot", observedAt: 1,
+      snapshotId: "world-real", stale: false, errorCode: null,
+    } });
     return route.fulfill({ json: {
       items: [{
         id: savePlayerId, instanceId: "instance-1", name: "Arthur King", level: 55,
@@ -166,7 +182,7 @@ test("在线训练家的探索进度使用 Player ID 关联只读存档并展示
           totalsDataVersion: "2026.08.30.2",
         },
       }],
-      page: 1, pageSize: 200, total: 1, source: "save-snapshot", observedAt: 1,
+      page: 2, pageSize: 200, total: 201, source: "save-snapshot", observedAt: 1,
       snapshotId: "world-real", stale: false, errorCode: null,
     } });
   });
@@ -231,6 +247,7 @@ test("在线训练家的探索进度使用 Player ID 关联只读存档并展示
     await expect(dialog.locator(".psc-exploration-metrics article").first()).toHaveCSS("padding", "14px");
   }
   expect(new URL(playerListRequest).searchParams.get("snapshotId")).toBe("world-real");
+  expect(playerPages).toEqual([1, 2]);
   if ((page.viewportSize()?.width ?? 0) <= 760) {
     await expect(dialog.getByRole("button", { name: "调整抽屉高度" })).toBeVisible();
     await dialog.locator(".psc-exploration-footer").scrollIntoViewIfNeeded();

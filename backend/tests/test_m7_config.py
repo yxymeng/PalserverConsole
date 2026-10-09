@@ -149,6 +149,38 @@ def test_running_ini_save_waits_then_applies_after_stop(tmp_path: Path) -> None:
     assert service.current()["pendingApply"] is None
 
 
+@pytest.mark.parametrize("first_kind", ["ini", "world-option"])
+def test_pending_other_config_target_is_rejected_without_losing_first_save(
+    tmp_path: Path, first_kind: str,
+) -> None:
+    service, state, world = make_world_service(tmp_path, running=True)
+    first_save, second_save = (
+        (service.save_ini, service.save_world_option)
+        if first_kind == "ini" else (service.save_world_option, service.save_ini)
+    )
+    first_save({"AutoSaveSpan": "901"})
+    row = service.database.get_config_draft()
+    assert row is not None
+    pending = Path(str(row["draft_path"]))
+    before = pending.read_bytes()
+
+    with pytest.raises(ConfigError) as error:
+        second_save({"bEnableFastTravel": "False"})
+    assert error.value.code == "CONFIG_PENDING_TARGET_CONFLICT"
+    assert service.database.get_config_draft() == row
+    assert pending.read_bytes() == before
+    assert len(list(pending.parent.glob("*.json"))) == 1
+
+    state["running"] = False
+    service.apply_pending()
+    fields = (
+        cast(dict[str, str], service.current()["fields"])
+        if first_kind == "ini" else cast(dict[str, str], service.current()["worldOptionFields"])
+    )
+    assert float(fields["AutoSaveSpan"]) == 901
+    assert fields["bEnableFastTravel"] == "True"
+
+
 def test_save_uses_latest_external_ini_as_its_base(tmp_path: Path) -> None:
     service, _, _, config = make_service(tmp_path)
     config.write_text(
@@ -445,6 +477,51 @@ def test_pending_changes_preserve_external_edits_before_save_and_apply(
 
 
 @pytest.mark.parametrize("kind", ["ini", "world-option"])
+def test_pending_same_field_conflict_preserves_files_until_explicit_resave(
+    tmp_path: Path, kind: str,
+) -> None:
+    service, state, world = make_world_service(tmp_path, running=True)
+    target = service.path() if kind == "ini" else world / "WorldOption.sav"
+    save = service.save_ini if kind == "ini" else service.save_world_option
+    if kind == "world-option":
+        gvas, save_type = create_world_option(world / "Level.sav", {"AutoSaveSpan": "600"})
+        target.write_bytes(serialize_world_option(gvas, save_type))
+    save({"AutoSaveSpan": "900"})
+    if kind == "ini":
+        target.write_text(
+            target.read_text(encoding="utf-8").replace(
+                "AutoSaveSpan=600.000000", "AutoSaveSpan=777",
+            ),
+            encoding="utf-8",
+        )
+    else:
+        gvas, save_type = create_world_option(world / "Level.sav", {"AutoSaveSpan": "777"})
+        target.write_bytes(serialize_world_option(gvas, save_type))
+    # Saving another field must not erase the original field's conflict baseline.
+    save({"bEnableFastTravel": "False"})
+    before = target.read_bytes()
+    row = service.database.get_config_draft()
+    assert row is not None
+    pending = Path(str(row["draft_path"]))
+    pending_before = pending.read_bytes()
+    state["running"] = False
+    with pytest.raises(ConfigError) as error:
+        service.apply_pending()
+    assert error.value.code == "CONFIG_CONFLICT"
+    assert target.read_bytes() == before
+    assert pending.read_bytes() == pending_before
+    assert service.database.get_config_draft() == row
+    assert not list(target.parent.glob(f"{target.name}.*.bak"))
+
+    save({"AutoSaveSpan": "901"})
+    current = service.current()
+    fields = cast(dict[str, str], current["fields" if kind == "ini" else "worldOptionFields"])
+    assert float(fields["AutoSaveSpan"]) == 901
+    assert fields["bEnableFastTravel"] == "False"
+    assert service.database.get_config_draft() is None
+
+
+@pytest.mark.parametrize("kind", ["ini", "world-option"])
 def test_same_second_saves_keep_distinct_original_backups(tmp_path: Path, kind: str) -> None:
     service, _, world = make_world_service(tmp_path)
     target = service.path() if kind == "ini" else world / "WorldOption.sav"
@@ -595,6 +672,49 @@ def test_legacy_pending_requires_resave_without_overwriting_latest_ini(tmp_path:
     assert pending.is_file()
     service.save_ini({"AutoSaveSpan": "901"})
     assert "AutoSaveSpan=901" in ini.read_text()
+
+
+@pytest.mark.parametrize("kind", ["ini", "world-option"])
+def test_raw_legacy_pending_rejects_partial_resave(tmp_path: Path, kind: str) -> None:
+    service, state, world = make_world_service(tmp_path, running=True)
+    save = service.save_ini if kind == "ini" else service.save_world_option
+    pending = tmp_path / "data" / "pending" / (
+        "PalWorldSettings.ini" if kind == "ini" else "WorldOption.sav"
+    )
+    pending.parent.mkdir()
+    if kind == "ini":
+        pending.write_text(
+            service.path().read_text().replace("600.000000", "900").replace(
+                "bEnableFastTravel=True", "bEnableFastTravel=False"
+            ),
+            encoding="utf-8",
+        )
+    else:
+        state["running"] = False
+        save({"AutoSaveSpan": "600"})
+        state["running"] = True
+        original = read_world_option(world / "WorldOption.sav")[2]
+        gvas, save_type = create_world_option(
+            world / "Level.sav",
+            {**original, "AutoSaveSpan": "900", "bEnableFastTravel": "False"},
+        )
+        pending.write_bytes(serialize_world_option(gvas, save_type))
+    service.database.save_config_draft(str(pending), "", 0, f"pending-{kind}", None)
+    row = service.database.get_config_draft()
+    original_pending = pending.read_bytes()
+    with pytest.raises(ConfigError) as error:
+        save({"AutoSaveSpan": "901"})
+    assert error.value.code == "CONFIG_PENDING_RESAVE_REQUIRED"
+    assert pending.read_bytes() == original_pending
+    assert service.database.get_config_draft() == row
+
+    state["running"] = False
+    save({"AutoSaveSpan": "901", "bEnableFastTravel": "False"})
+    current = service.current()
+    fields = cast(dict[str, str], current["fields" if kind == "ini" else "worldOptionFields"])
+    assert float(fields["AutoSaveSpan"]) == 901
+    assert fields["bEnableFastTravel"] == "False"
+    assert service.database.get_config_draft() is None
 
 
 def test_removed_difficulty_control_preserves_existing_sav_field(tmp_path: Path) -> None:
@@ -759,6 +879,48 @@ def test_resaving_after_world_switch_does_not_merge_other_world_pending(
         fields = read_world_option(other_world / "WorldOption.sav")[2]
     assert float(fields["AutoSaveSpan"]) == 600
     assert fields["bEnableFastTravel"] == "False"
+
+
+@pytest.mark.parametrize("kind", ["ini", "world-option"])
+def test_pending_without_baseline_preserves_fields_until_complete_resave(
+    tmp_path: Path, kind: str,
+) -> None:
+    service, state, _ = make_world_service(tmp_path, running=True)
+    save = service.save_ini if kind == "ini" else service.save_world_option
+    changes = {
+        "AutoSaveSpan": "900", "bEnableFastTravel": "False", "AdminPassword": "new-secret",
+    }
+    save(changes)
+    row = service.database.get_config_draft()
+    assert row is not None
+    pending = Path(str(row["draft_path"]))
+    payload = json.loads(pending.read_text(encoding="utf-8"))
+    del payload["baseline"]
+    pending.write_text(json.dumps(payload), encoding="utf-8")
+    original_pending = pending.read_bytes()
+
+    with pytest.raises(ConfigError) as error:
+        save({"AutoSaveSpan": "901"})
+    assert error.value.code == "CONFIG_PENDING_RESAVE_REQUIRED"
+    assert pending.read_bytes() == original_pending
+    assert service.database.get_config_draft() == row
+    with pytest.raises(ConfigError) as error:
+        save({**changes, "AdminPassword": "已配置"})
+    assert error.value.code == "CONFIG_PENDING_RESAVE_REQUIRED"
+    assert pending.read_bytes() == original_pending
+    assert service.database.get_config_draft() == row
+    state["running"] = False
+    with pytest.raises(ConfigError) as error:
+        service.apply_pending()
+    assert error.value.code == "CONFIG_PENDING_RESAVE_REQUIRED"
+    assert pending.read_bytes() == original_pending
+
+    save({**changes, "AutoSaveSpan": "901"})
+    current = service.current()
+    fields = cast(dict[str, str], current["fields" if kind == "ini" else "worldOptionFields"])
+    assert float(fields["AutoSaveSpan"]) == 901
+    assert fields["bEnableFastTravel"] == "False"
+    assert service.database.get_config_draft() is None
 
 
 @pytest.mark.parametrize("kind", ["ini", "world-option"])
