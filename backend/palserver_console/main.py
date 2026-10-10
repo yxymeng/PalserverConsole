@@ -53,19 +53,21 @@ def _lifespan(deps: AppDependencies) -> Callable[[FastAPI], AbstractAsyncContext
         )
         interrupted_operations = deps.database.recover_incomplete_operations()
         for interrupted in interrupted_operations:
+            transition_detail: dict[str, object] = {
+                "operationId": interrupted.get("id"),
+                "kind": interrupted.get("kind"),
+                "fromState": interrupted.get("state"),
+                "fromStage": interrupted.get("stage"),
+                "state": "failed",
+                "stage": "interrupted",
+                "errorCode": "CONSOLE_RESTARTED",
+            }
             deps.audit.record(
                 "server.operation.transition",
                 result="interrupted",
-                detail={
-                    "operationId": interrupted.get("id"),
-                    "kind": interrupted.get("kind"),
-                    "fromState": interrupted.get("state"),
-                    "fromStage": interrupted.get("stage"),
-                    "state": "failed",
-                    "stage": "interrupted",
-                    "errorCode": "CONSOLE_RESTARTED",
-                },
+                detail=transition_detail,
             )
+            deps.notifications.on_operation_transition(transition_detail)
         recovery = deps.backups.recovery_status()
         if recovery["active"]:
             journal = recovery.get("journal")
@@ -83,11 +85,13 @@ def _lifespan(deps: AppDependencies) -> Callable[[FastAPI], AbstractAsyncContext
         if deps.database.get_setting("audit.retention_days") is None:
             deps.database.set_setting("audit.retention_days", str(DEFAULT_RETENTION_DAYS))
         deps.audit.start()
+        deps.config.start()
         deps.monitor.start()
         deps.world.start()
         try:
             yield
         finally:
+            deps.config.stop()
             deps.world.stop()
             deps.monitor.stop()
             deps.audit.stop()
@@ -132,7 +136,6 @@ def create_app(
     app.state.config_editor = deps.config
     app.state.operational_health = deps.operational_health
     app.state.notifications = deps.notifications
-    app.state.updates = deps.updates
     app.state.application_updates = deps.application_updates
 
     @app.exception_handler(RequestValidationError)

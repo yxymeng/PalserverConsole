@@ -1,33 +1,19 @@
-import { Activity, Database, FileCog, LogOut, Wrench, X } from "lucide-react";
-import { lazy, Suspense, useState, type CSSProperties } from "react";
+import { Activity, Database, FileCog, LogOut, Megaphone, Wrench } from "lucide-react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 
-import type { AuthStatus, ShellStatus, Theme } from "../api/contracts";
+import type { ApplicationUpdateStatus, AuthStatus, ShellStatus, Theme } from "../api/contracts";
 import { requestJson } from "../api/client";
-import { Badge } from "../components/ui/badge";
+import { BroadcastDialog } from "../components/BroadcastDialog";
 import { BlurFade } from "../components/ui/blur-fade";
 import { Button } from "../components/ui/button";
-import { Spinner } from "../components/ui/spinner";
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarHeader,
-  SidebarInset,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarProvider,
-  SidebarSeparator,
-  SidebarTrigger,
-  useSidebar,
-} from "../components/ui/sidebar";
+import { ApplicationUpdatePanel, type ApplicationUpdateHandle } from "../features/maintenance/ApplicationUpdatePanel";
 import { MaintenancePage } from "../features/maintenance/MaintenancePage";
 import { Overview } from "../features/overview/Overview";
+import { serverStateLabel } from "../features/server/labels";
 import { text } from "./text";
 import { BrandMark } from "./BrandMark";
-import { InstanceQuickPanel } from "./InstanceQuickPanel";
+import { PageLoadBoundary, PageSkeleton } from "./PageLoadingStates";
 import { ThemeToggle } from "./ThemeToggle";
-import { FRONTEND_VERSION } from "./version";
 
 type PageKey = "overview" | "world" | "config" | "maintenance";
 
@@ -44,42 +30,64 @@ const ConfigPage = lazy(() =>
 
 const NAVIGATION = [
   { key: "overview", label: "首页", icon: Activity },
-  { key: "world", label: text.world, icon: Database },
+  { key: "world", label: "世界", icon: Database },
   { key: "config", label: "配置", icon: FileCog },
   { key: "maintenance", label: "维护", icon: Wrench },
 ] as const;
+
+const PAGE_RETRY_STORAGE_KEY = "palserver-console-retry-page";
+
+function initialPage(): PageKey {
+  if (typeof window === "undefined") return "overview";
+  try {
+    const saved = window.sessionStorage.getItem(PAGE_RETRY_STORAGE_KEY);
+    window.sessionStorage.removeItem(PAGE_RETRY_STORAGE_KEY);
+    return NAVIGATION.some((item) => item.key === saved) ? saved as PageKey : "overview";
+  } catch {
+    return "overview";
+  }
+}
+
+function retryPage(page: PageKey) {
+  try {
+    window.sessionStorage.setItem(PAGE_RETRY_STORAGE_KEY, page);
+  } finally {
+    window.location.reload();
+  }
+}
 
 export function ConsoleShell({
   auth,
   shell,
   onAuthChanged,
   theme,
-  onThemeToggle,
+  onThemeChange,
 }: {
   auth: AuthStatus;
   shell: ShellStatus | null;
   onAuthChanged: () => void;
   theme: Theme;
-  onThemeToggle: () => void;
+  onThemeChange: (theme: Theme) => void;
 }) {
-  const [active, setActive] = useState<PageKey>("overview");
+  const [active, setActive] = useState<PageKey>(initialPage);
   const [configWorkspace, setConfigWorkspace] = useState<"game" | "instance">("game");
-  const sidebarStyle = { "--sidebar-width": "252px" } as CSSProperties;
-
+  const [currentShell, setCurrentShell] = useState(shell);
+  useEffect(() => setCurrentShell(shell), [shell]);
   return (
-    <SidebarProvider style={sidebarStyle}>
+    <div className="psc-shell">
       <ConsoleLayout
         active={active}
         auth={auth}
-        shell={shell}
+        shell={currentShell}
         theme={theme}
         onActiveChange={setActive}
         configWorkspace={configWorkspace}
         onConfigWorkspaceChange={setConfigWorkspace}
         onAuthChanged={onAuthChanged}
-        onThemeToggle={onThemeToggle}
+        onShellStatusChange={setCurrentShell}
+        onThemeChange={onThemeChange}
       />
-    </SidebarProvider>
+    </div>
   );
 }
 
@@ -92,7 +100,8 @@ function ConsoleLayout({
   configWorkspace,
   onConfigWorkspaceChange,
   onAuthChanged,
-  onThemeToggle,
+  onShellStatusChange,
+  onThemeChange,
 }: {
   active: PageKey;
   auth: AuthStatus;
@@ -102,94 +111,61 @@ function ConsoleLayout({
   configWorkspace: "game" | "instance";
   onConfigWorkspaceChange: (workspace: "game" | "instance") => void;
   onAuthChanged: () => void;
-  onThemeToggle: () => void;
+  onShellStatusChange: (status: ShellStatus) => void;
+  onThemeChange: (theme: Theme) => void;
 }) {
-  const { isMobile, setOpenMobile } = useSidebar();
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const applicationUpdateRef = useRef<ApplicationUpdateHandle>(null);
+  const [applicationUpdateStatus, setApplicationUpdateStatus] = useState<ApplicationUpdateStatus | null>(null);
   const pageTitle = NAVIGATION.find((item) => item.key === active)?.label || "首页";
 
   function activate(page: PageKey) {
     if (page === "config") onConfigWorkspaceChange("game");
     onActiveChange(page);
-    if (isMobile) setOpenMobile(false);
   }
 
   return (
     <>
-      <Sidebar collapsible="offcanvas" className="psc-sidebar">
-        <SidebarHeader className="psc-sidebar-header">
-          <div className="psc-brand-row">
+      <header className="psc-topbar">
+        <div className="psc-topbar-inner">
+          <div className="psc-desktop-brand" aria-label={text.product}>
             <BrandMark />
-            <span className="psc-brand-copy"><strong>{text.product}</strong><small>PalServer 值守台</small></span>
-            {isMobile && (
-              <Button variant="ghost" size="icon" aria-label="关闭菜单" onClick={() => setOpenMobile(false)}>
-                <X aria-hidden="true" />
-              </Button>
-            )}
+            <span className="psc-brand-copy">
+              <strong>{text.product}</strong>
+              <span
+                className="psc-server-status"
+                data-state={shell?.serverState ?? "loading"}
+              >
+                <span className="status-dot" aria-hidden="true" />
+                {shell ? serverStateLabel(shell.serverState) : "读取中"}
+              </span>
+            </span>
           </div>
-        </SidebarHeader>
-        <SidebarSeparator />
-        <SidebarContent>
-          <nav aria-label="主导航" className="psc-navigation">
-            <SidebarMenu>
-              {NAVIGATION.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <SidebarMenuItem key={item.key}>
-                    <SidebarMenuButton
-                      isActive={active === item.key}
-                      aria-current={active === item.key ? "page" : undefined}
-                      onClick={() => activate(item.key)}
-                    >
-                      <Icon aria-hidden="true" />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              })}
-            </SidebarMenu>
-          </nav>
-        </SidebarContent>
-        <SidebarFooter className="psc-sidebar-footer">
-          <Badge variant={auth.local ? "success" : "warning"}>
-            <span className="status-dot" aria-hidden="true" />
-            {auth.local ? "本机访问" : "局域网会话"}
-          </Badge>
-          <small>前端 v{FRONTEND_VERSION}</small>
-        </SidebarFooter>
-      </Sidebar>
+          <h1 className="psc-mobile-page-title">{pageTitle}</h1>
+          <PrimaryNavigation className="psc-desktop-navigation" active={active} onActivate={activate} />
+          <div className="psc-topbar-actions">
+            <ApplicationUpdatePanel auth={auth} ref={applicationUpdateRef} onStatusChange={setApplicationUpdateStatus} />
+            <Button className="psc-topbar-control psc-broadcast-trigger" variant="outline" size="sm" type="button" aria-label="发送全服广播" title="发送全服广播" onClick={() => setBroadcastOpen(true)}><Megaphone data-icon="inline-start" aria-hidden="true" /><span>广播</span></Button>
+            <ThemeToggle theme={theme} onChange={onThemeChange} />
+            {!auth.local && <LogoutButton csrfToken={auth.csrfToken} onDone={onAuthChanged} />}
+          </div>
+        </div>
+      </header>
+      <BroadcastDialog auth={auth} open={broadcastOpen} onOpenChange={setBroadcastOpen} />
 
-      <SidebarInset className="psc-inset">
-        <header className="psc-topbar">
-          <div className="psc-topbar-inner">
-            <SidebarTrigger className="md:hidden" aria-label="打开菜单" title="打开菜单" />
-            <h1>{pageTitle}</h1>
-            <div className="psc-topbar-actions">
-              <Badge className="hidden sm:inline-flex" variant={auth.local ? "success" : "warning"}>
-                {auth.local ? "本机" : "LAN"} · {auth.port}
-              </Badge>
-              <InstanceQuickPanel
-                auth={auth}
-                shell={shell}
-                onOpenSettings={() => {
-                  onConfigWorkspaceChange("instance");
-                  onActiveChange("config");
-                }}
-              />
-              <ThemeToggle theme={theme} onToggle={onThemeToggle} />
-              {!auth.local && <LogoutButton csrfToken={auth.csrfToken} onDone={onAuthChanged} />}
-            </div>
-          </div>
-        </header>
-        <main className="psc-main" aria-label={`${pageTitle}页面`}>
-          <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={4} blur="3px">
-            {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} />}
-            {active === "world" && (
-              <Suspense fallback={<PageLoading label="正在加载世界数据模块" />}>
-                <WorldDataPage auth={auth} />
+      <main className="psc-main" aria-label={`${pageTitle}页面`}>
+        <BlurFade key={active} className="psc-page-transition" duration={0.22} offset={0} blur="3px">
+          {active === "overview" && <Overview shell={shell} auth={auth} onOpenMaintenance={() => onActiveChange("maintenance")} onShellStatusChange={onShellStatusChange} />}
+          {active === "world" && (
+            <PageLoadBoundary errorTitle="世界界面加载失败" retryLabel="重试加载世界" onRetry={() => retryPage("world")}>
+              <Suspense fallback={<PageSkeleton page="world" label="正在加载世界界面" />}>
+                <WorldDataPage key={shell?.instanceId || auth.port} auth={auth} />
               </Suspense>
-            )}
-            {active === "config" && (
-              <Suspense fallback={<PageLoading label="正在加载配置模块" />}>
+            </PageLoadBoundary>
+          )}
+          {active === "config" && (
+            <PageLoadBoundary errorTitle="配置界面加载失败" retryLabel="重试加载配置" onRetry={() => retryPage("config")}>
+              <Suspense fallback={<PageSkeleton page="config" label="正在加载配置界面" />}>
                 <ConfigPage
                   auth={auth}
                   onAuthChanged={onAuthChanged}
@@ -197,21 +173,40 @@ function ConsoleLayout({
                   onWorkspaceChange={onConfigWorkspaceChange}
                 />
               </Suspense>
-            )}
-            {active === "maintenance" && <MaintenancePage auth={auth} />}
-          </BlurFade>
-        </main>
-      </SidebarInset>
+            </PageLoadBoundary>
+          )}
+          {active === "maintenance" && <MaintenancePage auth={auth} applicationUpdateStatus={applicationUpdateStatus} onCheckApplicationUpdate={() => {
+            if (!applicationUpdateRef.current) return Promise.reject(new Error("更新检查尚未就绪，请稍后重试。"));
+            return applicationUpdateRef.current.check();
+          }} />}
+        </BlurFade>
+      </main>
+
+      <PrimaryNavigation className="psc-mobile-navigation" active={active} onActivate={activate} />
     </>
   );
 }
 
-function PageLoading({ label }: { label: string }) {
+function PrimaryNavigation({ className, active, onActivate }: { className: string; active: PageKey; onActivate: (page: PageKey) => void }) {
   return (
-    <section className="empty-state" role="status" aria-live="polite">
-      <Spinner aria-hidden="true" />
-      {label}…
-    </section>
+    <nav aria-label="主导航" className={`psc-primary-navigation ${className}`}>
+      {NAVIGATION.map((item) => {
+        const Icon = item.icon;
+        return (
+          <Button
+            key={item.key}
+            variant={active === item.key ? "default" : "ghost"}
+            size="sm"
+            type="button"
+            aria-current={active === item.key ? "page" : undefined}
+            onClick={() => onActivate(item.key)}
+          >
+            <Icon data-icon="inline-start" aria-hidden="true" />
+            <span>{item.label}</span>
+          </Button>
+        );
+      })}
+    </nav>
   );
 }
 

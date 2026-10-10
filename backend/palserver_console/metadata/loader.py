@@ -6,6 +6,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
 from typing import Any, Literal, TypedDict, cast
@@ -61,6 +62,8 @@ class WorldMetadataBundle:
     pals: dict[str, PalSpeciesMetadata]
     skills: dict[str, dict[str, object]]
     items: dict[str, ItemMetadata]
+    player_progress_totals: dict[str, int]
+    player_progress_totals_data_version: str
     _pals_casefold: dict[str, PalSpeciesMetadata] = field(repr=False)
     _skills_casefold: dict[str, dict[str, object]] = field(repr=False)
     _items_casefold: dict[str, ItemMetadata] = field(repr=False)
@@ -105,6 +108,7 @@ def unavailable_metadata_status(error_code: str = "WORLD_METADATA_UNAVAILABLE") 
     }
 
 
+@lru_cache(maxsize=8)
 def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
     try:
         text = (
@@ -137,6 +141,8 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
             "collections",
             "integrity",
             "sources",
+            "progressTotals",
+            "progressTotalsDataVersion",
         },
         "root",
     )
@@ -164,8 +170,26 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
     pals_raw = _required_mapping(collections, "pals")
     skills_raw = _required_mapping(collections, "skills")
     items_raw = _required_mapping(collections, "items")
+    progress_totals_raw = _required_mapping(payload, "progressTotals")
+    progress_totals_data_version = _required_text(payload, "progressTotalsDataVersion")
+    _require_keys(
+        progress_totals_raw,
+        {"fastTravel", "exploredAreas", "towerBosses", "oilRigLocations"},
+        "progressTotals",
+    )
+    progress_totals: dict[str, int] = {}
+    for name, value in progress_totals_raw.items():
+        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+            raise WorldMetadataError(
+                "WORLD_METADATA_INVALID", f"Player progress total is invalid: {name}."
+            )
+        progress_totals[str(name)] = value
     integrity = _required_mapping(payload, "integrity")
-    _require_keys(integrity, {"algorithm", "collectionsSha256", "counts"}, "integrity")
+    _require_keys(
+        integrity,
+        {"algorithm", "collectionsSha256", "progressTotalsSha256", "counts"},
+        "integrity",
+    )
     _require_equal(integrity, "algorithm", "sha256")
     expected_hash = _required_text(integrity, "collectionsSha256")
     actual_hash = hashlib.sha256(_canonical_json(collections)).hexdigest()
@@ -173,6 +197,14 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
         raise WorldMetadataError(
             "WORLD_METADATA_INTEGRITY_FAILED",
             f"Metadata collections SHA-256 mismatch: expected {expected_hash}, got {actual_hash}.",
+        )
+    expected_progress_hash = _required_text(integrity, "progressTotalsSha256")
+    actual_progress_hash = hashlib.sha256(_canonical_json(progress_totals_raw)).hexdigest()
+    if actual_progress_hash != expected_progress_hash:
+        raise WorldMetadataError(
+            "WORLD_METADATA_INTEGRITY_FAILED",
+            "Metadata player progress totals SHA-256 mismatch: "
+            f"expected {expected_progress_hash}, got {actual_progress_hash}.",
         )
     counts = _required_mapping(integrity, "counts")
     _require_keys(counts, {"pals", "skills", "items"}, "counts")
@@ -260,6 +292,8 @@ def load_world_metadata(path: Path | None = None) -> WorldMetadataBundle:
         pals=pals,
         skills=skills,
         items=items,
+        player_progress_totals=progress_totals,
+        player_progress_totals_data_version=progress_totals_data_version,
         _pals_casefold={name.casefold(): value for name, value in pals.items()},
         _skills_casefold={name.casefold(): value for name, value in skills.items()},
         _items_casefold={name.casefold(): value for name, value in items.items()},

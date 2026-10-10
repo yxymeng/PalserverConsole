@@ -4,6 +4,13 @@
 
 ## 后续事项
 
+### 后续版本默认值与游戏内生效核验 `[ ]`
+
+- 配置页及 INI/SAV 读写已支持 `bAllowEnemyCampSpawnNearBaseCamp`、`FishingDifficultyRate`、`MaxBuildingLimitNumPerPlayer`；尚需在获准的维护窗口核验游戏内效果及语音配置生效行为。
+- `MaxBuildingLimitNumPerPlayer` 的 `0–10000` 目前只是控制台调节范围，并非已确认的游戏硬上限；PowerShellGSM 模板和 PalModManager 整数读取可作为参考，但均未给出游戏最大值。未获确认前不套用其他参数或工具的上限。
+- SAV 稀疏序列化目前按 `pal-conf` 2026-07-11 默认表处理，需核对后续版本默认值；例如官方 1.0.4 文档的 `BaseCampMaxNumInGuild` 默认值为 4，而该表为 3。
+- 依据：[官方配置参数](https://docs.palworldgame.com/settings-and-operation/configuration/)、[1.0.4 官方公告](https://steamcommunity.com/games/1623730/announcements/detail/695397189431592457)。
+
 ### 受控远程访问与角色权限 `[ ]`
 
 - 不直接把控制台端口映射到公网。

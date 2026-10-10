@@ -15,14 +15,20 @@ from typing import Any, cast
 import httpx
 import psutil
 import pytest
+from fastapi.testclient import TestClient
 
 from palserver_console.application_updates import (
+    ABANDONED_PROGRESS_GRACE_SECONDS,
     RELEASE_API_URL,
+    RELEASE_CHECK_CACHE_SECONDS,
     ApplicationUpdateError,
     ApplicationUpdateService,
     _InstallUpdateGuard,
+    _release_notes,
     portable_application_update_in_progress,
 )
+from palserver_console.config import AppSettings
+from palserver_console.main import create_app
 
 
 def _release_zip(version: str) -> bytes:
@@ -356,6 +362,7 @@ def test_application_update_check_uses_fixed_release_asset() -> None:
         "tag_name": "v0.2.0",
         "html_url": "https://github.com/yxymeng/PalserverConsole/releases/tag/v0.2.0",
         "published_at": "2026-08-27T00:00:00Z",
+        "body": "## 更新内容\n- 新增右上角升级入口\n- 修复更新状态提示\n",
         "assets": [
             {
                 "name": "PalServerConsole-0.2.0-windows-x64.zip",
@@ -377,6 +384,179 @@ def test_application_update_check_uses_fixed_release_asset() -> None:
     assert status["updateAvailable"] is True
     assert status["portable"] is False
     assert status["assetUrl"] == "https://github.com/yxymeng/PalserverConsole/releases/download/v0.2.0/PalServerConsole-0.2.0-windows-x64.zip"
+    assert status["releaseNotes"] == ["新增右上角升级入口", "修复更新状态提示"]
+    assert service.progress() == {"state": "idle", "step": 0, "message": "等待开始升级。"}
+
+
+def test_application_update_check_reuses_recent_release_but_forced_check_is_fresh() -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests > 1:
+            return httpx.Response(403, request=request)
+        return httpx.Response(
+            200,
+            json={"tag_name": "v0.2.0", "assets": []},
+            request=request,
+        )
+
+    service = ApplicationUpdateService(
+        "0.1.1",
+        Path("unused"),
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert service.check()["latestVersion"] == "0.2.0"
+    assert service.check()["latestVersion"] == "0.2.0"
+    assert requests == 1
+    service._checked_at -= RELEASE_CHECK_CACHE_SECONDS + 1
+    assert service.check()["stale"] is True
+    assert service.check()["stale"] is True
+    assert requests == 2
+    with pytest.raises(ApplicationUpdateError) as error:
+        service.check(force=True)
+    assert error.value.code == "RELEASE_CHECK_FAILED"
+    assert requests == 3
+
+
+def test_application_update_check_keeps_cache_when_release_fields_are_invalid() -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        release = {"tag_name": "v0.2.0", "assets": []} if requests == 1 else {
+            "tag_name": "v0.3.0", "assets": "invalid"
+        }
+        return httpx.Response(200, json=release, request=request)
+
+    service = ApplicationUpdateService(
+        "0.1.1",
+        Path("unused"),
+        client_factory=lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    assert service.check()["latestVersion"] == "0.2.0"
+    service._checked_at -= RELEASE_CHECK_CACHE_SECONDS + 1
+    assert service.check()["stale"] is True
+    assert service.check()["latestVersion"] == "0.2.0"
+    with pytest.raises(ApplicationUpdateError) as error:
+        service.check(force=True)
+    assert error.value.code == "RELEASE_RESPONSE_INVALID"
+
+
+def test_application_update_get_reports_unavailable_without_502(tmp_path: Path) -> None:
+    app = create_app(AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static"))
+    app.state.application_updates.client_factory = lambda: httpx.Client(
+        transport=httpx.MockTransport(lambda request: httpx.Response(503, request=request))
+    )
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8223",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        response = client.get("/api/maintenance/application-update")
+
+    assert response.status_code == 200
+    assert response.json()["state"] == "unavailable"
+    assert response.json()["errorCode"] == "RELEASE_CHECK_FAILED"
+    assert "latestVersion" not in response.json()
+
+
+def test_application_update_manual_check_bypasses_cache(tmp_path: Path) -> None:
+    requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal requests
+        requests += 1
+        if requests > 2:
+            return httpx.Response(503, request=request)
+        return httpx.Response(
+            200, json={"tag_name": f"v0.{requests + 1}.0", "assets": []}, request=request
+        )
+
+    app = create_app(AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static"))
+    app.state.application_updates.client_factory = lambda: httpx.Client(
+        transport=httpx.MockTransport(handler)
+    )
+    with TestClient(
+        app, base_url="http://127.0.0.1:8223", client=("127.0.0.1", 50000)
+    ) as client:
+        assert client.get("/api/maintenance/application-update").json()["latestVersion"] == "0.2.0"
+        assert client.get("/api/maintenance/application-update").json()["latestVersion"] == "0.2.0"
+        assert requests == 1
+        fresh = client.get("/api/maintenance/application-update?force=true")
+        assert fresh.status_code == 200
+        assert fresh.json()["latestVersion"] == "0.3.0"
+        failed = client.get("/api/maintenance/application-update?force=true")
+        assert failed.status_code == 200
+        assert failed.json()["state"] == "unavailable"
+        assert failed.json()["errorCode"] == "RELEASE_CHECK_FAILED"
+        assert requests == 3
+
+
+def test_release_notes_preserve_common_markdown_shapes() -> None:
+    assert _release_notes(
+        """## 更新内容
++ 新增升级入口
+1) 修复更新状态
+- [x] 已验证 portable 包
+  并补充失败回滚
+
+普通段落说明。
+"""
+    ) == [
+        "新增升级入口",
+        "修复更新状态",
+        "已验证 portable 包 并补充失败回滚",
+        "普通段落说明。",
+    ]
+
+
+def test_application_update_progress_survives_service_restart(tmp_path: Path) -> None:
+    progress_path = tmp_path / "application-updates" / "progress.json"
+    progress_path.parent.mkdir(parents=True)
+    progress_path.write_text(
+        json.dumps(
+            {
+                "updateId": "helper-owned-update",
+                "state": "installing",
+                "step": 4,
+                "message": "正在替换控制台程序文件。",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    service = ApplicationUpdateService("0.2.0", tmp_path)
+
+    assert service.progress() == {
+        "updateId": "helper-owned-update",
+        "state": "installing",
+        "step": 4,
+        "message": "正在替换控制台程序文件。",
+    }
+
+
+def test_application_update_portable_failure_reaches_terminal_progress(tmp_path: Path) -> None:
+    service = ApplicationUpdateService("0.1.1", tmp_path)
+    service.install_root = None
+
+    with pytest.raises(ApplicationUpdateError) as raised:
+        service.prepare("0.2.0")
+
+    assert raised.value.code == "PORTABLE_REQUIRED"
+    progress = service.progress()
+    assert isinstance(progress.pop("updatedAt"), int)
+    assert progress == {
+        "state": "failed",
+        "step": 0,
+        "message": "升级失败，请根据错误码处理。",
+        "errorCode": "PORTABLE_REQUIRED",
+    }
 
 
 def test_application_update_requests_graceful_shutdown(
@@ -450,6 +630,15 @@ def test_application_update_prepares_package_and_starts_external_helper(
         "version": version,
         "restartScheduled": True,
     }
+    progress = service.progress()
+    update_id = progress.pop("updateId")
+    assert isinstance(update_id, str) and update_id
+    assert isinstance(progress.pop("updatedAt"), int)
+    assert progress == {
+        "state": "restart_scheduled",
+        "step": 4,
+        "message": "更新包已校验，控制台即将退出并完成升级。",
+    }
     package_root = (
         data_directory / "application-updates" / f"PalServerConsole-{version}-windows-x64"
     )
@@ -458,12 +647,19 @@ def test_application_update_prepares_package_and_starts_external_helper(
     command = calls[0][0]
     assert command[command.index("-DataDirectory") + 1] == str(data_directory)
     assert command[command.index("-UpdateLockId") + 1]
+    assert command[command.index("-ExpectedVersion") + 1] == version
     assert command[command.index("-InstanceId") + 1] == "north"
     assert command[command.index("-Port") + 1] == "18224"
     lock_metadata = json.loads(
         (install_root / ".palserver-console-update.lock").read_text(encoding="utf-8")
     )
     assert lock_metadata["phase"] == "helper"
+
+    with pytest.raises(ApplicationUpdateError) as overlapping:
+        service.prepare(version)
+
+    assert overlapping.value.code == "APPLICATION_UPDATE_IN_PROGRESS"
+    assert service.progress()["state"] == "restart_scheduled"
     assert lock_metadata["lockId"] == command[command.index("-UpdateLockId") + 1]
     assert lock_metadata["processStartedAt"] > 0
 
@@ -606,6 +802,11 @@ def test_application_update_prepare_failure_releases_install_root_lock(
 
     with pytest.raises((ApplicationUpdateError, OSError)):
         service.prepare(version)
+    if failure == "runner":
+        progress = service.progress()
+        assert progress["state"] == "failed"
+        assert progress["errorCode"] == "APPLICATION_UPDATE_FAILED"
+        assert "process runner failed" not in json.dumps(progress)
     assert not lock_path.exists()
 
     with pytest.raises((ApplicationUpdateError, OSError)) as retried:
@@ -1006,6 +1207,97 @@ def test_application_update_lock_write_failure_never_exposes_final_lock(
 
     assert not lock_path.exists()
     assert not list(install_root.glob(".palserver-console-update.lock.tmp-*"))
+
+
+def test_application_update_prepare_persists_lock_acquisition_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    service = ApplicationUpdateService(
+        "0.1.1", tmp_path / "data", install_root=install_root
+    )
+
+    def fail_lock() -> tuple[Path, str]:
+        raise OSError("forced update guard failure")
+
+    monkeypatch.setattr(service, "_acquire_update_lock", fail_lock)
+
+    with pytest.raises(OSError, match="forced update guard failure"):
+        service.prepare("0.2.0")
+
+    progress = service.progress()
+    assert isinstance(progress.pop("updatedAt"), int)
+    assert progress == {
+        "state": "failed",
+        "step": 0,
+        "message": "升级失败，请根据错误码处理。",
+        "errorCode": "APPLICATION_UPDATE_FAILED",
+    }
+
+
+def test_application_update_recovers_abandoned_active_progress(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    progress_path = data_dir / "application-updates" / "progress.json"
+    progress_path.parent.mkdir(parents=True)
+    progress_path.write_text(
+        json.dumps(
+            {
+                "updateId": "interrupted-update",
+                "state": "installing",
+                "step": 4,
+                "message": "Applying console update.",
+                "updatedAt": int(time.time())
+                - ABANDONED_PROGRESS_GRACE_SECONDS
+                - 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    progress = ApplicationUpdateService(
+        "0.2.0", data_dir, install_root=install_root
+    ).progress()
+
+    assert progress["state"] == "failed"
+    assert progress["step"] == 0
+    assert progress["updateId"] == "interrupted-update"
+    assert progress["errorCode"] == "APPLICATION_UPDATE_INTERRUPTED"
+    assert progress["message"] == "升级任务已中断，请重新发起升级。"
+    assert isinstance(progress["updatedAt"], int)
+
+
+def test_application_update_keeps_recent_active_progress_during_restart(
+    tmp_path: Path,
+) -> None:
+    data_dir = tmp_path / "data"
+    install_root = tmp_path / "install"
+    install_root.mkdir()
+    progress_path = data_dir / "application-updates" / "progress.json"
+    progress_path.parent.mkdir(parents=True)
+    progress_path.write_text(
+        json.dumps(
+            {
+                "updateId": "restarting-update",
+                "state": "restarting",
+                "step": 4,
+                "message": "Restarting console.",
+                "updatedAt": int(time.time())
+                - ABANDONED_PROGRESS_GRACE_SECONDS
+                + 1,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    progress = ApplicationUpdateService(
+        "0.2.0", data_dir, install_root=install_root
+    ).progress()
+
+    assert progress["state"] == "restarting"
+    assert progress["updateId"] == "restarting-update"
 
 
 def test_application_update_lock_publish_failure_cleans_temp_and_final_lock(

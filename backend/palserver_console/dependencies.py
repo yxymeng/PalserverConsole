@@ -15,7 +15,7 @@ from .config_editor import ConfigService
 from .control import create_control_lock
 from .instances import InstanceTargetRegistry
 from .lifecycle import LifecycleManager
-from .maintenance import NotificationService, SteamCmdUpdateService
+from .maintenance import NotificationService
 from .monitoring import (
     MonitorCoordinator,
     MonitoringConfigError,
@@ -42,7 +42,6 @@ class AppDependencies:
     config: ConfigService
     operational_health: OperationalHealthService
     notifications: NotificationService
-    updates: SteamCmdUpdateService
     application_updates: ApplicationUpdateService
 
 
@@ -88,16 +87,23 @@ class DefaultDependencyFactory:
         def monitor_config() -> tuple[Path, ServerConnectionConfig]:
             try:
                 profile = profiles.profile()
-                return profile.executable_path, read_connection_config(profile.install_path)
+                return profile.executable_path, read_connection_config(
+                    profile.install_path, profile.world_path
+                )
             except ProfileError as error:
                 raise MonitoringConfigError(error.code, str(error)) from error
 
         def audit_operation(event_type: str, result: str, detail: dict[str, object]) -> None:
             audit.record(event_type, result=result, detail=detail)
+            if event_type == "server.operation.transition":
+                notifications.on_operation_transition(detail)
 
         def audit_console_line(line: str) -> None:
             audit.ingest_line(line, "console-output")
 
+        notifications = NotificationService(
+            database, settings.instance_id, audit_callback=audit_operation
+        )
         control_lock = create_control_lock(settings.operation_lock_path)
         lifecycle = lifecycle_manager or LifecycleManager(
             database,
@@ -138,20 +144,7 @@ class DefaultDependencyFactory:
             control_lock=lifecycle.control_lock,
             admin_password_rotation_callback=auth.revoke_lan_sessions,
         )
-        lifecycle.set_config_apply(config.apply)
-        notifications = NotificationService(
-            database,
-            settings.instance_id,
-            audit_callback=audit_operation,
-        )
-        updates = SteamCmdUpdateService(
-            database,
-            lifecycle,
-            live_monitor,
-            notifications,
-            instance_id=settings.instance_id,
-            audit_callback=audit_operation,
-        )
+        lifecycle.set_pending_config_apply(config.apply_pending)
         operational_health = OperationalHealthService(
             settings.data_dir,
             live_monitor,
@@ -180,7 +173,6 @@ class DefaultDependencyFactory:
             config=config,
             operational_health=operational_health,
             notifications=notifications,
-            updates=updates,
             application_updates=application_updates,
         )
 

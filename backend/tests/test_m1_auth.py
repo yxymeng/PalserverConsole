@@ -289,8 +289,7 @@ def test_lan_login_uses_new_admin_password_after_config_apply(tmp_path: Path) ->
     database = Database(settings.database_path)
     database.migrate()
     config_service = ConfigService(database, settings.data_dir, lambda: executable, lambda: False)
-    config_service.save_draft({"AdminPassword": f'"{new_password}"'})
-    config_service.apply()
+    config_service.save_ini({"AdminPassword": f'"{new_password}"'})
     assert f'AdminPassword="{new_password}"' in config.read_text(encoding="utf-8")
 
     with _lan_client(settings) as client:
@@ -351,11 +350,12 @@ def test_lan_login_and_admin_password_rotation_are_serialized(
         original_revoke_lan_sessions()
 
     executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
+    server_state = {"running": True}
     config_service = ConfigService(
         app.state.database,
         settings.data_dir,
         lambda: executable,
-        lambda: False,
+        lambda: server_state["running"],
         admin_password_rotation_callback=signaled_revoke_lan_sessions,
     )
     monkeypatch.setattr(auth, "create_session", blocked_create_session)
@@ -366,7 +366,8 @@ def test_lan_login_and_admin_password_rotation_are_serialized(
         client=("192.0.2.55", 51001),
     ) as client:
         local_cookie, _ = auth.create_session("127.0.0.1", local=True)
-        config_service.save_draft({"AdminPassword": f'"{new_password}"'})
+        config_service.save_ini({"AdminPassword": f'"{new_password}"'})
+        server_state["running"] = False
 
         def run_login() -> None:
             try:
@@ -384,7 +385,7 @@ def test_lan_login_and_admin_password_rotation_are_serialized(
 
         def run_rotation() -> None:
             try:
-                config_service.apply()
+                config_service.apply_pending()
             except BaseException as error:
                 rotation_errors.append(error)
 
@@ -442,14 +443,12 @@ def test_admin_password_rotation_revokes_lan_sessions_but_keeps_local_sessions(
     lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
     local_cookie, _ = auth.create_session("127.0.0.1", local=True, now=100)
 
-    service.save_draft({"AutoSaveSpan": "900"})
-    service.apply()
+    service.save_ini({"AutoSaveSpan": "900"})
     assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is not None
     assert auth.read_session(local_cookie, "127.0.0.1", now=100) is not None
 
     rotated_lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
-    service.save_draft({"AdminPassword": '"new-password"'})
-    service.apply()
+    service.save_ini({"AdminPassword": '"new-password"'})
 
     assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is None
     assert auth.read_session(rotated_lan_cookie, "192.0.2.55", now=100) is None
@@ -463,20 +462,19 @@ def test_failed_admin_password_apply_does_not_revoke_lan_sessions(tmp_path: Path
     database.migrate()
     auth = AuthStore(database, settings)
     executable = settings.data_dir.parent / "PalServer" / "PalServer.exe"
-    running = False
+    server_state = {"running": True}
     service = ConfigService(
         database,
         settings.data_dir,
         lambda: executable,
-        lambda: running,
+        lambda: server_state["running"],
         admin_password_rotation_callback=auth.revoke_lan_sessions,
     )
     lan_cookie, _ = auth.create_session("192.0.2.55", local=False, now=100)
-    service.save_draft({"AdminPassword": '"new-password"'})
-    running = True
+    service.save_ini({"AdminPassword": '"new-password"'})
 
     with pytest.raises(ConfigError) as error:
-        service.apply()
+        service.apply_pending()
 
     assert error.value.code == "SERVER_RUNNING"
     assert auth.read_session(lan_cookie, "192.0.2.55", now=100) is not None

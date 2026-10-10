@@ -11,7 +11,9 @@ from tools.generate_world_metadata import (
     _build_items,
     _fmodel_rows,
     _game_text,
+    _oil_rig_total,
     _partner_skill,
+    _tower_boss_total,
 )
 
 
@@ -64,6 +66,46 @@ def test_pinned_world_metadata_loads_with_declared_collections() -> None:
     assert unnamed.category
     assert unnamed.rarity == "0"
     assert len(bundle.items) == 2_466
+    assert bundle.player_progress_totals == {
+        "fastTravel": 174,
+        "exploredAreas": 123,
+        "towerBosses": 13,
+        "oilRigLocations": 3,
+    }
+    assert bundle.player_progress_totals_data_version == "2026.08.30.2"
+
+
+def test_passive_descriptions_expand_known_effects_without_internal_targets() -> None:
+    bundle = load_world_metadata()
+
+    conceited = bundle.skill("PAL_conceited")
+    thunder = bundle.skill("ElementBoost_Thunder_1_PAL")
+    assert conceited is not None
+    assert thunder is not None
+    assert conceited["description"] == "工作速度 +10%，防御 -10%"
+    assert thunder["description"] == "雷属性攻击伤害增加10%"
+
+
+def test_tower_boss_total_excludes_enum_sentinels() -> None:
+    source = """enum class EPalBossType : uint8 {
+        None,
+        GrassBoss,
+        ElectricBoss,
+        Max,
+    };"""
+
+    assert _tower_boss_total(source) == 2
+
+
+def test_oil_rig_total_excludes_debug_enum_member() -> None:
+    source = """enum class EPalOilrigType : uint8 {
+        Debug,
+        TypeA,
+        TypeB,
+        TypeC,
+    };"""
+
+    assert _oil_rig_total(source) == 3
 
 
 def test_fmodel_skill_tables_parse_localized_text_and_match_direct_keys(tmp_path: Path) -> None:

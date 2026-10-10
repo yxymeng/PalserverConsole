@@ -18,6 +18,8 @@ function response(snapshotId: string, count: number, start = 0): WorldPalRosterR
     parsing: false, parseStatus: "ready", dataCoverage: { state: "complete", resources: { players: true, pals: true, guilds: true, bases: true, inventories: true, "work-pals": true } },
     careSummary: { total: count, critical: 0, warning: 0, attention: 0, unavailable: count },
     passiveSkills: [],
+    passiveCatalog: [],
+    passiveCatalogErrorCode: null,
     metadata: { status: "ready", schema: "palserver-console-world-metadata", schemaVersion: 1, dataVersion: "test", sourceRevision: "revision", errorCode: null },
   };
 }

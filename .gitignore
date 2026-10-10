@@ -16,6 +16,7 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 frontend/artifacts/
+# Local promo production: videos, audio, assets, scripts, frames and reports
 artifacts/
 build/
 

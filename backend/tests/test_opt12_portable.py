@@ -5,11 +5,15 @@ import hashlib
 import json
 import math
 import os
+import re
+import socket
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from contextlib import suppress
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import psutil
@@ -17,6 +21,9 @@ import pytest
 
 import palserver_console.__main__ as console_main
 from palserver_console.application_updates import (
+    ABANDONED_PROGRESS_GRACE_SECONDS,
+    ACTIVE_UPDATE_STATES,
+    HELPER_PROGRESS_MESSAGES,
     _InstallUpdateGuard,
     portable_application_update_in_progress,
 )
@@ -83,6 +90,8 @@ def _run_upgrade(
     *,
     data_directory: Path | None = None,
     update_lock_id: str | None = None,
+    prune_backups_only: bool = False,
+    prune_after_update_id: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = [
         "powershell.exe",
@@ -101,6 +110,10 @@ def _run_upgrade(
         command.extend(["-DataDirectory", str(data_directory)])
     if update_lock_id is not None:
         command.extend(["-UpdateLockId", update_lock_id])
+    if prune_backups_only:
+        command.append("-PruneBackupsOnly")
+    if prune_after_update_id is not None:
+        command.extend(["-PruneAfterUpdateId", prune_after_update_id])
     return subprocess.run(
         command,
         check=False,
@@ -637,6 +650,89 @@ def test_portable_upgrade_scans_and_backups_all_managed_databases(tmp_path: Path
     assert not (install_root / "data" / "instances" / "empty" / "upgrade-backups").exists()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
+def test_successful_upgrade_keeps_only_latest_database_and_program_backup(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[2] / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, databases = _portable_upgrade_fixture(
+        tmp_path, named_schemas={"north": 8}
+    )
+    old_backups: list[Path] = []
+    for stamp in ("20200101-120000-000", "20200102-120000-000"):
+        for database in databases.values():
+            backup = database.parent / "upgrade-backups" / stamp
+            backup.mkdir(parents=True)
+            (backup / "app.db").write_bytes(database.read_bytes())
+            (backup / "backup-info.json").write_text("{}", encoding="utf-8")
+            old_backups.append(backup)
+        program = install_root / "program-backups" / f"Program-{stamp}"
+        program.mkdir(parents=True)
+        (program / "release.txt").write_text("older", encoding="utf-8")
+        old_backups.append(program)
+        for filename in (
+            f"PalServerConsole-{stamp}.exe",
+            f"apply-downloaded-update-{stamp}.ps1",
+            f"upgrade-portable-{stamp}.ps1",
+        ):
+            backup_file = program.parent / filename
+            backup_file.write_text("older", encoding="utf-8")
+            old_backups.append(backup_file)
+    unrelated = install_root / "program-backups" / "manual-notes.txt"
+    unrelated.write_text("keep", encoding="utf-8")
+    failed = install_root / "program-backups" / "Program-failed-20200101-120000-000"
+    failed.mkdir()
+
+    upgraded = _run_upgrade(script, install_root, package_root)
+
+    assert upgraded.returncode == 0, f"{upgraded.stdout}\n{upgraded.stderr}"
+    assert all(not backup.exists() for backup in old_backups), upgraded.stdout
+    assert unrelated.read_text(encoding="utf-8") == "keep"
+    assert failed.exists()
+    for database in databases.values():
+        backups = list((database.parent / "upgrade-backups").glob("*/app.db"))
+        assert len(backups) == 1
+        assert _schema_version(backups[0]) == 8
+        assert _schema_version(database) == 8
+    programs = list((install_root / "program-backups").glob("Program-20*"))
+    assert len(programs) == 1
+    assert (programs[0] / "release.txt").read_text(encoding="utf-8") == "old"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable backup cleanup targets Windows")
+def test_backup_retention_skips_directory_links_and_an_active_update(tmp_path: Path) -> None:
+    script = Path(__file__).resolve().parents[2] / "scripts" / "upgrade-portable.ps1"
+    install_root, package_root, databases = _portable_upgrade_fixture(tmp_path)
+    backups = databases["default"].parent / "upgrade-backups"
+    oldest = backups / "20200101-120000-000"
+    linked = backups / "20200102-120000-000"
+    latest = backups / "20200103-120000-000"
+    for directory in (oldest, linked, latest):
+        directory.mkdir(parents=True)
+        (directory / "app.db").write_bytes(databases["default"].read_bytes())
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    marker = outside / "keep.txt"
+    marker.write_text("keep", encoding="utf-8")
+    junction = linked / "external"
+    created = _run_encoded_powershell(
+        f"New-Item -ItemType Junction -Path {_powershell_literal(junction)} "
+        f"-Target {_powershell_literal(outside)} -ErrorAction Stop | Out-Null"
+    )
+    assert created.returncode == 0, f"{created.stdout}\n{created.stderr}"
+    lock = install_root / ".palserver-console-update.lock"
+    lock.write_text("active update", encoding="utf-8")
+    blocked = _run_upgrade(script, install_root, package_root, prune_backups_only=True)
+    assert blocked.returncode == 0, f"{blocked.stdout}\n{blocked.stderr}"
+    assert oldest.exists()
+    lock.unlink()
+
+    pruned = _run_upgrade(script, install_root, package_root, prune_backups_only=True)
+    assert pruned.returncode == 0, f"{pruned.stdout}\n{pruned.stderr}"
+    assert not oldest.exists()
+    assert linked.exists()
+    assert latest.exists()
+    assert marker.read_text(encoding="utf-8") == "keep"
+
+
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
 def test_portable_upgrade_rejects_incompatible_non_current_named_database(
     tmp_path: Path,
@@ -722,6 +818,11 @@ def test_portable_upgrade_rolls_back_maintenance_scripts_after_late_failure(
     (install_root / "Program" / "release.txt").write_text("old", encoding="utf-8")
     (install_root / "PalServerConsole.exe").write_bytes(b"old-launcher")
     _write_maintenance_scripts(install_root, "old")
+    database = install_root / "data" / "app.db"
+    _write_database(database, schema_version=8)
+    prior_backup = database.parent / "upgrade-backups" / "20200101-120000-000"
+    prior_backup.mkdir(parents=True)
+    (prior_backup / "app.db").write_bytes(database.read_bytes())
 
     package_root = tmp_path / "candidate"
     candidate_program = package_root / "Program"
@@ -791,6 +892,8 @@ function Move-Item {{
         encoding="utf-8"
     ) == "upgrade script old"
     assert not (install_root / ".palserver-console-update.lock").exists()
+    assert prior_backup.exists()
+    assert len(list((database.parent / "upgrade-backups").glob("*/app.db"))) == 2
 
 
 @pytest.mark.skipif(os.name != "nt", reason="OPT-12 packages and upgrade tooling target Windows")
@@ -836,25 +939,54 @@ def test_license_collector_includes_bundled_frontend_runtime_dependencies(
         "react": {"version": "19.1.1", "dependencies": {"scheduler": "1.0.0"}},
         "scheduler": {"version": "1.0.0"},
         "lucide-react": {"version": "0.468.0", "peerDependencies": {"react": "*"}},
+        "@yxymeng/flowmist": {
+            "version": "0.1.0",
+            "private": True,
+            "license": "UNLICENSED",
+        },
     }
     package_lock = {
         "name": "frontend-license-fixture",
         "lockfileVersion": 3,
         "packages": {
-            "": {"dependencies": {"react": "19.1.1", "lucide-react": "0.468.0"}},
-            **{f"node_modules/{name}": metadata for name, metadata in packages.items()},
+            "": {"dependencies": {
+                "react": "19.1.1",
+                "lucide-react": "0.468.0",
+                "@yxymeng/flowmist": "file:vendor/flowmist",
+            }},
+            **{
+                f"node_modules/{name}": (
+                    {"resolved": "vendor/flowmist", "link": True}
+                    if name == "@yxymeng/flowmist"
+                    else metadata
+                )
+                for name, metadata in packages.items()
+            },
+            "vendor/flowmist": {
+                "name": "@yxymeng/flowmist",
+                "version": "0.1.0",
+                "private": True,
+                "license": "UNLICENSED",
+            },
         },
     }
     lock_path = tmp_path / "package-lock.json"
     lock_path.write_text(json.dumps(package_lock), encoding="utf-8")
     for name, metadata in packages.items():
-        package_root = node_modules / name
+        package_root = (
+            tmp_path / "vendor" / "flowmist"
+            if name == "@yxymeng/flowmist"
+            else node_modules / name
+        )
         package_root.mkdir(parents=True)
         (package_root / "package.json").write_text(
-            json.dumps({"name": name, **metadata, "license": "MIT"}),
+            json.dumps({"name": name, "license": "MIT", **metadata}),
             encoding="utf-8",
         )
-        (package_root / "LICENSE").write_text(f"{name} fixture license", encoding="utf-8")
+        if name != "@yxymeng/flowmist":
+            (package_root / "LICENSE").write_text(
+                f"{name} fixture license", encoding="utf-8"
+            )
 
     output = tmp_path / "THIRD_PARTY_LICENSES.md"
     completed = subprocess.run(
@@ -884,6 +1016,9 @@ def test_license_collector_includes_bundled_frontend_runtime_dependencies(
     assert "### react 19.1.1" in rendered
     assert "### scheduler 1.0.0" in rendered
     assert "### lucide-react 0.468.0" in rendered
+    assert "### @yxymeng/flowmist 0.1.0" in rendered
+    assert "Declared license: UNLICENSED" in rendered
+    assert "Bundled private workspace package" in rendered
 
 
 def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclosure() -> None:
@@ -1004,11 +1139,20 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     success_launch = application_update_helper.index(
         "Start-ConsoleLauncher -Launcher $launcher", success_release
     )
+    success_health = application_update_helper.index(
+        "Wait-ConsoleHealth -Port $Port -ExpectedVersion $ExpectedVersion",
+        success_launch,
+    )
+    success_complete = application_update_helper.index(
+        "Publish-UpdateProgress -ProgressPath $progressPath "
+        '-UpdateId $UpdateLockId -State "completed"',
+        success_health,
+    )
     failure_release = application_update_helper.rindex(release_call)
     failure_restore = application_update_helper.index(
         "Restore-ConsoleLauncher -Launcher $launcher"
     )
-    assert success_release < success_launch
+    assert success_release < success_launch < success_health < success_complete
     assert failure_release < failure_restore
     assert 'Join-Path $packageRootPath "PalServerConsole.exe"' in upgrade_script
     assert 'Join-Path $installRootPath "PalServerConsole.exe"' in upgrade_script
@@ -1029,8 +1173,91 @@ def test_portable_build_contract_includes_runtime_integrity_and_unsigned_disclos
     assert "未签名" in portable_readme
     assert "双击根目录的 `PalServerConsole.exe`" in portable_readme
     assert "Python" in portable_readme and "Node.js" in portable_readme
-    assert "npm >= 11.17" in root_readme
-    assert "npm 11.17.0" in root_readme
+    assert "npm ≥ 11.17" in root_readme
+    workflow = (project_root / ".github" / "workflows" / "windows-ci.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "npm@11.17.0" in workflow
+
+
+def test_application_update_progress_protocol_is_consistent_across_runtimes() -> None:
+    expected_steps = {
+        "idle": 0,
+        "checking": 1,
+        "downloading": 2,
+        "validating": 3,
+        "handoff": 4,
+        "restart_scheduled": 4,
+        "waiting_for_exit": 4,
+        "installing": 4,
+        "restarting": 4,
+        "completed": 4,
+        "failed": 0,
+    }
+    expected_active = set(expected_steps) - {"idle", "completed", "failed"}
+    expected_terminal = {"completed", "failed"}
+    project_root = Path(__file__).resolve().parents[2]
+    python_source = (
+        project_root / "backend" / "palserver_console" / "application_updates.py"
+    ).read_text(encoding="utf-8")
+    contracts = (project_root / "frontend" / "src" / "api" / "contracts.ts").read_text(
+        encoding="utf-8"
+    )
+    panel = (
+        project_root
+        / "frontend"
+        / "src"
+        / "features"
+        / "maintenance"
+        / "ApplicationUpdatePanel.tsx"
+    ).read_text(encoding="utf-8")
+    helper = (project_root / "scripts" / "apply-downloaded-update.ps1").read_text(
+        encoding="utf-8-sig"
+    )
+
+    progress_type = re.search(
+        r"export type ApplicationUpdateProgress = \{.*?state:\s*([^;]+);",
+        contracts,
+        re.DOTALL,
+    )
+    active_states = re.search(
+        r"const ACTIVE_UPDATE_STATES.*?\(\[(.*?)\]\);", panel, re.DOTALL
+    )
+    terminal_states = re.search(
+        r"const TERMINAL_UPDATE_STATES.*?\(\[(.*?)\]\);", panel, re.DOTALL
+    )
+    health_timeout = re.search(
+        r"function Wait-ConsoleHealth.*?\[int\]\$TimeoutSeconds\s*=\s*(\d+)",
+        helper,
+        re.DOTALL,
+    )
+    assert progress_type and active_states and terminal_states and health_timeout
+    assert set(re.findall(r'"([a-z_]+)"', progress_type.group(1))) == set(expected_steps)
+    assert set(re.findall(r'"([a-z_]+)"', active_states.group(1))) == expected_active
+    assert set(re.findall(r'"([a-z_]+)"', terminal_states.group(1))) == expected_terminal
+    assert expected_active == ACTIVE_UPDATE_STATES
+    assert set(HELPER_PROGRESS_MESSAGES) == {
+        "waiting_for_exit",
+        "installing",
+        "restarting",
+        "completed",
+        "failed",
+    }
+    assert int(health_timeout.group(1)) < ABANDONED_PROGRESS_GRACE_SECONDS
+
+    written_steps = {
+        state: int(step)
+        for state, step in re.findall(
+            r'self\._set_progress\(\s*"([a-z_]+)",\s*(\d+)', python_source
+        )
+    }
+    written_steps.update(
+        (state, int(step))
+        for state, step in re.findall(r'-State "([a-z_]+)" -Step (\d+)', helper)
+    )
+    assert re.search(r'"state":\s*"idle",\s*"step":\s*0', python_source, re.DOTALL)
+    written_steps["idle"] = 0
+    assert written_steps == expected_steps
 
 
 def test_portable_v011_bootstrap_document_uses_candidate_upgrader() -> None:
@@ -1340,6 +1567,8 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
             str(data_directory),
             "-NewPackage",
             str(tmp_path / "missing-package"),
+            "-ExpectedVersion",
+            "0.3.0",
             "-InstanceId",
             "north",
             "-Port",
@@ -1357,20 +1586,57 @@ def test_portable_update_helper_releases_lock_after_failed_update(tmp_path: Path
     assert "UPDATE_HELPER_INVALID" in (
         data_directory / "application-updates" / "apply-update.log"
     ).read_text(encoding="utf-8")
+    progress = json.loads(
+        (data_directory / "application-updates" / "progress.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert isinstance(progress.pop("updatedAt"), int)
+    assert progress == {
+        "updateId": lock_id,
+        "state": "failed",
+        "step": 0,
+        "message": "Application update failed. See error code.",
+        "errorCode": "APPLICATION_UPDATE_FAILED",
+    }
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
-def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: Path) -> None:
+@pytest.mark.parametrize("healthy", [True, False])
+def test_portable_update_helper_releases_lock_and_prunes_only_after_health(
+    tmp_path: Path, healthy: bool
+) -> None:
     project_root = Path(__file__).resolve().parents[2]
     update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
-    install_root = tmp_path / "install"
-    install_root.mkdir()
-    launcher = install_root / "PalServerConsole.exe"
-    launcher.write_bytes(Path(os.environ["COMSPEC"]).read_bytes())
-    data_directory = tmp_path / "data"
-    package_root = tmp_path / "package"
-    package_root.mkdir()
-    (package_root / "upgrade-portable.ps1").write_text("exit 0", encoding="utf-8")
+    bounded_helper = tmp_path / "apply-downloaded-update.ps1"
+    # The unchanged helper uses the old health -> completed protocol, without
+    # a retention call. Exercise the real downloaded updater, not a stub.
+    helper_source = update_helper.read_text(encoding="utf-8")
+    bounded_helper.write_text(
+        helper_source.replace(
+            "Wait-ConsoleHealth -Port $Port -ExpectedVersion $ExpectedVersion",
+            "Wait-ConsoleHealth -Port $Port -ExpectedVersion $ExpectedVersion -TimeoutSeconds 1",
+        ),
+        encoding="utf-8-sig",
+    )
+    install_root, package_root, databases = _portable_upgrade_fixture(tmp_path / "更新 '测试'")
+    data_directory = databases["default"].parent
+    (package_root / "PalServerConsole.exe").write_bytes(Path(os.environ["COMSPEC"]).read_bytes())
+    (package_root / "upgrade-portable.ps1").write_text(
+        (project_root / "scripts" / "upgrade-portable.ps1").read_text(encoding="utf-8-sig"),
+        encoding="utf-8-sig",
+    )
+    (package_root / "apply-downloaded-update.ps1").write_bytes(update_helper.read_bytes())
+    _write_checksum_manifest(
+        package_root,
+        [path for path in package_root.rglob("*")
+         if path.is_file() and path.name != "checksums.sha256"],
+    )
+    for stamp in ("20200101-120000-000", "20200102-120000-000"):
+        backup = data_directory / "upgrade-backups" / stamp
+        backup.mkdir(parents=True)
+        (backup / "app.db").write_bytes(databases["default"].read_bytes())
+        (install_root / "program-backups" / f"Program-{stamp}").mkdir(parents=True)
     lock_id = "successful-lock"
     lock_path = install_root / ".palserver-console-update.lock"
     lock_path.write_text(
@@ -1387,6 +1653,31 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
         encoding="utf-8",
     )
 
+    class HealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path != "/api/health":
+                self.send_error(404)
+                return
+            payload = json.dumps(
+                {
+                    "service": "palserver-console",
+                    "status": "ok",
+                    "versions": {"application": "0.3.0" if healthy else "0.2.0"},
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            pass
+
+    health_server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+    health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
+    health_thread.start()
+
     try:
         completed = subprocess.run(
             [
@@ -1396,7 +1687,7 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
                 "-ExecutionPolicy",
                 "Bypass",
                 "-File",
-                str(update_helper),
+                str(bounded_helper),
                 "-WaitPid",
                 "999999",
                 "-InstallRoot",
@@ -1407,10 +1698,12 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
                 str(data_directory),
                 "-NewPackage",
                 str(package_root),
+                "-ExpectedVersion",
+                "0.3.0",
                 "-InstanceId",
                 "north",
                 "-Port",
-                "18224",
+                str(health_server.server_port),
             ],
             check=False,
             capture_output=True,
@@ -1419,10 +1712,170 @@ def test_portable_update_helper_releases_lock_after_successful_update(tmp_path: 
             timeout=30,
         )
 
-        assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+        assert completed.returncode == (0 if healthy else 1), (
+            f"{completed.stdout}\n{completed.stderr}"
+        )
+        deadline = time.monotonic() + 5
+        while healthy and (
+            len(list((data_directory / "upgrade-backups").glob("*/app.db"))) != 1
+            or len(list((install_root / "program-backups").glob("Program-20*"))) != 1
+        ):
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+        if not healthy:
+            time.sleep(1)
+        expected_backups = 1 if healthy else 3
+        assert len(list((data_directory / "upgrade-backups").glob("*/app.db"))) == expected_backups
+        assert len(list((install_root / "program-backups").glob("Program-20*"))) == expected_backups
         assert not lock_path.exists()
+        progress = json.loads(
+            (data_directory / "application-updates" / "progress.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert isinstance(progress.pop("updatedAt"), int)
+        expected = {
+            "updateId": lock_id,
+            "state": "completed" if healthy else "failed",
+            "step": 4 if healthy else 0,
+            "message": (
+                "Console update completed." if healthy
+                else "Application update failed. See error code."
+            ),
+        }
+        if not healthy:
+            expected["errorCode"] = "APPLICATION_UPDATE_FAILED"
+        assert progress == expected
     finally:
+        health_server.shutdown()
+        health_server.server_close()
+        health_thread.join(timeout=5)
         _cleanup_test_launcher(install_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable backup cleanup targets Windows")
+@pytest.mark.parametrize("state, update_id", [
+    ("failed", "this-update"),
+    ("completed", "another-update"),
+    ("restarting", "this-update"),
+])
+def test_backup_retention_requires_this_updates_completed_signal(
+    tmp_path: Path, state: str, update_id: str
+) -> None:
+    source = Path(__file__).resolve().parents[2] / "scripts" / "upgrade-portable.ps1"
+    script = tmp_path / "bounded-upgrade.ps1"
+    script.write_text(
+        source.read_text(encoding="utf-8-sig").replace("AddSeconds(90)", "AddSeconds(1)"),
+        encoding="utf-8-sig",
+    )
+    install_root, package_root, databases = _portable_upgrade_fixture(tmp_path)
+    data_directory = databases["default"].parent
+    for stamp in ("20200101-120000-000", "20200102-120000-000"):
+        backup = data_directory / "upgrade-backups" / stamp
+        backup.mkdir(parents=True)
+        (backup / "app.db").write_bytes(databases["default"].read_bytes())
+        (install_root / "program-backups" / f"Program-{stamp}").mkdir(parents=True)
+    progress = data_directory / "application-updates" / "progress.json"
+    progress.parent.mkdir()
+    progress.write_text(json.dumps({"state": state, "updateId": update_id}), encoding="utf-8")
+
+    result = _run_upgrade(
+        script, install_root, package_root,
+        prune_backups_only=True, prune_after_update_id="this-update",
+    )
+
+    assert result.returncode == 0, f"{result.stdout}\n{result.stderr}"
+    assert len(list((data_directory / "upgrade-backups").glob("*/app.db"))) == 2
+    assert len(list((install_root / "program-backups").glob("Program-20*"))) == 2
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_health_wait_times_out_without_console() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    loader = _powershell_function_loader(update_helper, ("Wait-ConsoleHealth",))
+    with socket.socket() as reservation:
+        reservation.bind(("127.0.0.1", 0))
+        unused_port = reservation.getsockname()[1]
+
+    script = f"""
+{loader}
+try {{
+    Wait-ConsoleHealth -Port {unused_port} -ExpectedVersion "0.3.0" -TimeoutSeconds 1
+    "no failure"
+}}
+catch {{
+    $_.Exception.Message
+}}
+"""
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    completed = subprocess.run(
+        ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+        check=False,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=10,
+    )
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "UPDATE_RELAUNCH_HEALTH_TIMEOUT" in completed.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="portable update helper targets Windows")
+def test_portable_update_helper_rejects_healthy_wrong_version() -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    update_helper = project_root / "scripts" / "apply-downloaded-update.ps1"
+    loader = _powershell_function_loader(update_helper, ("Wait-ConsoleHealth",))
+
+    class WrongVersionHealthHandler(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            payload = json.dumps(
+                {
+                    "service": "palserver-console",
+                    "status": "ok",
+                    "versions": {"application": "0.2.0"},
+                }
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, format_string: str, *args: object) -> None:
+            pass
+
+    health_server = ThreadingHTTPServer(("127.0.0.1", 0), WrongVersionHealthHandler)
+    health_thread = threading.Thread(target=health_server.serve_forever, daemon=True)
+    health_thread.start()
+    script = f'''{loader}
+try {{
+    Wait-ConsoleHealth -Port {health_server.server_port} -ExpectedVersion "0.3.0" -TimeoutSeconds 1
+    "no failure"
+}}
+catch {{
+    $_.Exception.Message
+}}
+'''
+    try:
+        encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+        completed = subprocess.run(
+            ["powershell.exe", "-NoLogo", "-NoProfile", "-EncodedCommand", encoded],
+            check=False,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=10,
+        )
+    finally:
+        health_server.shutdown()
+        health_server.server_close()
+        health_thread.join(timeout=5)
+
+    assert completed.returncode == 0, f"{completed.stdout}\n{completed.stderr}"
+    assert "UPDATE_RELAUNCH_HEALTH_TIMEOUT" in completed.stdout
 
 
 @pytest.mark.skipif(os.name != "nt", reason="portable upgrade tooling targets Windows")
@@ -1870,6 +2323,8 @@ def test_portable_update_helper_does_not_delete_another_lock(tmp_path: Path) -> 
             str(data_directory),
             "-NewPackage",
             str(tmp_path / "missing-package"),
+            "-ExpectedVersion",
+            "0.3.0",
             "-InstanceId",
             "north",
             "-Port",

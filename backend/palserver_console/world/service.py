@@ -12,7 +12,7 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from copy import deepcopy
 from dataclasses import dataclass
@@ -20,7 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from ..config import ProfileError, ServerProfile
-from ..metadata.loader import METADATA_SCHEMA_NAME, METADATA_SCHEMA_VERSION
+from ..metadata import WorldMetadataError, load_world_metadata
+from ..metadata.loader import (
+    METADATA_SCHEMA_NAME,
+    METADATA_SCHEMA_VERSION,
+)
 from ..persistence import Database
 from ..steam import is_reparse_point
 from .cache import (
@@ -63,6 +67,65 @@ def _worker_output_text(value: object) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value or "")
+
+
+def _with_player_progress_totals(item: Mapping[str, object]) -> dict[str, object]:
+    result = dict(item)
+    progress = item.get("progress")
+    if not isinstance(progress, Mapping):
+        return result
+    try:
+        metadata = load_world_metadata()
+        totals = metadata.player_progress_totals
+        data_version: str | None = metadata.player_progress_totals_data_version
+    except WorldMetadataError:
+        totals = {}
+        data_version = None
+    result["progress"] = {
+        **progress,
+        "totals": dict(totals),
+        "totalsDataVersion": data_version,
+    }
+    return result
+
+
+def _passive_catalog() -> list[dict[str, object]]:
+    skills = load_world_metadata().skills
+    fields = ("name", "description", "sourceName", "rank", "element", "power", "cooldown")
+    return [
+        {"id": skill_id, **{field: skill.get(field) for field in fields}, "metadataKnown": True}
+        for skill_id, skill in skills.items()
+        if skill.get("kind") == "passive"
+        and skill.get("displayable") is True
+        and skill.get("name")
+        and not skill_id.startswith("Test_")
+    ]
+
+
+def _with_current_passive_descriptions(item: Mapping[str, object]) -> dict[str, object]:
+    skills = item.get("skills")
+    if not isinstance(skills, Mapping):
+        return dict(item)
+    passive = skills.get("passive")
+    if not isinstance(passive, list):
+        return dict(item)
+    try:
+        metadata = load_world_metadata()
+    except WorldMetadataError:
+        return dict(item)
+    refreshed = []
+    for skill in passive:
+        if not isinstance(skill, Mapping):
+            refreshed.append(skill)
+            continue
+        current = metadata.skill(str(skill.get("id") or ""))
+        description = current.get("description") if current else None
+        refreshed.append(
+            {**skill, "description": description}
+            if isinstance(description, str)
+            else skill
+        )
+    return {**item, "skills": {**skills, "passive": refreshed}}
 
 
 @dataclass(frozen=True)
@@ -503,6 +566,8 @@ class WorldSnapshotService:
             status=status,
             sort=sort,
         )
+        if resource == "players":
+            items = [_with_player_progress_totals(item) for item in items]
         state = self._status_for_snapshot(current)
         return {
             "items": items,
@@ -529,6 +594,7 @@ class WorldSnapshotService:
         search: str | None,
         marker: str,
         sort: str,
+        character_ids: tuple[str, ...] = (),
         care: str = "all",
         min_level: int | None = None,
         min_rank: int | None = None,
@@ -540,15 +606,34 @@ class WorldSnapshotService:
         work_suitabilities: tuple[str, ...] = (),
         min_work_level: int = 1,
         passive_skills: tuple[str, ...] = (),
+        passive_match: str = "all",
+        exclude_negative_passives: bool = False,
         location: str = "all",
         snapshot_id: str | None = None,
     ) -> dict[str, object]:
         current, cache = self._current_snapshot_cache(snapshot_id)
+        passive_options = query_pal_passive_skill_options(cache)
+        normalized_search = (search or "").strip().casefold()
+        passive_search_skills = tuple(
+            str(option["id"])
+            for option in passive_options
+            if normalized_search
+            and any(
+                normalized_search in str(option.get(key) or "").casefold()
+                for key in ("id", "name", "sourceName")
+            )
+        )
+        negative_passive_skills = tuple(
+            str(option["id"])
+            for option in passive_options
+            if isinstance(rank := option.get("rank"), int) and rank < 0
+        )
         items, total = query_pal_roster(
             cache,
             page=page,
             page_size=page_size,
             search=search,
+            character_ids=character_ids,
             marker=marker,
             sort=sort,
             care=care,
@@ -562,17 +647,30 @@ class WorldSnapshotService:
             work_suitabilities=work_suitabilities,
             min_work_level=min_work_level,
             passive_skills=passive_skills,
+            passive_match=passive_match,
+            exclude_negative_passives=exclude_negative_passives,
+            negative_passive_skills=negative_passive_skills,
+            passive_search_skills=passive_search_skills,
             location=location,
         )
         state = self._status_for_snapshot(current)
+        metadata_status = query_world_metadata_status(cache)
+        passive_catalog_error_code: str | None = None
+        try:
+            passive_catalog = _passive_catalog()
+        except WorldMetadataError as error:
+            passive_catalog = []
+            passive_catalog_error_code = error.code
         return {
             "items": items,
             "page": page,
             "pageSize": page_size,
             "total": total,
             "careSummary": query_pal_care_summary(cache),
-            "passiveSkills": query_pal_passive_skill_options(cache),
-            "metadata": query_world_metadata_status(cache),
+            "passiveSkills": passive_options,
+            "passiveCatalog": passive_catalog,
+            "passiveCatalogErrorCode": passive_catalog_error_code,
+            "metadata": metadata_status,
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],
@@ -699,7 +797,7 @@ class WorldSnapshotService:
             raise WorldDataError("PLAYER_NOT_FOUND", "玩家不存在于当前存档缓存。")
         state = self._status_for_snapshot(current)
         return {
-            **result,
+            **_with_player_progress_totals(result),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],
@@ -723,7 +821,13 @@ class WorldSnapshotService:
             raise WorldDataError("WORLD_ENTITY_NOT_FOUND", "实体不存在于当前存档缓存。")
         state = self._status_for_snapshot(current)
         response: dict[str, object] = {
-            **result,
+            **(
+                _with_player_progress_totals(result)
+                if resource == "players"
+                else _with_current_passive_descriptions(result)
+                if resource == "pals"
+                else result
+            ),
             "source": state["source"],
             "observedAt": state["observedAt"],
             "sourceObservedAt": state["sourceObservedAt"],

@@ -1,0 +1,18 @@
+{
+  "name": "@yxymeng/flowmist",
+  "version": "0.1.0",
+  "description": "流岚 · FlowMist — cloud-motion progress for JavaScript and React",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": {"types": "./src/index.d.ts", "import": "./src/index.js"},
+    "./react": {"types": "./src/react.d.ts", "import": "./src/react.js"},
+    "./style.css": "./src/style.css"
+  },
+  "files": ["src", "README.md"],
+  "sideEffects": ["**/*.css"],
+  "peerDependencies": {"react": ">=18 <20"},
+  "peerDependenciesMeta": {"react": {"optional": true}},
+  "scripts": {"test": "node --test", "demo": "python3 -m http.server 4173 --bind 127.0.0.1"}
+}

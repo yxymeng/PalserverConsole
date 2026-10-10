@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, MapPin, Search, SlidersHorizontal, X } from "lucide-react";
+import { Archive, ChevronDown, ChevronLeft, ChevronRight, LoaderCircle, MapPin, Package, Search, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 
 import type { WorldInventoryDetailResponse, WorldInventoryItem, WorldInventoryLocationGroup, WorldInventoryResponse, WorldInventoryScope } from "../../api/contracts";
@@ -92,6 +92,7 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    setPage(1);
     invalidateLocationRequest();
     setExpanded(null);
     setLocations(null);
@@ -202,31 +203,33 @@ export function InventoryWorkspace({ snapshotId, context, onSnapshotReplaced, on
   const allUnknown = Boolean(result?.items.length) && result!.items.every((item) => !item.metadataKnown);
   const quantityLabel = ({ inventory: "持有总量", player: "玩家背包", base: "据点箱子", world: "世界容器总量", all: "全世界总量" } as const)[context.scope];
 
-  return <section className="inventory-workspace" aria-label="仓库">
+  return <section className="inventory-workspace" aria-label="全服物资检索">
     <header className="world-module-heading inventory-heading">
-      <div><p className="world-module-kicker">玩家持有资产</p><h2>仓库</h2><p>默认仅汇总玩家背包、据点箱子与公会箱子；世界宝箱和其他地图容器不计入仓库。</p></div>
+      <div><h2>全服物资检索</h2><p>默认汇总玩家背包、据点箱子与公会箱子；世界宝箱和其他地图容器不计入仓库。</p></div>
       <span className="world-module-total inventory-total">{result ? `共 ${result.total.toLocaleString()} 种物品` : "等待快照"}</span>
     </header>
     {context.label && <div className="inventory-context" role="status"><MapPin size={17} aria-hidden="true" /><span>当前仅显示：{context.label}</span><button className="world-clear-button" type="button" onClick={onClearContext}><X size={15} />返回全部仓库</button></div>}
     {allUnknown && <p className="inventory-metadata-warning" role="status">当前结果中的物品资料尚未收录；仍保留 Item ID、真实数量和全部位置。</p>}
     <form className="inventory-toolbar" onSubmit={submitSearch}>
-      <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索物品" placeholder="搜索中文名称或 Item ID" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
+      <label className="world-search"><Search size={18} aria-hidden="true" /><input aria-label="搜索物品" placeholder="搜索物品名称或 Item ID（例如：Pal_Sphere、蛋糕、帕鲁之魂）" value={search} onChange={(event) => setSearch(event.target.value)} maxLength={100} /></label>
       <button className="primary-button world-search-button" type="submit">搜索</button>
+      <label className="world-control inventory-category"><SlidersHorizontal size={16} aria-hidden="true" /><span>分类</span><select aria-label="物品分类筛选" title={category || "全部分类"} value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="">全部分类</option>{(result?.categories || []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
       <fieldset className="inventory-scope" aria-label="仓库范围"><legend>仓库范围</legend>{([ ["inventory", "全部持有"], ["player", "玩家背包"], ["base", "据点箱子"] ] as const).map(([value, label]) => <button type="button" key={value} className={context.scope === value ? "active" : ""} aria-pressed={context.scope === value} onClick={() => { onContextChange({ scope: value }); setPage(1); }}>{label}</button>)}</fieldset>
-      <label className="world-control"><SlidersHorizontal size={16} aria-hidden="true" /><span>分类</span><select aria-label="物品分类筛选" value={category} onChange={(event) => { setCategory(event.target.value); setPage(1); }}><option value="">全部分类</option>{(result?.categories || []).map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-      <label className="world-control"><span>排序</span><select aria-label="仓库排序方式" value={sort} onChange={(event) => { setSort(event.target.value as InventorySort); setPage(1); }}><option value="name">名称</option><option value="quantity">总量（高到低）</option></select></label>
-      {hasFilters && <button className="world-clear-button" type="button" onClick={clearFilters}><X size={15} />清除筛选</button>}
+      <label className="world-control inventory-sort"><span>排序</span><select aria-label="仓库排序方式" value={sort} onChange={(event) => { setSort(event.target.value as InventorySort); setPage(1); }}><option value="name">名称</option><option value="quantity">总量（高到低）</option></select></label>
+      {hasFilters && <button className="world-clear-button inventory-clear" type="button" onClick={clearFilters}><X size={15} />清除筛选</button>}
     </form>
     {error && <section className="world-request-failure" role="alert"><Archive size={18} aria-hidden="true" /><div><strong>仓库请求失败</strong><p>当前页面没有写入任何存档；请检查连接或快照状态后重试。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void load()}>重新尝试</button></section>}
     <div className="inventory-results" aria-live="polite" aria-busy={loading}>
-      {loading ? <div className="inventory-loading"><LoaderCircle className="spin" size={20} />正在聚合仓库…</div> : result?.items.length ? result.items.map((item) => <article className="inventory-item" key={item.itemId} data-expanded={expanded?.itemId === item.itemId || undefined}>
+      {loading ? Array.from({ length: 8 }, (_, index) => <div className="inventory-item inventory-skeleton" role={index === 0 ? "status" : undefined} aria-label={index === 0 ? "正在聚合仓库" : undefined} aria-hidden={index === 0 ? undefined : true} key={index}><div><i /><i /></div><i /><i /><div><i /><i /></div></div>) : result?.items.length ? result.items.map((item) => <article className="inventory-item" key={item.itemId} data-expanded={expanded?.itemId === item.itemId || undefined}>
         <button className="inventory-item-summary" type="button" aria-expanded={expanded?.itemId === item.itemId} onClick={() => toggleItem(item)}>
-          <span className="inventory-item-icon" aria-hidden="true"><Archive size={20} /></span>
-          <span className="inventory-item-main"><strong>{item.name || item.itemId}</strong><span className="inventory-item-meta"><code>{item.itemId}</code>{item.metadataLabel && <em>{item.metadataLabel}</em>}{item.category && <small>{item.category}</small>}{item.rarity && <small>{item.rarity}</small>}</span></span>
+          <span className="inventory-item-icon" aria-hidden="true"><Package size={20} /></span>
+          <span className="inventory-item-badges">{item.category && <small>{item.category}</small>}{item.rarity && <small>{item.rarity}</small>}{item.metadataLabel && <em>{item.metadataLabel}</em>}</span>
+          <span className="inventory-item-main"><strong>{item.name || item.itemId}</strong><code>{item.itemId}</code></span>
           <span className="inventory-item-number"><small>{quantityLabel}</small><strong>{item.totalQuantity.toLocaleString()}</strong></span>
-          <span className="inventory-item-number"><small>存放记录</small><strong>{item.locationCount.toLocaleString()}</strong></span>
+          <span className="inventory-item-location-count">{item.locationCount.toLocaleString()} 条存放记录</span>
           <ChevronDown className="inventory-chevron" size={19} aria-hidden="true" />
         </button>
+        {!!item.locationPreview?.length && <div className="inventory-preview" aria-label="位置预览">{item.locationPreview.map((group) => <div key={`${group.locationType}:${group.groupId || "all"}`}><span title={group.label}>{group.label}:</span><strong>× {group.quantitySum.toLocaleString()}</strong></div>)}{item.locationGroupCount > item.locationPreview.length && <small>另有 {item.locationGroupCount - item.locationPreview.length} 处位置，展开查看</small>}</div>}
         {expanded?.itemId === item.itemId && <section className="inventory-locations" aria-label={`${item.name || item.itemId}的存放分布`}>
           <h3>存放分布 <small>{item.locationCount} 条记录</small></h3>
           {locationError && <section className="world-request-failure compact" role="alert"><Archive size={17} aria-hidden="true" /><div><strong>存放分布读取失败</strong><p>已保留仓库汇总；请重试读取此物品的位置。</p><code>{locationError}</code></div><button className="quiet-button" type="button" onClick={() => void loadLocations(item, expandedGroup)}>重新读取位置</button></section>}

@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronDown, FileCog, FolderSearch, HardDrive, Network, RotateCcw, RotateCw, Save, Search, ServerCog } from "lucide-react";
+import { AlertTriangle, Building2, ChevronDown, Database, FileCode, FileCog, Flame, FolderSearch, Globe, HardDrive, Layers, Network, RotateCcw, RotateCw, Save, Search, ServerCog, Shield, Sparkles, TimerReset, Users, Zap } from "lucide-react";
 import { useCallback, useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import type { AuthStatus, ConfigDocument } from "../../api/contracts";
 import { createIdempotencyKey, isAbortError, requestJson } from "../../api/client";
@@ -6,7 +6,9 @@ import { useAbortableRequest } from "../../hooks/useAbortableRequest";
 import { ConsolePortSettings } from "../server/ConsolePortSettings";
 import { ServerSettingsPanel } from "../server/ServerSettingsPanel";
 
-type ConfigEditorTab = "common" | "advanced";
+type ConfigFileMode = "ini" | "world-option";
+type ConfigTargetMode = "effective" | ConfigFileMode;
+type ConfigSectionId = "basics" | "runtime" | "progression" | "combat" | "resources" | "building" | "guild" | "rules";
 export type ConfigWorkspace = "game" | "instance";
 type ConfigCategoryId =
   | "server"
@@ -32,7 +34,7 @@ type ConfigOption = { value: string; label: string; description?: string };
 type ConfigFieldMeta = {
   key: string;
   label: string;
-  description: string;
+  description?: string;
   kind: ConfigKind;
   min?: number;
   max?: number;
@@ -45,7 +47,6 @@ const CONFIG_LABELS: Record<string, string> = {
   ServerDescription: "服务器描述",
   AdminPassword: "管理员密码",
   ServerPassword: "服务器密码",
-  Difficulty: "难度",
   PublicIP: "公共 IP",
   PublicPort: "公共端口",
   ServerPlayerMaxNum: "服务器玩家最大数量",
@@ -84,6 +85,7 @@ const CONFIG_LABELS: Record<string, string> = {
   CollectionObjectHpRate: "可采集物品生命值倍率",
   CollectionObjectRespawnSpeedRate: "可采集物品重生间隔倍率",
   EnemyDropItemRate: "道具掉落量倍率",
+  FishingDifficultyRate: "钓鱼难度倍率",
   DeathPenalty: "死亡惩罚",
   bEnablePlayerToPlayerDamage: "启用玩家对玩家伤害",
   bEnableFriendlyFire: "启用友伤",
@@ -97,10 +99,11 @@ const CONFIG_LABELS: Record<string, string> = {
   BaseCampMaxNum: "全地图据点最大数量",
   BaseCampMaxNumInGuild: "公会的据点最大数量",
   BaseCampWorkerMaxNum: "可分配至据点工作的帕鲁数量上限",
-  MaxBuildingLimitNum: "每个玩家的建筑物最大数量",
+  MaxBuildingLimitNum: "建筑物数量上限",
+  MaxBuildingLimitNumPerPlayer: "每个玩家的建筑物数量上限",
   DropItemAliveMaxHours: "掉落物品存活最大小时数",
-  bAutoResetGuildNoOnlinePlayers: "自动重置无在线玩家的公会",
-  AutoResetGuildTimeNoOnlinePlayers: "自动重置无在线玩家的公会时间（小时）",
+  bAutoResetGuildNoOnlinePlayers: "自动重置无在线训练家的公会",
+  AutoResetGuildTimeNoOnlinePlayers: "自动重置无在线训练家的公会时间（小时）",
   GuildPlayerMaxNum: "公会玩家最大数量",
   PalEggDefaultHatchingTime: "巨大蛋孵化所需时间（小时）",
   WorkSpeedRate: "工作速率",
@@ -117,6 +120,7 @@ const CONFIG_LABELS: Record<string, string> = {
   bEnableDefenseOtherGuildPlayer: "启用据点内防御其他公会玩家",
   bInvisibleOtherGuildBaseCampAreaFX: "隐藏其他公会据点区域特效",
   bBuildAreaLimit: "建筑区域限制",
+  bAllowEnemyCampSpawnNearBaseCamp: "允许敌方营地在据点附近生成",
   ItemWeightRate: "物品重量倍率",
   ServerReplicatePawnCullDistance: "玩家与帕鲁同步距离",
   bShowPlayerList: "启用服务器内可以查看其他玩家列表",
@@ -161,12 +165,9 @@ const CONFIG_LABELS: Record<string, string> = {
 };
 
 const CONFIG_DESCRIPTIONS: Record<string, string> = {
-  AutoSaveSpan: "服务器自动保存世界的时间间隔。",
-  DeathPenalty: "决定玩家死亡时会掉落哪些物品。",
-  LogFormatType: "选择服务器日志文件的保存格式。",
-  RandomizerType: "决定随机化的作用范围。",
-  CrossplayPlatforms: "选择允许加入本服务器的平台。",
-  DenyTechnologyList: "选择需要从科技树中禁用的项目。",
+  FishingDifficultyRate: "调整钓鱼小游戏的难度，范围 0.1–1.0，默认 1.0。",
+  MaxBuildingLimitNumPerPlayer: "限制每位玩家可以建造的建筑物数量；0 表示不限制。",
+  bAllowEnemyCampSpawnNearBaseCamp: "开启后，敌方营地可以在玩家据点附近生成；默认关闭。",
 };
 
 type ConfigCategoryGroup = { id: ConfigCategoryId; tab: "panel" | "world"; label: string; description: string; keys: string[] };
@@ -182,8 +183,8 @@ const CONFIG_CATEGORY_GROUPS: ConfigCategoryGroup[] = [
   { id: "progression", tab: "world", label: "时间与成长", description: "昼夜、经验、捕捉、出现数量与工作速度", keys: ["DayTimeSpeedRate", "NightTimeSpeedRate", "ExpRate", "PalCaptureRate", "PalSpawnNumRate", "WorkSpeedRate"] },
   { id: "combat", tab: "world", label: "战斗", description: "玩家和帕鲁伤害、PvP、袭击与死亡惩罚", keys: ["PlayerDamageRateAttack", "PlayerDamageRateDefense", "PalDamageRateAttack", "PalDamageRateDefense", "bEnablePlayerToPlayerDamage", "bEnableFriendlyFire", "bIsPvP", "DeathPenalty", "bEnableInvaderEnemy", "EnablePredatorBossPal", "bHardcore", "bPalLost", "bCharacterRecreateInHardcore", "bCanPickupOtherGuildDeathPenaltyDrop", "bAdditionalDropItemWhenPlayerKillingInPvPMode", "AdditionalDropItemWhenPlayerKillingInPvPMode", "AdditionalDropItemNumWhenPlayerKillingInPvPMode"] },
   { id: "survival", tab: "world", label: "生存", description: "饱食度、耐力、生命恢复、孵化与重生", keys: ["PlayerStomachDecreaceRate", "PlayerStaminaDecreaceRate", "PlayerAutoHPRegeneRate", "PlayerAutoHpRegeneRateInSleep", "PalStomachDecreaceRate", "PalStaminaDecreaceRate", "PalAutoHPRegeneRate", "PalAutoHpRegeneRateInSleep", "PalEggDefaultHatchingTime", "bEnableNonLoginPenalty", "bExistPlayerAfterLogout", "BlockRespawnTime", "RespawnPenaltyDurationThreshold", "RespawnPenaltyTimeScale"] },
-  { id: "resources", tab: "world", label: "资源与掉落", description: "采集、掉落、重量、空投与耐久度", keys: ["CollectionDropRate", "CollectionObjectHpRate", "CollectionObjectRespawnSpeedRate", "EnemyDropItemRate", "ItemWeightRate", "DropItemMaxNum", "DropItemMaxNum_UNKO", "DropItemAliveMaxHours", "SupplyDropSpan", "EquipmentDurabilityDamageRate", "ItemContainerForceMarkDirtyInterval", "ItemCorruptionMultiplier", "PhysicsActiveDropItemMaxNum", "bActiveUNKO"] },
-  { id: "building", tab: "world", label: "建造与据点", description: "建筑耐久、建造限制、据点与防御规则", keys: ["BuildObjectHpRate", "BuildObjectDamageRate", "BuildObjectDeteriorationDamageRate", "MaxBuildingLimitNum", "bBuildAreaLimit", "BaseCampMaxNum", "BaseCampMaxNumInGuild", "BaseCampWorkerMaxNum", "bEnableDefenseOtherGuildPlayer", "bInvisibleOtherGuildBaseCampAreaFX", "bEnableBuildingPlayerUIdDisplay", "BuildingNameDisplayCacheTTLSeconds"] },
+  { id: "resources", tab: "world", label: "资源与掉落", description: "采集、钓鱼、掉落、重量、空投与耐久度", keys: ["CollectionDropRate", "CollectionObjectHpRate", "CollectionObjectRespawnSpeedRate", "EnemyDropItemRate", "FishingDifficultyRate", "ItemWeightRate", "DropItemMaxNum", "DropItemMaxNum_UNKO", "DropItemAliveMaxHours", "SupplyDropSpan", "EquipmentDurabilityDamageRate", "ItemContainerForceMarkDirtyInterval", "ItemCorruptionMultiplier", "PhysicsActiveDropItemMaxNum", "bActiveUNKO"] },
+  { id: "building", tab: "world", label: "建造与据点", description: "建筑耐久、建造限制、据点与防御规则", keys: ["BuildObjectHpRate", "BuildObjectDamageRate", "BuildObjectDeteriorationDamageRate", "MaxBuildingLimitNum", "MaxBuildingLimitNumPerPlayer", "bBuildAreaLimit", "bAllowEnemyCampSpawnNearBaseCamp", "BaseCampMaxNum", "BaseCampMaxNumInGuild", "BaseCampWorkerMaxNum", "bEnableDefenseOtherGuildPlayer", "bInvisibleOtherGuildBaseCampAreaFX", "bEnableBuildingPlayerUIdDisplay", "BuildingNameDisplayCacheTTLSeconds"] },
   { id: "guild", tab: "world", label: "公会与玩家", description: "公会人数、自动重置、归属转移与地图显示", keys: ["GuildPlayerMaxNum", "bAutoResetGuildNoOnlinePlayers", "AutoResetGuildTimeNoOnlinePlayers", "GuildRejoinCooldownMinutes", "AutoTransferMasterCheckIntervalSeconds", "AutoTransferMasterThresholdDays", "MaxGuildsPerFrame", "bDisplayPvPItemNumOnWorldMap_BaseCamp", "bDisplayPvPItemNumOnWorldMap_Player"] },
   { id: "worldRules", tab: "world", label: "世界规则", description: "传送、复活位置、瞄准辅助与其他规则", keys: ["bEnableFastTravel", "bEnableFastTravelOnlyBaseCamp", "bIsStartLocationSelectByMap", "bEnableAimAssistPad", "bEnableAimAssistKeyboard"] },
   { id: "performance", tab: "world", label: "高级性能", description: "同步距离、放牧和数据更新策略", keys: ["ServerReplicatePawnCullDistance", "PlayerDataPalStorageUpdateCheckTickInterval", "MonsterFarmActionSpeedRate"] },
@@ -191,13 +192,16 @@ const CONFIG_CATEGORY_GROUPS: ConfigCategoryGroup[] = [
   { id: "advanced", tab: "world", label: "高级字段", description: "版本化 schema 外的配置键", keys: [] },
 ];
 
-const COMMON_CONFIG_KEYS = [
-  "ServerName", "ServerDescription", "ServerPassword", "AdminPassword", "ServerPlayerMaxNum", "PublicPort", "Difficulty",
-  "ExpRate", "PalCaptureRate", "EnemyDropItemRate", "PalEggDefaultHatchingTime", "DayTimeSpeedRate", "NightTimeSpeedRate",
-  "PlayerDamageRateAttack", "PlayerDamageRateDefense", "PalDamageRateAttack", "PalDamageRateDefense",
-  "PlayerStomachDecreaceRate", "PlayerStaminaDecreaceRate", "PalStomachDecreaceRate", "PalStaminaDecreaceRate",
-  "DeathPenalty", "bIsPvP", "bEnablePlayerToPlayerDamage", "bEnableFriendlyFire",
-];
+const CONFIG_SECTIONS = [
+  { id: "basics", label: "基础与连接", title: "服务器基础信息与连接", icon: Globe },
+  { id: "runtime", label: "存档与性能", title: "存档、运行与性能", icon: HardDrive },
+  { id: "progression", label: "时间与成长", title: "时间流速与成长倍率", icon: TimerReset },
+  { id: "combat", label: "战斗与生存", title: "战斗、生存与角色状态", icon: Flame },
+  { id: "resources", label: "资源与掉落", title: "采集、掉落与物品规则", icon: Zap },
+  { id: "building", label: "据点与建造", title: "据点规模与建造规则", icon: Building2 },
+  { id: "guild", label: "公会与玩家", title: "公会管理与玩家规则", icon: Users },
+  { id: "rules", label: "世界规则与其他", title: "世界规则与其他高级配置", icon: Shield },
+] as const;
 
 const CONFIG_CATEGORY_BY_KEY: Record<string, ConfigCategoryId> = {};
 for (const group of CONFIG_CATEGORY_GROUPS) {
@@ -236,11 +240,13 @@ const CONFIG_NUMERIC_RANGES: Record<string, { min: number; max: number; step: nu
   CollectionObjectHpRate: { min: 0.5, max: 3, step: 0.1 },
   CollectionObjectRespawnSpeedRate: { min: 0.5, max: 5, step: 0.1 },
   EnemyDropItemRate: { min: 0.5, max: 5, step: 0.1 },
+  FishingDifficultyRate: { min: 0.1, max: 1, step: 0.1 },
   PalEggDefaultHatchingTime: { min: 0, max: 240, step: 0.1 },
   GuildPlayerMaxNum: { min: 1, max: 100, step: 1 },
   BaseCampMaxNumInGuild: { min: 1, max: 50, step: 1 },
   BaseCampWorkerMaxNum: { min: 1, max: 50, step: 1 },
   MaxBuildingLimitNum: { min: 0, max: 10000, step: 1 },
+  MaxBuildingLimitNumPerPlayer: { min: 0, max: 10000, step: 1 },
   SupplyDropSpan: { min: 0, max: 1000, step: 1 },
   ChatPostLimitPerMinute: { min: 0, max: 100, step: 1 },
   EquipmentDurabilityDamageRate: { min: 0.1, max: 5, step: 0.1 },
@@ -315,6 +321,18 @@ function configCategoryFor(key: string): ConfigCategoryId {
   return CONFIG_CATEGORY_BY_KEY[key] || "advanced";
 }
 
+function configSectionFor(key: string): ConfigSectionId {
+  const category = configCategoryFor(key);
+  if (["server", "network", "mods", "communication", "access"].includes(category)) return "basics";
+  if (["runtime", "performance"].includes(category)) return "runtime";
+  if (["progression", "random"].includes(category)) return "progression";
+  if (["combat", "survival"].includes(category)) return "combat";
+  if (category === "resources") return "resources";
+  if (category === "building") return "building";
+  if (["guild", "character"].includes(category)) return "guild";
+  return "rules";
+}
+
 function configLabelFor(key: string): string {
   return CONFIG_LABELS[key] || key;
 }
@@ -324,7 +342,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: "密码不会回显。输入新密码后保存草稿，再停服应用到游戏设置。",
+      description: "密码不会回显。",
       kind: "password",
     };
   }
@@ -333,7 +351,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: CONFIG_DESCRIPTIONS[key] || "可直接输入数值，也可以拖动进度条调整。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "number",
       ...range,
     };
@@ -342,7 +360,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: CONFIG_DESCRIPTIONS[key] || "从预设选项中选择配置值。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "select",
       options: CONFIG_SELECT_OPTIONS[key],
     };
@@ -351,7 +369,7 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: CONFIG_DESCRIPTIONS[key] || "可以同时选择多个配置项。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "multi-select",
       options: CONFIG_MULTI_OPTIONS[key],
     };
@@ -360,14 +378,14 @@ function configMetaFor(key: string, value: string): ConfigFieldMeta {
     return {
       key,
       label: configLabelFor(key),
-      description: "开启或关闭这项服务器规则。",
+      description: CONFIG_DESCRIPTIONS[key],
       kind: "boolean",
     };
   }
   return {
     key,
     label: configLabelFor(key),
-    description: "按原文本保存此配置值。",
+    description: CONFIG_DESCRIPTIONS[key],
     kind: "text",
   };
 }
@@ -449,14 +467,12 @@ function ConfigFieldEditor({
   sourceValue,
   modified,
   onChange,
-  onReset,
 }: {
   meta: ConfigFieldMeta;
   value: string;
   sourceValue: string;
   modified: boolean;
   onChange: (value: string) => void;
-  onReset: () => void;
 }) {
   const isCrossplayPlatforms = meta.key === "CrossplayPlatforms";
   const selectedValues = [...new Set(isCrossplayPlatforms ? configTupleValues(value) : configArrayValues(value))];
@@ -478,7 +494,7 @@ function ConfigFieldEditor({
           <code>{meta.key}</code>
           {modified && <span className="config-changed-badge">已修改</span>}
         </div>
-        <p>{meta.description}</p>
+        {meta.description && <p>{meta.description}</p>}
       </div>
       <div className={`config-field-control config-kind-${meta.kind}`}>
         {meta.kind === "number" && meta.min !== undefined && meta.max !== undefined && meta.step !== undefined && (
@@ -555,7 +571,6 @@ function ConfigFieldEditor({
         {meta.kind === "password" && <input className="config-text-input" type="password" autoComplete="new-password" value={configTextDisplayValue(value)} placeholder={sourceValue === "已配置" ? "已配置；输入新密码以覆盖" : "输入游戏管理员密码"} aria-label={meta.label} onChange={(event) => onChange(serializeConfigPassword(event.target.value))} />}
         {meta.kind === "text" && <input className="config-text-input" value={configTextDisplayValue(value)} aria-label={meta.label} onChange={(event) => onChange(serializeConfigTextValue(event.target.value, value))} />}
       </div>
-      <button className="config-reset-button" type="button" title="恢复原值" aria-label={`恢复${meta.label}原值`} onClick={onReset} disabled={meta.kind === "password" ? !value : value === sourceValue}><RotateCcw size={15} /></button>
     </div>
   );
 }
@@ -573,48 +588,51 @@ export function ConfigPage({
 }) {
   const [document, setDocument] = useState<ConfigDocument | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
-  const [diff, setDiff] = useState<{ hasDraft: boolean; conflict: Record<string, unknown> | null; text: string; fields: { key: string; current: string; draft: string }[] } | null>(null);
   const [query, setQuery] = useState("");
-  const [editorTab, setEditorTab] = useState<ConfigEditorTab>("common");
-  const [selectedCategory, setSelectedCategory] = useState<ConfigCategoryId>("server");
+  const [fileMode, setFileMode] = useState<ConfigFileMode>("ini");
+  const [targetMode, setTargetMode] = useState<ConfigTargetMode>("effective");
+  const [viewMode, setViewMode] = useState<"visual" | "raw">("visual");
+  const [selectedSection, setSelectedSection] = useState<ConfigSectionId>("basics");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const nextRequestSignal = useAbortableRequest();
-  const load = useCallback(async () => {
+  const load = useCallback(async (preferredMode?: ConfigFileMode) => {
     const signal = nextRequestSignal();
+    setError("");
     try {
-      const next = await requestJson<ConfigDocument>("/api/config/draft", { signal });
+      const next = await requestJson<ConfigDocument>("/api/config/current", { signal });
       setDocument(next);
-      const nextFields = { ...(next.draft?.fields || next.fields) };
+      const nextMode = preferredMode || (next.effectiveSource === "world-option" ? "world-option" : "ini");
+      setFileMode(nextMode);
+      const nextFields = { ...(nextMode === "world-option" ? next.worldOptionFields || {} : next.fields) };
       delete nextFields.AdminPassword;
       setFields(nextFields);
-      setDiff(await requestJson<typeof diff>("/api/config/diff", { signal }));
     } catch (caught) { if (!isAbortError(caught)) setError(caught instanceof Error ? caught.message : "配置读取失败"); }
   }, [nextRequestSignal]);
   useEffect(() => { void load(); }, [load]);
-  async function saveDraft(event: FormEvent) {
+  async function saveConfig(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError(""); setMessage("");
-    const fieldsToSave = { ...fields };
+    const fieldsToSave = Object.fromEntries(modifiedKeys.map((key) => [key, fields[key] || ""]));
     if (!fieldsToSave.AdminPassword) delete fieldsToSave.AdminPassword;
-    try { await requestJson("/api/config/draft", { method: "PUT", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ fields: fieldsToSave }) }); setMessage("配置草稿已保存，尚未写入真实 INI。"); await load(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : "草稿保存失败"); } finally { setBusy(false); }
+    const savingWorldOption = fileMode === "world-option";
+    try {
+      const result = await requestJson<{ message?: string; pending?: boolean; serverRunning?: boolean }>(savingWorldOption ? "/api/config/world-option" : "/api/config/ini", { method: "PUT", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ fields: fieldsToSave }) });
+      setMessage(result.message || `${savingWorldOption ? "WorldOption.sav" : "PalWorldSettings.ini"} 已保存。`);
+      await load(fileMode);
+      if (result.pending && result.serverRunning && window.confirm("PalServer 正在运行。配置已保存，将在关闭、重启或下次启动前自动应用。是否现在重启 PalServer？")) await restartForConfig(true);
+    }
+    catch (caught) { setError(caught instanceof Error ? caught.message : savingWorldOption ? "WorldOption.sav 保存失败" : "PalWorldSettings.ini 保存失败"); } finally { setBusy(false); }
   }
-  async function apply(force = false) {
-    if (!window.confirm(force ? "检测到外部修改，确认用当前草稿覆盖吗？" : "确认应用配置吗？PalServer 必须已停止。")) return;
+  async function restartForConfig(confirmed = false) {
+    if (!confirmed && !window.confirm("确认重启 PalServer 并应用已保存的配置吗？将先发送维护通知并保存世界。")) return;
     setBusy(true); setError("");
-    try { const result = await requestJson<{ message: string }>("/api/config/apply", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: JSON.stringify({ force }) }); setMessage(result.message); await load(); }
-    catch (caught) { setError(caught instanceof Error ? caught.message : "配置应用失败"); } finally { setBusy(false); }
-  }
-  async function restartApply() {
-    if (!window.confirm("确认停止并重启 PalServer 后应用草稿吗？将先发送维护通知并保存世界。")) return;
-    setBusy(true); setError("");
-    try { await requestJson("/api/config/apply-with-restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启并应用操作。"); }
+    try { await requestJson("/api/server/operations/restart", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "", "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ countdownSeconds: 30, message: "服务器将在 30 秒后重启并应用配置，请及时返回安全地点。" }) }); setMessage("已提交重启；配置会在 PalServer 再次启动前完成应用和回读校验。"); }
     catch (caught) { setError(caught instanceof Error ? caught.message : "重启应用失败"); } finally { setBusy(false); }
   }
-  async function openFolder() { try { await requestJson("/api/config/open-folder", { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
+  async function openFolder() { try { await requestJson(`/api/config/open-folder?kind=${fileMode}`, { method: "POST", headers: { "X-CSRF-Token": auth.csrfToken || "" }, body: "{}" }); setError(""); setMessage("已打开配置目录。"); } catch (caught) { setError(caught instanceof Error ? caught.message : "打开目录失败"); } }
   const workspaceTabs = <div className="config-workspace-tabs" role="tablist" aria-label="配置工作区">
-    <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />游戏配置</button>
+    <button className={workspace === "game" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "game"} onClick={() => onWorkspaceChange("game")}><FileCog size={18} />世界法则配置</button>
     <button className={workspace === "instance" ? "is-active" : ""} type="button" role="tab" aria-selected={workspace === "instance"} onClick={() => onWorkspaceChange("instance")}><ServerCog size={18} />实例与控制台</button>
   </div>;
   const consoleAndInstanceSettings = <section className="config-instance-workspace">
@@ -632,100 +650,96 @@ export function ConfigPage({
     </div>
   </section>;
   if (workspace === "instance") return <div className="page-stack config-page">{workspaceTabs}{consoleAndInstanceSettings}</div>;
-  if (!document) return <div className="page-stack config-page">{workspaceTabs}<section className="config-loading" aria-live="polite">{error ? <p className="form-error" role="alert">{error}</p> : <><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></>}</section></div>;
+  if (!document) return <div className="page-stack config-page">{workspaceTabs}{error ? <section className="config-load-error" role="alert"><AlertTriangle aria-hidden="true" /><div><h2>世界法则读取失败</h2><p>没有取得 PalWorldSettings.ini，尚未显示或修改任何配置。</p><code>{error}</code></div><button className="quiet-button" type="button" onClick={() => void load()}><RotateCw size={17} />重新读取世界法则</button></section> : <section className="config-loading" role="status" aria-label="正在读取世界法则" aria-busy="true"><span className="config-loading-line" /><span className="config-loading-line short" /><p className="muted">正在读取 PalWorldSettings.ini...</p></section>}</div>;
 
+  const activeSchema = fileMode === "world-option" ? document.worldOptionSchema || [] : document.schema;
   const allKeys = [
-    ...document.schema.filter((key) => key === "AdminPassword" || key in fields),
-    ...Object.keys(fields).filter((key) => !document.schema.includes(key)),
-  ];
+    ...activeSchema,
+    ...Object.keys(fields).filter((key) => !activeSchema.includes(key)),
+  ].filter((key) => key !== "Difficulty");
   const configOrder = new Map<string, number>();
   CONFIG_CATEGORY_GROUPS.forEach((group, groupIndex) => group.keys.forEach((key, keyIndex) => configOrder.set(key, groupIndex * 1000 + keyIndex)));
   const orderedKeys = [...allKeys].sort((left, right) => (configOrder.get(left) ?? Number.MAX_SAFE_INTEGER) - (configOrder.get(right) ?? Number.MAX_SAFE_INTEGER));
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const commonKeys = COMMON_CONFIG_KEYS.filter((key) => allKeys.includes(key));
-  const commonKeySet = new Set(commonKeys);
-  const advancedKeys = orderedKeys.filter((key) => !commonKeySet.has(key));
-  const activeGroups = CONFIG_CATEGORY_GROUPS.filter((group) => advancedKeys.some((key) => configCategoryFor(key) === group.id));
-  const visibleKeys = (editorTab === "common" ? commonKeys : advancedKeys).filter((key) => {
-    const inCategory = editorTab === "common" || Boolean(normalizedQuery) || configCategoryFor(key) === selectedCategory;
+  const visibleKeys = orderedKeys.filter((key) => {
+    const inCategory = Boolean(normalizedQuery) || configSectionFor(key) === selectedSection;
     const searchable = `${configLabelFor(key)} ${key} ${CONFIG_DESCRIPTIONS[key] || ""}`.toLocaleLowerCase();
     return inCategory && (!normalizedQuery || searchable.includes(normalizedQuery));
   });
-  const selectedGroup = activeGroups.find((group) => group.id === selectedCategory) || activeGroups[0] || CONFIG_CATEGORY_GROUPS[0];
-  const tabTotal = editorTab === "common" ? commonKeys.length : advancedKeys.length;
-  const baselineFields = document.draft?.fields || document.fields;
+  const baselineFields = fileMode === "world-option" ? document.worldOptionFields || {} : document.fields;
   const modifiedKeys = allKeys.filter((key) => key === "AdminPassword" ? Boolean(fields[key]) : (fields[key] || "") !== (baselineFields[key] || ""));
   const modifiedKeySet = new Set(modifiedKeys);
-  const draftFieldCount = diff?.fields.length || 0;
-  function switchEditorTab(tab: ConfigEditorTab) {
-    setEditorTab(tab);
-    setQuery("");
-    if (tab === "advanced") setSelectedCategory(activeGroups[0]?.id || "advanced");
-  }
   function discardWorkingChanges() {
     const nextFields = { ...baselineFields };
     delete nextFields.AdminPassword;
     setFields(nextFields);
   }
+  function switchFileMode(mode: ConfigFileMode) {
+    if (!document) return;
+    const nextFields = { ...(mode === "world-option" ? document.worldOptionFields || {} : document.fields) };
+    delete nextFields.AdminPassword;
+    setFileMode(mode);
+    setFields(nextFields);
+    setQuery("");
+    setMessage("");
+    setError("");
+  }
+  function switchTargetMode(mode: ConfigTargetMode) {
+    if (!document) return;
+    setTargetMode(mode);
+    switchFileMode(mode === "effective" ? document.effectiveSource || "ini" : mode);
+  }
+
+  const isWorldOption = fileMode === "world-option";
+  const activePath = isWorldOption ? document.worldOptionPath || "当前世界目录未绑定" : document.path;
+  const activePasswordConfigured = isWorldOption ? document.worldOptionAdminPasswordConfigured : document.adminPasswordConfigured;
+  const selectedConfigSection = CONFIG_SECTIONS.find((section) => section.id === selectedSection) || CONFIG_SECTIONS[0];
+  const SelectedSectionIcon = selectedConfigSection.icon;
+  const effectiveLabel = document.effectiveSource === "world-option"
+    ? "WorldOption.sav（优先于 PalWorldSettings.ini）"
+    : "PalWorldSettings.ini";
+  const targetLabel = targetMode === "effective"
+    ? effectiveLabel
+    : targetMode === "world-option"
+      ? "WorldOption.sav 存档世界规则"
+      : "PalWorldSettings.ini 标准服务器配置";
 
   return <div className="page-stack config-page">
     {workspaceTabs}
-    <section className="config-summary" aria-label="游戏配置状态">
-      <div className="config-file-summary"><div><h2>PalWorldSettings.ini</h2><p>{document.path}</p></div>{auth.local && <button className="quiet-button" type="button" onClick={() => void openFolder()}><FolderSearch size={17} />打开配置目录</button>}</div>
-      <div className="config-summary-items">
-        <span><small>管理员密码</small><strong className={document.adminPasswordConfigured ? "is-success" : "is-warning"}>{document.adminPasswordConfigured ? "已配置" : "未配置"}</strong></span>
-        <span><small>WorldOption.sav</small><strong className={document.worldOptionPresent ? "is-warning" : ""}>{document.worldOptionPresent ? "可能覆盖 INI" : "未检测到覆盖"}</strong></span>
-        <span><small>已保存草稿</small><strong>{diff?.hasDraft ? `${draftFieldCount} 项修改` : "无"}</strong></span>
-        <span><small>外部冲突</small><strong className={diff?.conflict ? "is-danger" : "is-success"}>{diff?.conflict ? "需要确认" : "未检测到"}</strong></span>
-      </div>
-    </section>
-    <div className="config-workflow" role="note"><strong>编辑 → 保存草稿 → 应用到服务器</strong><span>运行中的 PalServer 不会被实时写入；应用前必须停服，或使用“重启并应用”。</span></div>
-    {document.worldOptionPresent && <div className="warning-strip"><AlertTriangle size={19} /><span>检测到当前世界存在 WorldOption.sav，游戏内设置可能覆盖此 INI。仍可继续应用。</span></div>}
-    <form className="config-form" onSubmit={saveDraft}>
-      <section className="config-editor-shell">
-        <div className="config-editor-tabs" role="tablist" aria-label="配置设置类型">
-          <button className={editorTab === "common" ? "is-active" : ""} type="button" role="tab" aria-selected={editorTab === "common"} onClick={() => switchEditorTab("common")}>常用配置</button>
-          <button className={editorTab === "advanced" ? "is-active" : ""} type="button" role="tab" aria-selected={editorTab === "advanced"} onClick={() => switchEditorTab("advanced")}>高级配置</button>
+    <form className="config-law-form" onSubmit={saveConfig}>
+      <section className="config-law-banner" aria-label="世界法则配置状态">
+        <div className="config-law-banner-main">
+          <div className="config-law-title"><div><span aria-hidden="true">⚙️</span><h2>世界法则配置 (PalWorldSettings.ini &amp; WorldOption.sav)</h2></div><p>生效目标：<strong>{targetLabel}</strong><span className={document.worldOptionPresent ? "is-present" : ""}>WorldOption.sav {document.worldOptionPresent ? "已存在" : "未生成"}</span>{auth.local && <button type="button" title={activePath} onClick={() => void openFolder()}><FolderSearch size={13} />打开目录</button>}{modifiedKeys.length > 0 && <em>（{modifiedKeys.length} 项已暂存修改）</em>}</p></div>
+          <div className="config-law-actions">
+            <div className="config-law-view-toggle" role="tablist" aria-label="配置查看方式"><button className={viewMode === "visual" ? "is-active" : ""} type="button" role="tab" aria-selected={viewMode === "visual"} onClick={() => setViewMode("visual")}>可视化调节</button><button className={viewMode === "raw" ? "is-active" : ""} type="button" role="tab" aria-selected={viewMode === "raw"} onClick={() => setViewMode("raw")}>原始配置文本</button></div>
+            <button className="config-law-reset" type="button" disabled={busy || modifiedKeys.length === 0} onClick={discardWorkingChanges}><RotateCcw size={15} />撤销修改</button>
+            {document.pendingApply && <button className="config-law-restart" type="button" disabled={busy} onClick={() => void restartForConfig()}><RotateCw size={15} />立即重启并应用</button>}
+            <button className="config-law-save" disabled={busy || modifiedKeys.length === 0} type="submit"><Save size={15} />{busy ? "正在保存…" : "保存并应用法则"}</button>
+          </div>
         </div>
-        <div className="config-editor-toolbar">
-          {editorTab === "advanced" && <label className="config-search"><Search size={19} aria-hidden="true" /><input type="search" value={query} placeholder="搜索名称或配置键" aria-label="搜索名称或配置键" onChange={(event) => setQuery(event.target.value)} /></label>}
-          <span className="config-count">{normalizedQuery ? visibleKeys.length : tabTotal} 项配置</span>
-        </div>
-        <div className={editorTab === "advanced" ? "config-editor-layout" : "config-editor-layout common-config-layout"}>
-          {editorTab === "advanced" && <nav className="config-category-nav" aria-label="高级配置分类">
-            {activeGroups.map((group) => {
-              const count = advancedKeys.filter((key) => configCategoryFor(key) === group.id).length;
-              return <button key={group.id} className={selectedCategory === group.id && !normalizedQuery ? "is-active" : ""} type="button" onClick={() => { setSelectedCategory(group.id); setQuery(""); }}><span>{group.label}</span><small>{count}</small></button>;
-            })}
-          </nav>}
-          <div className="config-editor-main">
-            <header className="config-section-header"><div><h2>{normalizedQuery ? "匹配的配置" : editorTab === "common" ? "日常服务器规则" : selectedGroup.label}</h2><p>{normalizedQuery ? `共找到 ${visibleKeys.length} 项配置。` : editorTab === "common" ? "仅展示日常会调整的服务器规则；完整字段可从高级配置进入。" : selectedGroup.description}</p></div><span className="config-section-total">{visibleKeys.length} 项</span></header>
-            <div className="config-field-list">
-              {visibleKeys.map((key) => {
-                const meta = configMetaFor(key, fields[key] || "");
-                const sourceValue = key === "AdminPassword" ? (document.adminPasswordConfigured ? "已配置" : "未配置") : baselineFields[key] || "";
-                return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} modified={modifiedKeySet.has(key)} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} onReset={() => setFields((current) => {
-                  if (meta.kind === "password") {
-                    const next = { ...current };
-                    delete next[key];
-                    return next;
-                  }
-                  return { ...current, [key]: baselineFields[key] || "" };
-                })} />;
-              })}
-              {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>{editorTab === "common" ? "当前配置中没有可显示的常用字段。" : "没有找到匹配的配置。"}</p>{editorTab === "advanced" && <button className="quiet-button" type="button" onClick={() => { setQuery(""); setSelectedCategory(activeGroups[0]?.id || "advanced"); }}>清除搜索</button>}</div>}
-            </div>
+        <div className="config-law-target-strip">
+          <strong><Layers size={15} />配置目标与生效模式：</strong>
+          <div role="radiogroup" aria-label="配置目标">
+            <button className={targetMode === "effective" ? "is-active effective" : ""} type="button" role="radio" aria-checked={targetMode === "effective"} onClick={() => switchTargetMode("effective")}><Sparkles size={15} />当前有效配置（推荐）</button>
+            <button className={targetMode === "world-option" ? "is-active world-option" : ""} type="button" role="radio" aria-checked={targetMode === "world-option"} onClick={() => switchTargetMode("world-option")}><Database size={15} />WorldOption.sav 注入模式</button>
+            <button className={targetMode === "ini" ? "is-active ini" : ""} type="button" role="radio" aria-checked={targetMode === "ini"} onClick={() => switchTargetMode("ini")}><FileCode size={15} />仅 PalWorldSettings.ini</button>
           </div>
         </div>
       </section>
       {error && <p className="form-error" role="alert">{error}</p>}{message && <p className="form-success" role="status">{message}</p>}
-      <div className="config-action-bar"><div className="config-action-state"><strong>{modifiedKeys.length ? `${modifiedKeys.length} 项未保存修改` : document.draft ? "草稿已保存，等待应用" : "配置与已保存内容一致"}</strong><span>{modifiedKeys.length ? "先保存为草稿，不会立即写入真实 INI。" : document.draft ? `${draftFieldCount} 项草稿修改尚未应用到服务器。` : "修改字段后可保存为待应用草稿。"}</span></div><div className="config-toolbar">{modifiedKeys.length > 0 && <button className="quiet-button" type="button" disabled={busy} onClick={discardWorkingChanges}>放弃本次修改</button>}<button className="primary-button" disabled={busy || modifiedKeys.length === 0} type="submit"><Save size={18} />{busy ? "正在保存…" : modifiedKeys.length ? `保存 ${modifiedKeys.length} 项草稿` : "保存草稿"}</button>{document.draft && <><button className="quiet-button" type="button" disabled={busy || Boolean(diff?.conflict)} onClick={() => void apply(false)}>停服应用</button><button className="quiet-button" type="button" disabled={busy || Boolean(diff?.conflict)} onClick={() => void restartApply()}><RotateCw size={17} />{busy ? "正在提交…" : "重启并应用"}</button></>}</div></div>
+      {viewMode === "raw" ? <section className="config-law-raw"><header><strong>{isWorldOption ? "WorldOption.sav 解析结果" : "OptionSettings 原始文本"}</strong><span>只读展示磁盘最新配置</span></header><textarea readOnly rows={18} value={isWorldOption ? JSON.stringify(document.worldOptionFields || {}, null, 2) : document.rawText} aria-label="原始配置文本" /></section> : <div className="config-law-editor">
+        <nav className="config-law-sidebar" aria-label="世界法则分类">
+          {CONFIG_SECTIONS.map((section) => { const Icon = section.icon; return <button key={section.id} className={selectedSection === section.id && !normalizedQuery ? "is-active" : ""} type="button" onClick={() => { setSelectedSection(section.id); setQuery(""); }}><Icon size={16} /><span>{section.label}</span></button>; })}
+          <label className="config-law-search"><Search size={16} /><input type="search" value={query} placeholder="搜索配置项" aria-label="搜索名称或配置键" onChange={(event) => setQuery(event.target.value)} /></label>
+        </nav>
+        <section className="config-law-panel">
+          <header><h3><SelectedSectionIcon size={17} />{normalizedQuery ? "匹配的配置" : selectedConfigSection.title}</h3>{normalizedQuery && <span>{visibleKeys.length} 项</span>}</header>
+          <div className="config-law-field-grid">
+            {visibleKeys.map((key) => { const meta = configMetaFor(key, fields[key] || ""); const sourceValue = key === "AdminPassword" ? (activePasswordConfigured ? "已配置" : "未配置") : baselineFields[key] || ""; return <ConfigFieldEditor key={key} meta={meta} value={fields[key] || ""} sourceValue={sourceValue} modified={modifiedKeySet.has(key)} onChange={(value) => setFields((current) => ({ ...current, [key]: value }))} />; })}
+            {!visibleKeys.length && <div className="config-empty-results"><Search size={22} /><p>没有找到匹配的配置。</p>{normalizedQuery && <button className="quiet-button" type="button" onClick={() => setQuery("")}>清除搜索</button>}</div>}
+          </div>
+        </section>
+      </div>}
     </form>
-    {diff?.hasDraft && <section className={diff.conflict ? "config-diff conflict" : "config-diff"}><div className="section-heading"><div><h2>草稿差异</h2><p>{diff.conflict ? "检测到外部修改，应用前必须确认覆盖。" : "以下草稿尚未写入真实 INI。"}</p></div>{diff.conflict && <button className="danger-button" type="button" disabled={busy} onClick={() => void apply(true)}>确认覆盖外部修改</button>}</div>{diff.fields.length ? <div className="config-diff-table"><div className="config-diff-head"><span>配置项</span><span>当前值</span><span>草稿值</span></div>{diff.fields.map((item) => <div className="config-diff-row" key={item.key}><strong>{configLabelFor(item.key)}<small>{item.key}</small></strong><span>{displayDiffValue(item.key, item.current)}</span><span>{displayDiffValue(item.key, item.draft)}</span></div>)}</div> : <p className="muted">字段值有变化，但没有可显示的字段摘要。</p>}<details className="config-raw-diff"><summary>查看原始差异</summary><pre>{diff.text || "文本差异为空。"}</pre></details></section>}
   </div>;
-}
-
-function displayDiffValue(key: string, value: string): string {
-  if (key === "AdminPassword") return "••••••";
-  return value || "（空）";
 }

@@ -45,7 +45,7 @@ export function resolvePal(source: PalSource): PalPresentation {
   const characterId = textValue(source.characterId);
   const nickname = textValue(source.nickname);
   const catalogEntry = PAL_CATALOG[characterId] || PAL_CATALOG_CASE_INSENSITIVE[characterId.toLocaleLowerCase("en-US")];
-  const speciesName = catalogEntry?.name || characterId || "未知帕鲁";
+  const speciesName = catalogEntry?.name || "未知帕鲁";
   return {
     characterId: characterId || "未知",
     displayName: nickname || speciesName,
@@ -55,13 +55,21 @@ export function resolvePal(source: PalSource): PalPresentation {
     icon: catalogEntry?.icon || UNKNOWN_PAL_ICON,
     known: Boolean(catalogEntry),
     gender: genderValue(source.gender),
-    rank: numberValue(source.rank),
+    rank: condensationStars(numberValue(source.rank)),
     isBoss: booleanValue(source.isBoss) || /^(BOSS_|GYM_)|Boss$/i.test(characterId),
     isPredator: booleanValue(source.isPredator) || /^PREDATOR_/i.test(characterId),
     isLucky: booleanValue(source.isLucky),
     isAwakened: booleanValue(source.isAwakened),
     isImported: booleanValue(source.isImported),
   };
+}
+
+export function matchingPalCharacterIds(search: string): string[] {
+  const normalized = search.trim().toLocaleLowerCase("zh-CN");
+  if (!normalized) return [];
+  return Object.entries(PAL_CATALOG)
+    .filter(([, entry]) => [entry.name, entry.englishName].some((name) => name.trim().toLocaleLowerCase("zh-CN") === normalized))
+    .map(([characterId]) => characterId);
 }
 
 export function palTraitLabels(source: PalSource): string[] {
@@ -85,8 +93,14 @@ function textValue(value: unknown): string {
 }
 
 function numberValue(value: unknown): number | null {
+  if (value === null || value === undefined || (typeof value === "string" && !value.trim())) return null;
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function condensationStars(rank: number | null): number | null {
+  if (rank === null) return 0;
+  return Number.isInteger(rank) && rank >= 1 && rank <= 5 ? rank - 1 : null;
 }
 
 function booleanValue(value: unknown): boolean {

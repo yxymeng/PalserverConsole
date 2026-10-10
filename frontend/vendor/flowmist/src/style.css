@@ -1,0 +1,7 @@
+.flowmist {position:relative;isolation:isolate;overflow:hidden;min-width:0;height:72px;border-radius:999px;background:#fff;color:#34343b;box-shadow:0 18px 24px -16px #0005,inset 0 0 0 1px #fff;font-family:system-ui,sans-serif}
+.flowmist canvas {display:block;width:100%;height:100%}
+.flowmist::after {content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;box-shadow:inset 0 1px 1px #fff,inset 0 -1px 2px #ffffffd0}
+.flowmist-label,.flowmist-value {position:absolute;top:50%;transform:translateY(-50%);pointer-events:none;font-size:14px;line-height:1.4;background:#ffffffb3;border-radius:6px;padding:2px 6px}
+.flowmist-label {left:6%;max-width:65%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.flowmist-value {right:6%;font-variant-numeric:tabular-nums}
+.flowmist-fallback {height:100%;background:#c7c2e8}

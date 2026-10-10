@@ -1,26 +1,41 @@
 from __future__ import annotations
 
-import difflib
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
+import threading
 import time
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import cast
 
+from palworld_save_tools.gvas import GvasFile
+
 from .config import ProfileError, ServerProfile
 from .control import ControlLock, create_control_lock
+from .monitoring import MonitoringConfigError, read_admin_password
 from .persistence import Database
 from .steam import assert_no_reparse_points, validate_executable
+from .world_option import (
+    WORLD_OPTION_KEYS,
+    create_world_option,
+    default_world_option_fields,
+    read_world_option,
+    serialize_world_option,
+    update_world_option,
+)
 
 SCHEMA_SOURCE = (
-    "Palworld official configuration guide (checked 2026-08-06) + Bluefissure/pal-conf main"
+    "Palworld official configuration guide + 1.0.4 default INI "
+    "(checked 2026-09-29) + Bluefissure/pal-conf main"
 )
+logger = logging.getLogger(__name__)
 
 # Keep the upstream field order. New fields are still preserved as unknown fields.
 SCHEMA_FIELDS: tuple[str, ...] = (
@@ -67,6 +82,7 @@ SCHEMA_FIELDS: tuple[str, ...] = (
     "CollectionObjectHpRate",
     "CollectionObjectRespawnSpeedRate",
     "EnemyDropItemRate",
+    "FishingDifficultyRate",
     "PalEggDefaultHatchingTime",
     "bEnableInvaderEnemy",
     "EnablePredatorBossPal",
@@ -75,6 +91,7 @@ SCHEMA_FIELDS: tuple[str, ...] = (
     "BaseCampMaxNumInGuild",
     "BaseCampWorkerMaxNum",
     "MaxBuildingLimitNum",
+    "MaxBuildingLimitNumPerPlayer",
     "SupplyDropSpan",
     "ChatPostLimitPerMinute",
     "EquipmentDurabilityDamageRate",
@@ -107,6 +124,7 @@ SCHEMA_FIELDS: tuple[str, ...] = (
     "bEnableDefenseOtherGuildPlayer",
     "bInvisibleOtherGuildBaseCampAreaFX",
     "bBuildAreaLimit",
+    "bAllowEnemyCampSpawnNearBaseCamp",
     "ServerReplicatePawnCullDistance",
     "bShowPlayerList",
     "bAllowGlobalPalboxExport",
@@ -144,8 +162,8 @@ SCHEMA_FIELDS: tuple[str, ...] = (
 )
 SECRET_FIELDS = frozenset({"AdminPassword"})
 MASKED_SECRET_VALUES = frozenset({"已配置", "未配置"})
-MAX_CONFIG_DRAFT_BYTES = 64 * 1024
-MAX_CONFIG_DRAFT_FIELDS = 128
+MAX_CONFIG_SAVE_BYTES = 64 * 1024
+MAX_CONFIG_SAVE_FIELDS = 128
 MAX_CONFIG_FIELD_KEY_LENGTH = 128
 MAX_CONFIG_FIELD_VALUE_LENGTH = 4096
 _FIELD_KEY_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -180,6 +198,7 @@ BOOL_FIELDS = frozenset(
         "bEnableDefenseOtherGuildPlayer",
         "bInvisibleOtherGuildBaseCampAreaFX",
         "bBuildAreaLimit",
+        "bAllowEnemyCampSpawnNearBaseCamp",
         "bShowPlayerList",
         "bAllowGlobalPalboxExport",
         "bAllowGlobalPalboxImport",
@@ -353,7 +372,7 @@ def _render_verified(raw: str, fields: dict[str, str], order: list[str]) -> str:
     rendered = _replace_option(raw, fields, order)
     parsed_fields, parsed_order, _ = _parse_document(rendered)
     if parsed_fields != fields or parsed_order != _ordered_keys(fields, order):
-        raise ConfigError("CONFIG_SERIALIZATION_FAILED", "配置序列化后的内容与草稿不一致。")
+        raise ConfigError("CONFIG_SERIALIZATION_FAILED", "配置序列化后的内容与保存内容不一致。")
     return rendered
 
 
@@ -366,21 +385,21 @@ def _reject_duplicate_json_keys(pairs: list[tuple[str, object]]) -> dict[str, ob
     return result
 
 
-def parse_draft_request(body: bytes) -> dict[str, str]:
-    if len(body) > MAX_CONFIG_DRAFT_BYTES:
-        raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置草稿请求超过大小限制。")
+def parse_config_request(body: bytes) -> dict[str, str]:
+    if len(body) > MAX_CONFIG_SAVE_BYTES:
+        raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置保存请求超过大小限制。")
     try:
         payload = json.loads(body.decode("utf-8"), object_pairs_hook=_reject_duplicate_json_keys)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ConfigError(
-            "CONFIG_INVALID_REQUEST", "配置草稿必须是有效的 UTF-8 JSON 对象。"
+            "CONFIG_INVALID_REQUEST", "配置保存请求必须是有效的 UTF-8 JSON 对象。"
         ) from error
     if not isinstance(payload, dict) or set(payload) != {"fields"}:
-        raise ConfigError("CONFIG_INVALID_REQUEST", "配置草稿只能包含 fields 对象。")
+        raise ConfigError("CONFIG_INVALID_REQUEST", "配置保存请求只能包含 fields 对象。")
     fields = payload["fields"]
     if not isinstance(fields, dict):
         raise ConfigError("CONFIG_INVALID_REQUEST", "fields 必须是对象。")
-    if len(fields) > MAX_CONFIG_DRAFT_FIELDS:
+    if len(fields) > MAX_CONFIG_SAVE_FIELDS:
         raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置字段数量超过限制。")
     if not all(isinstance(key, str) and isinstance(value, str) for key, value in fields.items()):
         raise ConfigError("CONFIG_INVALID_REQUEST", "配置字段和值必须是字符串。")
@@ -431,6 +450,14 @@ def _normalise_text(key: str, value: str) -> str:
     if any(ord(char) < 0x20 for char in text):
         raise _invalid_value(key)
     return json.dumps(text, ensure_ascii=False)
+
+
+def _text_value_configured(value: str) -> bool:
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return bool(value)
+    return bool(decoded) if isinstance(decoded, str) else bool(value)
 
 
 def _normalise_tuple(key: str, value: str) -> str:
@@ -500,7 +527,7 @@ def _normalise_schema_value(key: str, value: str) -> str:
         return _normalise_tuple(key, value)
     if key in TEXT_FIELDS:
         return _normalise_text(key, value)
-    return _normalise_number(key, value, integer=False)
+    return _normalise_number(key, value, integer=key == "MaxBuildingLimitNumPerPlayer")
 
 
 def _normalise_admin_password(value: str) -> str:
@@ -548,6 +575,35 @@ class ConfigService:
         self.profile_provider = profile_provider
         self.control_lock = control_lock or create_control_lock()
         self.admin_password_rotation_callback = admin_password_rotation_callback
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._watch_pending, daemon=True)
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+
+    def _watch_pending(self) -> None:
+        last_error: str | None = None
+        while not self._stop.is_set():
+            try:
+                row = self.database.get_config_draft()
+                if row and row["state"] in {"pending-ini", "pending-world-option"}:
+                    with self.control_lock:
+                        if not self._stop.is_set() and not self.running():
+                            self._apply_pending_exclusive()
+                last_error = None
+            except Exception as error:
+                code = getattr(error, "code", type(error).__name__)
+                if code != last_error:
+                    logger.warning("pending configuration apply blocked: %s", code)
+                last_error = str(code)
+            self._stop.wait(1)
 
     def path(self) -> Path:
         if self.profile_provider is not None:
@@ -596,6 +652,11 @@ class ConfigService:
         self._assert_path_safe(folder)
         return folder
 
+    def world_option_folder_path(self) -> Path:
+        path = self._world_option_path(required=True)
+        assert path is not None
+        return path.parent
+
     def _read(
         self, path: Path | None = None
     ) -> tuple[Path, str, FileVersion, dict[str, str], list[str]]:
@@ -612,109 +673,266 @@ class ConfigService:
 
     def current(self) -> dict[str, object]:
         path, raw, version, fields, order = self._read()
-        result = self._payload(path, raw, version, fields, order, draft=False)
-        result["worldOptionPresent"] = self._world_option_present()
+        result = self._payload(path, raw, version, fields, order)
+        world_option_path = self._world_option_path()
+        world_option_present = bool(world_option_path and world_option_path.is_file())
+        result["worldOptionPath"] = str(world_option_path) if world_option_path else None
+        result["worldOptionPresent"] = world_option_present
+        result["effectiveSource"] = "world-option" if world_option_present else "ini"
+        world_schema = [key for key in SCHEMA_FIELDS if key in WORLD_OPTION_KEYS]
+        result["worldOptionSchema"] = world_schema
+        world_fields = default_world_option_fields()
+        if world_option_present and world_option_path is not None:
+            try:
+                _, _, saved_world_fields = read_world_option(world_option_path)
+            except ValueError as error:
+                raise ConfigError("WORLD_OPTION_READ_FAILED", str(error)) from error
+            world_fields.update(saved_world_fields)
+        else:
+            world_fields.update({
+                key: value for key, value in fields.items() if key in WORLD_OPTION_KEYS
+            })
+        world_fields = {key: world_fields[key] for key in world_schema}
+        world_password = world_fields.get("AdminPassword", "")
+        world_password_configured = _text_value_configured(world_password)
+        if "AdminPassword" in world_fields:
+            world_fields["AdminPassword"] = (
+                "已配置" if world_password_configured else "未配置"
+            )
+        result["worldOptionFields"] = world_fields
+        result["worldOptionAdminPasswordConfigured"] = world_password_configured
+        row = self.database.get_config_draft()
+        pending_path = Path(str(row["draft_path"])) if row else None
+        pending_state = str(row["state"]) if row else ""
+        result["pendingApply"] = (
+            {
+                "kind": "world-option" if pending_state == "pending-world-option" else "ini",
+                "updatedAt": row["updated_at"],
+            }
+            if row
+            and pending_state in {"pending-ini", "pending-world-option"}
+            and pending_path
+            and pending_path.is_file()
+            else None
+        )
         return result
 
-    def draft(self) -> dict[str, object]:
-        current = self.current()
-        row = self.database.get_config_draft()
-        if row is None:
-            current["draft"] = None
-            return current
-        draft_path = Path(str(row["draft_path"]))
-        if not draft_path.is_file():
-            current["draft"] = None
-            return current
-        _, raw, version, fields, order = self._read(draft_path)
-        draft_payload = self._payload(draft_path, raw, version, fields, order, draft=True)
-        draft_payload["state"] = row["state"]
-        draft_payload["conflict"] = (
-            json.loads(str(row["conflict_json"])) if row["conflict_json"] else None
-        )
-        current["draft"] = draft_payload
-        return current
+    def save_ini(self, fields: dict[str, str]) -> dict[str, object]:
+        with self.control_lock:
+            target, raw, _, original, order = self._read()
+            changes = self._validate_updates(fields, original)
+            updates, baseline = self._pending_updates("pending-ini", target, set(changes))
+            updates.update(changes)
+            baseline.update({key: original.get(key) for key in changes})
+            _render_verified(raw, {**original, **updates}, order)
+            self._save_pending_updates("pending-ini", updates, target, baseline)
+            if self.running():
+                return {
+                    "message": "配置已保存，PalServer 关闭、重启或下次启动时会自动应用。",
+                    "pending": True,
+                    "serverRunning": True,
+                }
+            result = self._apply_pending_exclusive()
+            result.update({"pending": False, "serverRunning": False, "path": str(target)})
+            return result
 
-    def save_draft(self, fields: dict[str, str]) -> dict[str, object]:
-        _, raw, source, original, order = self._read()
-        merged = dict(original)
-        updates = self._validate_updates(fields, original)
-        pending = self.data_dir / "pending" / "PalWorldSettings.ini"
-        if "AdminPassword" not in updates:
-            pending_password = self._pending_admin_password(pending)
-            if pending_password is not None:
-                merged["AdminPassword"] = pending_password
-        merged.update(updates)
-        pending.parent.mkdir(parents=True, exist_ok=True)
-        pending.write_text(_render_verified(raw, merged, order), encoding="utf-8", newline="")
-        self.database.save_config_draft(str(pending), source.sha256, source.mtime_ns, "draft", None)
-        return self.draft()
+    def save_world_option(self, fields: dict[str, str]) -> dict[str, object]:
+        with self.control_lock:
+            target = self._world_option_path(required=True)
+            assert target is not None
+            self._assert_path_safe(target)
+            if not target.parent.is_dir():
+                raise ConfigError("WORLD_PATH_UNAVAILABLE", "当前世界存档目录不存在。")
 
-    def diff(self) -> dict[str, object]:
-        current = self.current()
-        draft = cast(dict[str, object] | None, self.draft().get("draft"))
-        if not draft:
-            return {"hasDraft": False, "conflict": None, "text": "", "fields": []}
-        current_raw = str(current["rawText"])
-        draft_raw = str(draft["rawText"])
-        row = self.database.get_config_draft()
-        conflict = self._conflict(row)
-        current_fields: object = current["fields"]
-        draft_fields: object = draft["fields"]
-        if row is not None:
-            _, _, _, current_fields, _ = self._read()
-            _, _, _, draft_fields, _ = self._read(Path(str(row["draft_path"])))
-        return {
-            "hasDraft": True,
-            "conflict": conflict,
-            "text": "".join(
-                difflib.unified_diff(
-                    current_raw.splitlines(True),
-                    draft_raw.splitlines(True),
-                    fromfile="当前",
-                    tofile="草稿",
+            unsupported = set(fields) - (WORLD_OPTION_KEYS & SCHEMA_FIELD_SET)
+            if unsupported:
+                key = sorted(unsupported)[0]
+                raise ConfigError(
+                    "WORLD_OPTION_UNSUPPORTED_FIELD", f"WorldOption.sav 不支持字段 {key}。"
                 )
-            ),
-            "fields": self._field_diff(current_fields, draft_fields),
+            gvas, save_type, original = self._world_option_document(target)
+            changes = self._validate_updates(fields, original)
+            updates, baseline = self._pending_updates("pending-world-option", target, set(changes))
+            updates.update(changes)
+            baseline.update({key: original.get(key) for key in changes})
+            try:
+                update_world_option(gvas, updates)
+                serialize_world_option(gvas, save_type)
+            except (OSError, ValueError, TypeError) as error:
+                raise ConfigError(
+                    "WORLD_OPTION_WRITE_FAILED", f"生成 WorldOption.sav 失败: {error}"
+                ) from error
+            self._save_pending_updates("pending-world-option", updates, target, baseline)
+            if self.running():
+                return {
+                    "message": "配置已保存，PalServer 关闭、重启或下次启动时会自动应用。",
+                    "pending": True,
+                    "serverRunning": True,
+                }
+            result = self._apply_pending_exclusive()
+            result.update({"pending": False, "serverRunning": False, "path": str(target)})
+            return result
+
+    def _world_option_document(self, target: Path) -> tuple[GvasFile, int, dict[str, str]]:
+        original = default_world_option_fields()
+        if target.is_file():
+            try:
+                gvas, save_type, saved = read_world_option(target)
+            except ValueError as error:
+                raise ConfigError("WORLD_OPTION_READ_FAILED", str(error)) from error
+            original.update(saved)
+        else:
+            _, _, _, ini_fields, _ = self._read()
+            original.update({
+                key: value for key, value in ini_fields.items() if key in WORLD_OPTION_KEYS
+            })
+            try:
+                gvas, save_type = create_world_option(target.parent / "Level.sav", original)
+            except ValueError as error:
+                raise ConfigError("WORLD_OPTION_CREATE_FAILED", str(error)) from error
+        return gvas, save_type, original
+
+    def _pending_target(self, target: Path) -> dict[str, str | None]:
+        world_option = self._world_option_path()
+        return {
+            "path": os.path.normcase(str(target.resolve())),
+            "worldPath": os.path.normcase(str(world_option.parent)) if world_option else None,
         }
 
-    def apply(self, *, force: bool = False) -> dict[str, object]:
-        with self.control_lock:
-            return self._apply_exclusive(force=force)
+    def _pending_updates(
+        self, state: str, target: Path, resaved_keys: set[str],
+    ) -> tuple[dict[str, str], dict[str, str | None]]:
+        row = self.database.get_config_draft()
+        if row and row["state"] == state:
+            pending = Path(str(row["draft_path"]))
+            if pending.is_file():
+                return self._read_pending_updates(pending, target, resaved_keys=resaved_keys)
+        return {}, {}
 
-    def _apply_exclusive(self, *, force: bool) -> dict[str, object]:
+    def _read_pending_updates(
+        self, pending: Path, target: Path, *, resaved_keys: set[str] | None = None,
+    ) -> tuple[dict[str, str], dict[str, str | None]]:
+        if pending.suffix != ".json":
+            if resaved_keys is None or pending.suffix not in {".ini", ".sav"}:
+                raise ConfigError(
+                    "CONFIG_PENDING_RESAVE_REQUIRED",
+                    "旧版待应用配置缺少修改项或目标记录，请读取最新配置后重新保存。",
+                )
+            if pending.suffix == ".ini":
+                legacy, current = self._read(pending)[3], self._read(target)[3]
+            else:
+                legacy = self._world_option_document(pending)[2]
+                current = self._world_option_document(target)[2]
+            unresolved = {
+                key for key, value in legacy.items()
+                if current.get(key) != value and key not in resaved_keys
+            }
+            if unresolved:
+                raise ConfigError(
+                    "CONFIG_PENDING_RESAVE_REQUIRED",
+                    "旧版待应用配置仍有未重新保存的差异，原草稿已保留。"
+                    f"请读取最新配置后重新保存这些字段：{', '.join(sorted(unresolved))}。",
+                )
+            return {}, {}
+        try:
+            payload = json.loads(
+                pending.read_text(encoding="utf-8"),
+                object_pairs_hook=_reject_duplicate_json_keys,
+            )
+        except OSError as error:
+            raise ConfigError("CONFIG_PENDING_NOT_FOUND", "无法读取待应用配置。") from error
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ConfigError(
+                "CONFIG_INVALID_REQUEST", "待应用配置不是有效的 UTF-8 JSON。"
+            ) from error
+        if not isinstance(payload, dict):
+            raise ConfigError(
+                "CONFIG_PENDING_RESAVE_REQUIRED",
+                "旧版待应用配置缺少目标记录，请读取最新配置后重新保存。",
+            )
+        binding = payload.pop("target", None)
+        if binding is not None and binding != self._pending_target(target):
+            raise ConfigError(
+                "CONFIG_PENDING_TARGET_MISMATCH",
+                "待应用配置属于其他世界或安装目录，未写入。"
+                "请切回原世界应用，再保存当前世界的修改。",
+            )
+        baseline = payload.pop("baseline", None)
+        updates = parse_config_request(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        if (
+            binding is None or not isinstance(baseline, dict) or set(baseline) != set(updates)
+            or any(value is not None and not isinstance(value, str) for value in baseline.values())
+        ):
+            if resaved_keys is None or set(updates) - resaved_keys:
+                raise ConfigError(
+                    "CONFIG_PENDING_RESAVE_REQUIRED",
+                    "旧版待应用配置缺少字段冲突基准或目标记录，原草稿已保留。"
+                    f"请读取最新配置后重新保存全部待应用字段：{', '.join(updates)}。",
+                )
+            baseline = {}
+        return updates, baseline
+
+    def _save_pending_updates(
+        self, state: str, updates: dict[str, str], target: Path, baseline: dict[str, str | None],
+    ) -> None:
+        row = self.database.get_config_draft()
+        if (
+            row and row["state"] in {"pending-ini", "pending-world-option"}
+            and row["state"] != state
+        ):
+            raise ConfigError(
+                "CONFIG_PENDING_TARGET_CONFLICT",
+                "另一配置文件已有待应用修改，请先关闭或重启服务器应用，再保存此文件。"
+                "原待应用修改已保留。",
+            )
+        pending = self.data_dir / "pending" / f"{state}.json"
+        pending.parent.mkdir(parents=True, exist_ok=True)
+        parse_config_request(json.dumps({"fields": updates}, ensure_ascii=False).encode("utf-8"))
+        payload = json.dumps(
+            {"fields": updates, "target": self._pending_target(target), "baseline": baseline},
+            ensure_ascii=False,
+        ).encode("utf-8")
+        temp = pending.with_suffix(".tmp")
+        temp.write_bytes(payload)
+        os.replace(temp, pending)
+        self.database.save_config_draft(str(pending), "", 0, state, None)
+        if row and Path(str(row["draft_path"])) != pending:
+            self._clear_pending_file(row)
+
+    def apply_pending(self) -> dict[str, object]:
+        with self.control_lock:
+            return self._apply_pending_exclusive()
+
+    def _apply_pending_exclusive(self) -> dict[str, object]:
         if self.running():
             raise ConfigError(
-                "SERVER_RUNNING", "PalServer 运行中不能写入真实 INI，请先停止服务器。"
+                "SERVER_RUNNING", "PalServer 运行中不能应用配置，请先停止服务器。"
             )
-        target, _, _, original, order = self._read()
         row = self.database.get_config_draft()
-        if row is None:
-            raise ConfigError("CONFIG_DRAFT_NOT_FOUND", "没有待应用配置草稿。")
-        conflict = self._conflict(row)
-        if conflict and not force:
-            self.database.update_config_draft_state(
-                "conflict", json.dumps(conflict, ensure_ascii=False)
-            )
-            raise ConfigError(
-                "CONFIG_CONFLICT", "检测到 PalWorldSettings.ini 已被外部修改，请先查看差异。"
-            )
-        draft_path = Path(str(row["draft_path"]))
-        try:
-            draft_raw = draft_path.read_text(encoding="utf-8-sig")
-        except OSError as error:
-            raise ConfigError("CONFIG_DRAFT_NOT_FOUND", f"无法读取配置草稿: {error}") from error
-        self._validate_pending_document(draft_raw, original, order)
-        draft_fields, _, _ = _parse_document(draft_raw)
-        admin_password_changed = self._admin_password_changed(original, draft_fields)
-        backup = target.with_name(f"{target.name}.{time.strftime('%Y%m%d-%H%M%S')}.bak")
+        if row is None or row["state"] not in {"pending-ini", "pending-world-option"}:
+            return {"message": "没有待应用配置。", "applied": False, "backupPath": None}
+        if self.database.restore_recovery_active():
+            raise ConfigError("RESTORE_RECOVERY_REQUIRED", "未完成的恢复事务阻止配置应用。")
+        pending = Path(str(row["draft_path"]))
+        if row["state"] == "pending-world-option":
+            return self._apply_pending_world_option(pending)
+        return self._apply_pending_ini(pending)
+
+    def _apply_pending_ini(self, pending: Path) -> dict[str, object]:
+        target, raw, _, original, order = self._read()
+        updates, baseline = self._read_pending_updates(pending, target)
+        self._check_pending_conflicts(updates, baseline, original)
+        updates = self._validate_updates(updates, original)
+        pending_raw = _render_verified(raw, {**original, **updates}, order)
+        password_before = self._effective_admin_password()
+        backup = self._backup_path(target)
         self._assert_path_safe(target)
         self._assert_path_safe(backup)
         shutil.copy2(target, backup)
         temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
         try:
             self._assert_path_safe(temp)
-            temp.write_text(draft_raw, encoding="utf-8", newline="")
+            temp.write_text(pending_raw, encoding="utf-8", newline="")
             self._assert_path_safe(target)
             self._assert_path_safe(temp)
             os.replace(temp, target)
@@ -724,11 +942,84 @@ class ConfigService:
             raise ConfigError(
                 "CONFIG_WRITE_FAILED", f"写入 PalWorldSettings.ini 失败: {error}"
             ) from error
+        if _version(target).sha256 != hashlib.sha256(pending_raw.encode("utf-8")).hexdigest():
+            raise ConfigError("CONFIG_VERIFY_FAILED", "PalWorldSettings.ini 写入后回读校验失败。")
         self.database.clear_config_draft()
+        pending.unlink(missing_ok=True)
         self.database.set_setting("config.last_backup", str(backup))
-        if admin_password_changed and self.admin_password_rotation_callback is not None:
-            self.admin_password_rotation_callback()
-        return {"message": "PalWorldSettings.ini 已原子替换。", "backupPath": str(backup)}
+        self._revoke_changed_password(password_before)
+        return {
+            "message": "PalWorldSettings.ini 已保存并应用。",
+            "applied": True,
+            "kind": "ini",
+            "backupPath": str(backup),
+        }
+
+    def _apply_pending_world_option(self, pending: Path) -> dict[str, object]:
+        target = self._world_option_path(required=True)
+        assert target is not None
+        updates, baseline = self._read_pending_updates(pending, target)
+        gvas, save_type, original = self._world_option_document(target)
+        self._check_pending_conflicts(updates, baseline, original)
+        try:
+            update_world_option(gvas, self._validate_updates(updates, original))
+            payload = serialize_world_option(gvas, save_type)
+        except (OSError, ValueError) as error:
+            raise ConfigError(
+                "WORLD_OPTION_VERIFY_FAILED", f"待应用 WorldOption.sav 校验失败: {error}"
+            ) from error
+        password_before = self._effective_admin_password()
+        backup: Path | None = None
+        if target.is_file():
+            backup = self._backup_path(target)
+            self._assert_path_safe(backup)
+            shutil.copy2(target, backup)
+        temp = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+        try:
+            self._assert_path_safe(temp)
+            temp.write_bytes(payload)
+            self._assert_path_safe(target)
+            os.replace(temp, target)
+            if target.read_bytes() != payload:
+                raise ValueError("WorldOption.sav 写入后内容与待应用文件不一致")
+            read_world_option(target)
+        except (OSError, ValueError) as error:
+            if temp.exists():
+                temp.unlink()
+            raise ConfigError(
+                "WORLD_OPTION_WRITE_FAILED", f"写入 WorldOption.sav 失败: {error}"
+            ) from error
+        self.database.clear_config_draft()
+        pending.unlink(missing_ok=True)
+        self._revoke_changed_password(password_before)
+        return {
+            "message": "WorldOption.sav 已保存并应用。",
+            "applied": True,
+            "kind": "world-option",
+            "backupPath": str(backup) if backup else None,
+        }
+
+    @staticmethod
+    def _check_pending_conflicts(
+        updates: dict[str, str], baseline: dict[str, str | None], original: dict[str, str],
+    ) -> None:
+        conflicts = [
+            key for key, value in updates.items() if original.get(key) not in (baseline[key], value)
+        ]
+        if conflicts:
+            raise ConfigError(
+                "CONFIG_CONFLICT",
+                f"配置项 {', '.join(conflicts)} 在保存后被外部修改，未应用待应用配置。"
+                "请读取最新配置并重新保存这些修改项。",
+            )
+
+    def _clear_pending_file(self, row: dict[str, object] | None) -> None:
+        if row is None:
+            return
+        pending_root = (self.data_dir / "pending").resolve()
+        path = Path(str(row["draft_path"])).resolve()
+        if path.is_relative_to(pending_root):
+            path.unlink(missing_ok=True)
 
     @staticmethod
     def _assert_path_safe(path: Path) -> None:
@@ -738,19 +1029,28 @@ class ConfigService:
             raise ConfigError("PATH_REPARSE_POINT", str(error)) from error
 
     @staticmethod
-    def _admin_password_changed(original: dict[str, str], draft: dict[str, str]) -> bool:
-        current = original.get("AdminPassword")
-        pending = draft.get("AdminPassword")
-        if current is None or pending is None:
-            return current != pending
+    def _backup_path(target: Path) -> Path:
+        return target.with_name(
+            f"{target.name}.{time.strftime('%Y%m%d-%H%M%S')}.{uuid.uuid4().hex}.bak"
+        )
+
+    def _effective_admin_password(self) -> str | None:
+        world = self._world_option_path()
         try:
-            return _normalise_admin_password(current) != _normalise_admin_password(pending)
-        except ConfigError:
-            return current != pending
+            return read_admin_password(self.path().parents[4], world.parent if world else None)
+        except MonitoringConfigError as error:
+            raise ConfigError(error.code, str(error)) from error
+
+    def _revoke_changed_password(self, password_before: str | None) -> None:
+        if (
+            self.admin_password_rotation_callback is not None
+            and password_before != self._effective_admin_password()
+        ):
+            self.admin_password_rotation_callback()
 
     @staticmethod
     def _validate_updates(fields: dict[str, str], original: dict[str, str]) -> dict[str, str]:
-        if len(fields) > MAX_CONFIG_DRAFT_FIELDS:
+        if len(fields) > MAX_CONFIG_SAVE_FIELDS:
             raise ConfigError("CONFIG_REQUEST_TOO_LARGE", "配置字段数量超过限制。")
         updates: dict[str, str] = {}
         for key, value in fields.items():
@@ -772,125 +1072,20 @@ class ConfigService:
             updates[key] = _normalise_unknown_value(key, value, original[key])
         return updates
 
-    def _pending_admin_password(self, pending: Path) -> str | None:
-        row = self.database.get_config_draft()
-        if row is None or Path(str(row["draft_path"])) != pending:
-            return None
-        draft_path = Path(str(row["draft_path"]))
-        if not draft_path.is_file():
-            return None
-        try:
-            _, _, _, fields, _ = self._read(draft_path)
-        except ConfigError:
-            return None
-        password = fields.get("AdminPassword")
-        if password is None:
-            return None
-        try:
-            normalized = _normalise_admin_password(password)
-        except ConfigError:
-            return None
-        return password if password == normalized else None
-
-    @staticmethod
-    def _validate_pending_document(
-        draft_raw: str, original: dict[str, str], order: list[str]
-    ) -> None:
-        fields, draft_order, _ = _parse_document(draft_raw)
-        added_keys = set(fields) - set(original)
-        if (
-            not set(original).issubset(fields)
-            or not added_keys.issubset(SCHEMA_FIELD_SET)
-            or draft_order != _ordered_keys(fields, order)
-        ):
-            raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿包含新增、删除或重排字段。")
-        for key, value in fields.items():
-            if key in SECRET_FIELDS:
-                if value == original.get(key):
-                    continue
-                normalized = _normalise_admin_password(value)
-                if value != normalized:
-                    raise ConfigError(
-                        "CONFIG_DRAFT_INVALID", "配置草稿字段 AdminPassword 未通过规范化校验。"
-                    )
-                continue
-            source_value = original.get(key)
-            if source_value is not None and value == source_value:
-                continue
-            if key in SCHEMA_FIELD_SET:
-                normalized = _normalise_schema_value(key, value)
-            elif source_value is not None:
-                normalized = _normalise_unknown_value(key, value, source_value)
-            else:
-                raise ConfigError("CONFIG_DRAFT_INVALID", "配置草稿包含新增、删除或重排字段。")
-            if value != normalized:
-                raise ConfigError("CONFIG_DRAFT_INVALID", f"配置草稿字段 {key} 未通过规范化校验。")
-
-    def _world_option_present(self) -> bool:
+    def _world_option_path(self, *, required: bool = False) -> Path | None:
         if self.profile_provider is not None:
             try:
                 world = self.profile_provider().world_path
             except ProfileError as error:
                 raise ConfigError(error.code, str(error)) from error
-            return (world / "WorldOption.sav").is_file()
-        executable = self.executable_getter()
-        if executable is None:
-            return False
-        root = executable.parent / "Pal" / "Saved" / "SaveGames" / "0"
-        try:
-            return any(
-                (world / "WorldOption.sav").is_file() for world in root.iterdir() if world.is_dir()
+            path = world / "WorldOption.sav"
+            self._assert_path_safe(path)
+            return path
+        if required:
+            raise ConfigError(
+                "WORLD_PROFILE_REQUIRED", "尚未选择当前世界，无法写入 WorldOption.sav。"
             )
-        except OSError:
-            return False
-
-    def _conflict(self, row: dict[str, object] | None) -> dict[str, object] | None:
-        if row is None:
-            return None
-        try:
-            current = _version(self.path())
-        except ConfigError:
-            return {"reason": "CONFIG_NOT_FOUND"}
-        if current.sha256 != str(row["source_hash"]) or current.mtime_ns != int(
-            cast(int, row["source_mtime_ns"])
-        ):
-            return {
-                "reason": "SOURCE_CHANGED",
-                "expectedHash": row["source_hash"],
-                "actualHash": current.sha256,
-                "expectedMtimeNs": row["source_mtime_ns"],
-                "actualMtimeNs": current.mtime_ns,
-            }
         return None
-
-    @staticmethod
-    def _field_diff(current: object, draft: object) -> list[dict[str, str]]:
-        a = current if isinstance(current, dict) else {}
-        b = draft if isinstance(draft, dict) else {}
-        fields: list[dict[str, str]] = []
-        for key in sorted(set(a) | set(b)):
-            if key == "AdminPassword":
-                changed = ConfigService._admin_password_changed(
-                    {key: str(a[key])} if key in a else {},
-                    {key: str(b[key])} if key in b else {},
-                )
-            else:
-                changed = a.get(key) != b.get(key)
-            if changed:
-                fields.append(
-                    {
-                        "key": key,
-                        "current": ConfigService._public_diff_value(key, a.get(key, "")),
-                        "draft": ConfigService._public_diff_value(key, b.get(key, "")),
-                    }
-                )
-        return fields
-
-    @staticmethod
-    def _public_diff_value(key: str, value: object) -> str:
-        if key in SECRET_FIELDS:
-            return "已配置" if value else "未配置"
-        return str(value)
 
     @staticmethod
     def _payload(
@@ -899,8 +1094,6 @@ class ConfigService:
         version: FileVersion,
         fields: dict[str, str],
         order: list[str],
-        *,
-        draft: bool,
     ) -> dict[str, object]:
         masked = _masked_fields(fields)
         return {
@@ -916,5 +1109,4 @@ class ConfigService:
             "fieldOrder": order,
             "rawText": _masked_raw_text(raw, fields, order),
             "adminPasswordConfigured": bool(fields.get("AdminPassword")),
-            "isDraft": draft,
         }

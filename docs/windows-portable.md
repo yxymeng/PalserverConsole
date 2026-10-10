@@ -61,4 +61,6 @@ v0.2.0 起可在“维护 → 服务器更新 → PalServerConsole 更新”中�
 
 如果任一受管理 `app.db` 的 schema 比候选版本更新，脚本会以 `INCOMPATIBLE_DOWNGRADE` 拒绝降级，旧程序保持不变；不存在的数据库会被忽略，实例目录中的 reparse point/symlink 不会跟随。升级的文件校验或替换失败时，脚本会自动恢复旧启动器、旧 `Program/` 和旧维护脚本，并保留数据库备份。成功升级后，旧程序保留在根目录 `program-backups/Program-<时间戳>`，旧启动器保存为 `program-backups/PalServerConsole-<时间戳>.exe`；已有的旧维护脚本也会保存在同一目录。人工回退时需要同时恢复旧程序、旧启动器和旧维护脚本，不要回退或覆盖 `data/`。
 
+升级成功后，每个受管理的数据目录只保留最近一次数据库备份，`program-backups/` 只保留最近一次旧程序、启动器和维护脚本。自动更新由新升级脚本启动后台清理，等待更新助手在健康检查后写入本次更新的完成状态，兼容旧版本首次自动更新；手动升级在文件替换和校验成功后清理。失败、等待超时或更新编号不匹配时不触发清理；`*-failed-*` 程序副本、无法识别的文件和带 reparse point 的目录不会自动删除。旧备份被占用等清理失败会记录 `BACKUP_CLEANUP_FAILED`，不影响已完成的升级。
+
 若出现 `DATABASE_SIDECAR_PRESENT`，请先按正常方式启动一次旧控制台、再停止它，确保 SQLite WAL/journal 已安全收尾后再升级。不要在升级过程中复制、删除或替换真实 PalServer 存档。

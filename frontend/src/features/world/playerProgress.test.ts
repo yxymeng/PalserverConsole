@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorldPlayerProgress } from "../../api/contracts";
-import { playerProgressCoverage, playerProgressSummary, playerProgressUnavailable, playerProgressValue } from "./playerProgress";
+import { playerProgressCoverage, playerProgressGameTotal, playerProgressOf, playerProgressPercent, playerProgressSummary, playerProgressTotal, playerProgressUnavailable, playerProgressValue } from "./playerProgress";
 
 describe("玩家主要进度呈现", () => {
   it("明确区分发现种类、累计捕获和完成项目/累计次数", () => {
@@ -44,5 +44,37 @@ describe("玩家主要进度呈现", () => {
     expect(playerProgressUnavailable(partial)).toEqual(["已完成高塔", "地下城通关次数"]);
     expect(playerProgressCoverage(unavailable)).toBe("玩家进度不可用");
     expect(playerProgressSummary(unavailable)).toBe("玩家进度不可用");
+  });
+
+  it("油田通关次数缺失时按零次展示且不单独标记部分数据", () => {
+    const progress = playerProgressOf({
+      progress: {
+        state: "partial",
+        values: { dungeonClears: 2 },
+        unavailable: ["oilRigClears"],
+      },
+    });
+
+    expect(progress.state).toBe("complete");
+    expect(playerProgressValue(progress, "oilRigClears")).toBe("0");
+    expect(playerProgressUnavailable(progress)).toEqual([]);
+    expect(playerProgressCoverage(progress)).toBe("完整数据");
+  });
+
+  it("只显示可验证且不小于玩家值的游戏资源总量", () => {
+    const progress: WorldPlayerProgress = {
+      state: "partial",
+      values: { fastTravel: 48, exploredAreas: 87, towerBosses: 14 },
+      unavailable: [],
+      totals: { fastTravel: 174, exploredAreas: 100, towerBosses: 13, oilRigLocations: 3 },
+      totalsDataVersion: "2026.08.30.2",
+    };
+
+    expect(playerProgressTotal(progress, "fastTravel")).toBe(174);
+    expect(playerProgressTotal(progress, "towerBosses")).toBeNull();
+    expect(playerProgressTotal(progress, "exploredAreas")).toBe(100);
+    expect(playerProgressPercent(progress, "exploredAreas")).toBe(87);
+    expect(playerProgressPercent(progress, "towerBosses")).toBeNull();
+    expect(playerProgressGameTotal(progress, "oilRigLocations")).toBe(3);
   });
 });

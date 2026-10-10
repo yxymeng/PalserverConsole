@@ -69,7 +69,6 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
 
   const control = page.getByLabel("首页服务器控制");
   const liveStatus = page.getByLabel("实时服务器状态");
-  const hostStatus = page.getByLabel("主机性能状态");
   if (testInfo.project.name === "desktop") {
     await expect(page.locator('.brand-mark img[src="/zoe-console-icon.png"]')).toBeVisible();
   }
@@ -79,27 +78,26 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   await expect(page.getByLabel("PalServer 当前状态")).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "服务器状态" })).toHaveCount(0);
   await expect(page.getByText("实时监控", { exact: true })).toHaveCount(0);
-  await expect(hostStatus).toContainText("12.5%");
-  await expect(hostStatus).toContainText("4.0 MB");
-  await expect(hostStatus).toContainText("1.0 KB/秒");
-  await expect(hostStatus).toContainText("2.0 KB/秒");
-  const worldStatus = page.getByLabel("游戏世界状态");
-  await expect(worldStatus).not.toContainText("世界存档");
-  await expect(worldStatus).toContainText("在线玩家");
-  await expect(worldStatus).toContainText("1 人");
-  await expect(worldStatus).toContainText("测试玩家");
-  await expect(worldStatus).toContainText("128 天 1 小时");
-  await expect(worldStatus).toContainText("797 / 8");
-  await expect(page.getByText("实时数据正在重连", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("主机性能状态")).toHaveCount(0);
+  await expect(liveStatus).not.toContainText("CPU");
+  await expect(liveStatus).not.toContainText("磁盘读取");
+  await expect(liveStatus).not.toContainText("磁盘写入");
+  await expect(liveStatus).toContainText("服务器帧率");
+  await expect(liveStatus).toContainText("60 fps");
+  await expect(liveStatus).toContainText("内存占用负载");
+  await expect(liveStatus).toContainText("4.0 MB");
+  await expect(liveStatus).toContainText("世界累计游戏时间");
+  await expect(liveStatus).toContainText("128 天 1 小时");
+  await expect(liveStatus).toContainText("797 只帕鲁");
+  const playerSection = page.locator(".psc-online-players");
+  await expect(playerSection).toContainText("测试玩家");
   if (testInfo.project.name === "mobile") {
     await expect(page.locator(".psc-player-card")).toBeVisible();
     await expect(page.locator(".psc-player-table-wrap")).toBeHidden();
-    await page.getByRole("button", { name: "打开菜单" }).click();
     const navigation = page.getByRole("navigation", { name: "主导航" });
-    await expect(page.locator('.brand-mark img[src="/zoe-console-icon.png"]')).toBeVisible();
     await expect(navigation.getByRole("button")).toHaveCount(4);
     await navigation.getByRole("button", { name: "首页" }).click();
-    await expect(navigation).toBeHidden();
+    await expect(navigation).toBeVisible();
   } else {
     await expect(page.locator(".psc-player-table-wrap")).toBeVisible();
     await expect(page.locator(".psc-player-list")).toBeHidden();
@@ -110,11 +108,19 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   }
   await expect(control.getByRole("button", { name: "保存" })).toHaveCSS("color", "rgb(61, 105, 115)");
   await page.screenshot({ path: testInfo.outputPath(`overview-light-${testInfo.project.name}.png`) });
-  await page.getByRole("button", { name: "切换到深色界面" }).click();
+  const themeSelector = page.getByRole("combobox", { name: /选择界面主题/ });
+  await themeSelector.click();
+  await page.getByRole("option", { name: /灵动海岛/ }).click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("island");
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--background").trim())).toBe("#f4f9ff");
+  await page.screenshot({ path: testInfo.outputPath(`overview-island-${testInfo.project.name}.png`) });
+  await themeSelector.click();
+  await page.getByRole("option", { name: /深邃夜色/ }).click();
   await expect.poll(() => page.evaluate(() => document.documentElement.dataset.theme)).toBe("dark");
   await expect(control.getByRole("button", { name: "关闭" })).toHaveCSS("background-color", "rgb(39, 44, 43)");
   await page.screenshot({ path: testInfo.outputPath(`overview-dark-${testInfo.project.name}.png`) });
-  await page.getByRole("button", { name: "切换到浅色界面" }).click();
+  await themeSelector.click();
+  await page.getByRole("option", { name: /轻爽极简/ }).click();
 
   for (const action of ["保存", "重启"] as const) {
     const button = control.getByRole("button", { name: action });
@@ -148,13 +154,22 @@ test("UX-02：首页合并实时状态，关闭操作使用中文动态岛并在
   await expect(operationIsland).toContainText("关闭服务器");
   await expect(operationIsland).toContainText("维护倒计时中，仍可取消。", { timeout: 2_500 });
   await expect(operationIsland.getByRole("progressbar")).toBeVisible();
-  await expect(operationIsland.locator(".operation-liquid-fill")).toBeVisible();
+  await expect(operationIsland.locator(".operation-flowmist canvas")).toBeVisible();
   await expect(operationIsland).toContainText(/剩余 \d+ 秒/);
   await expect(operationIsland.getByRole("button", { name: "取消" })).toBeVisible();
   await expect(operationIsland).not.toContainText("countdown");
   await page.screenshot({ path: testInfo.outputPath(`ux02-${testInfo.project.name}.png`) });
   await expect(operationIsland).toContainText("正在请求服务器关闭。", { timeout: 2_500 });
   await expect(operationIsland).toContainText("服务器已完全关闭。", { timeout: 2_500 });
+  const progress = operationIsland.getByRole("progressbar");
+  await expect(progress).toHaveAttribute("aria-valuenow", "100");
+  await expect(progress).toHaveAttribute("aria-valuetext", "已完成");
+  await expect(progress.locator("canvas")).toBeVisible();
+  expect(await progress.locator("canvas").evaluate((canvas: HTMLCanvasElement) => {
+    const gl = canvas.getContext("webgl");
+    return gl !== null && !gl.isContextLost() && gl.getError() === gl.NO_ERROR;
+  })).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath(`flowmist-${testInfo.project.name}.png`) });
   await expect(operationIsland).toBeHidden({ timeout: 5_000 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
 });

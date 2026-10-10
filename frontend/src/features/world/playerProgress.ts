@@ -1,9 +1,9 @@
-import type { WorldPlayerProgress, WorldPlayerProgressField } from "../../api/contracts";
+import type { WorldPlayerProgress, WorldPlayerProgressField, WorldPlayerProgressTotalField } from "../../api/contracts";
 
 export const PLAYER_PROGRESS_LABELS: Record<WorldPlayerProgressField, string> = {
   discoveredPalSpecies: "已发现帕鲁种类",
   capturedPals: "累计捕获帕鲁数量",
-  fastTravel: "已解锁传送点",
+  fastTravel: "已解锁巨鹫之像",
   relics: "已收集翠叶鼠雕像",
   memos: "已收集手记",
   exploredAreas: "已探索区域",
@@ -26,7 +26,15 @@ export const PLAYER_PROGRESS_GROUPS: Array<{
 ];
 
 export function playerProgressOf(row: { progress: WorldPlayerProgress }): WorldPlayerProgress {
-  return row.progress;
+  const progress = row.progress;
+  if (progress.values.oilRigClears !== undefined) return progress;
+  const unavailable = progress.unavailable.filter((field) => field !== "oilRigClears");
+  return {
+    ...progress,
+    state: progress.state === "partial" && unavailable.length === 0 ? "complete" : progress.state,
+    values: { ...progress.values, oilRigClears: 0 },
+    unavailable,
+  };
 }
 
 export function playerProgressCoverage(progress: WorldPlayerProgress): string {
@@ -51,6 +59,23 @@ export function playerProgressUnavailable(progress: WorldPlayerProgress): string
 export function playerProgressValue(progress: WorldPlayerProgress, field: WorldPlayerProgressField): string | null {
   const value = progress.values[field];
   return value === undefined ? null : number(value);
+}
+
+export function playerProgressTotal(progress: WorldPlayerProgress, field: WorldPlayerProgressField): number | null {
+  const total = playerProgressGameTotal(progress, field);
+  const value = progress.values[field];
+  return total !== null && value !== undefined && total >= value ? total : null;
+}
+
+export function playerProgressGameTotal(progress: WorldPlayerProgress, field: WorldPlayerProgressTotalField): number | null {
+  const total = progress.totals?.[field];
+  return total !== undefined && total > 0 ? total : null;
+}
+
+export function playerProgressPercent(progress: WorldPlayerProgress, field: WorldPlayerProgressField): number | null {
+  const value = progress.values[field];
+  const total = playerProgressTotal(progress, field);
+  return value === undefined || total === null ? null : Math.round((value / total) * 1000) / 10;
 }
 
 function number(value: number): string {

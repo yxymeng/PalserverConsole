@@ -1,5 +1,6 @@
 import { AlertTriangle, CheckCircle2, CircleStop } from "lucide-react";
-import { motion } from "motion/react";
+import { FlowMist } from "@yxymeng/flowmist/react";
+import "@yxymeng/flowmist/style.css";
 import { useEffect, useState } from "react";
 
 import type { Operation } from "../api/contracts";
@@ -9,12 +10,15 @@ import { Spinner } from "./ui/spinner";
 const TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 const STAGE_PROGRESS: Record<string, number> = {
   queued: 8,
-  countdown: 18,
-  saving: 38,
-  stopping: 66,
-  force_stopping: 72,
-  restarting: 78,
-  health_check: 90,
+  countdown: 8,
+  saving: 62,
+  stopping: 78,
+  shutdown_timeout: 78,
+  force_stopping: 82,
+  config_applied: 86,
+  starting: 88,
+  restarting: 88,
+  health_check: 94,
 };
 
 export function OperationStatusIsland({
@@ -28,7 +32,7 @@ export function OperationStatusIsland({
   onForceStop: () => void;
   countdownSeconds?: number;
 }) {
-  const [stageStartedAt, setStageStartedAt] = useState(Date.now());
+  const [stageClock, setStageClock] = useState({ operationId: operation.operationId, stage: operation.stage, startedAt: Date.now() });
   const [now, setNow] = useState(Date.now());
   const countdown = operation.stage === "countdown" && ["queued", "running"].includes(operation.state);
   const needsForceConfirmation = operation.state === "awaiting_force_confirmation";
@@ -36,7 +40,7 @@ export function OperationStatusIsland({
 
   useEffect(() => {
     const timestamp = Date.now();
-    setStageStartedAt(timestamp);
+    setStageClock({ operationId: operation.operationId, stage: operation.stage, startedAt: timestamp });
     setNow(timestamp);
   }, [operation.operationId, operation.stage]);
 
@@ -46,13 +50,22 @@ export function OperationStatusIsland({
     return () => window.clearInterval(timer);
   }, [countdown]);
 
+  // A new operation/stage must not inherit the previous fallback clock before the effect resets it.
+  const stageStartedAt = stageClock.operationId === operation.operationId && stageClock.stage === operation.stage ? stageClock.startedAt : now;
   const startedAt = operation.updatedAt ? operation.updatedAt * 1_000 : stageStartedAt;
   const elapsedSeconds = Math.max(0, (now - startedAt) / 1_000);
   const remainingSeconds = Math.max(0, Math.ceil(countdownSeconds - elapsedSeconds));
-  const progress = operation.state === "succeeded" ? 100
-    : operation.state === "cancelled" || operation.state === "failed" ? 100
-      : countdown ? Math.min(100, (elapsedSeconds / countdownSeconds) * 100)
-        : STAGE_PROGRESS[operation.stage] ?? 12;
+  // The countdown is part of the whole operation; only success fills the bar.
+  const estimatedProgress = operation.state === "succeeded" ? 100
+    : completed ? 0
+      : countdown ? 8 + 52 * Math.min(1, elapsedSeconds / Math.max(1, countdownSeconds))
+        : STAGE_PROGRESS[operation.stage] ?? 8;
+  const [displayedProgress, setDisplayedProgress] = useState({ operationId: operation.operationId, value: estimatedProgress });
+  const progress = displayedProgress.operationId === operation.operationId
+    ? Math.max(displayedProgress.value, estimatedProgress) : estimatedProgress;
+  if (displayedProgress.operationId !== operation.operationId || displayedProgress.value !== progress) {
+    setDisplayedProgress({ operationId: operation.operationId, value: progress });
+  }
   const tone = operation.state === "failed" || needsForceConfirmation ? "danger"
     : operation.state === "succeeded" ? "success"
       : operation.state === "cancelled" ? "neutral" : "active";
@@ -67,12 +80,12 @@ export function OperationStatusIsland({
       </div>
     </div>
     <div className="operation-island-progress">
-      <div><span>{countdown ? "维护倒计时" : completed ? "执行结果" : "阶段进度"}</span><strong>{countdown ? `剩余 ${remainingSeconds} 秒` : operationStageLabel(operation)}</strong></div>
-      <div className="operation-liquid-progress" role="progressbar" aria-label={countdown ? "维护倒计时进度" : "服务器操作进度"} aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(progress)}>
-        <motion.div className="operation-liquid-fill" initial={false} animate={{ width: `${progress}%` }} transition={{ type: "spring", stiffness: 80, damping: 22, mass: 0.7 }}>
-          <span className="operation-liquid-surface" aria-hidden="true" />
-        </motion.div>
-      </div>
+      <div><span>{countdown ? "维护倒计时" : completed ? "执行结果" : "操作进度"}</span><strong>{countdown ? `剩余 ${remainingSeconds} 秒` : operationStageLabel(operation)}</strong></div>
+      <FlowMist className="operation-flowmist" value={progress}
+        palette="PAL_TIDE"
+        paused={completed || needsForceConfirmation}
+        label={countdown ? "维护倒计时进度" : "服务器操作进度"}
+        aria-valuetext={countdown ? `剩余 ${remainingSeconds} 秒` : `${operationStageLabel(operation)}${completed || needsForceConfirmation ? "" : "，按执行阶段估算"}`} />
     </div>
   </section>;
 }

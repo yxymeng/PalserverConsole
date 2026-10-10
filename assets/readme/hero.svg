@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="660" viewBox="0 0 1200 660" role="img" aria-labelledby="title desc">
+  <title id="title">PalServerConsole · 帕鲁海岛管理站</title>
+  <desc id="desc">灯塔、帕鲁足迹、配置小屋和备份港湾组成一座海岛，代表服务器管理、只读世界查询、世界法则与维护。功能示意插图，并非游戏地图。</desc>
+  <defs>
+    <linearGradient id="ocean" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#f1fcff"/><stop offset="0.55" stop-color="#d4f5f4"/><stop offset="1" stop-color="#8bdcd9"/>
+    </linearGradient>
+    <linearGradient id="lagoon" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#76d6d5"/><stop offset="1" stop-color="#37b7bc"/>
+    </linearGradient>
+    <linearGradient id="grass" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#b5e5a1"/><stop offset="1" stop-color="#58b794"/>
+    </linearGradient>
+    <linearGradient id="mountain" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#569e91"/><stop offset="1" stop-color="#2a7d7c"/>
+    </linearGradient>
+    <clipPath id="canvas"><rect width="1200" height="660" rx="28"/></clipPath>
+    <g id="palm">
+      <path d="M0 74Q15 33 1 0" fill="none" stroke="#9a7951" stroke-width="11" stroke-linecap="round"/>
+      <path d="M0 0Q-36-31-59 2Q-24-12 0 0M0 0Q-13-39 23-48Q20-17 0 0M0 0Q39-31 66-4Q29-13 0 0M0 0Q-41 6-40 36Q-20 14 0 0M0 0Q36 5 41 38Q15 15 0 0" fill="#208a78"/>
+      <path d="M0 0Q4-20 23-48M0 0Q29-13 66-4" fill="none" stroke="#55b58c" stroke-width="3"/>
+      <circle cx="-4" cy="8" r="6" fill="#b88b53"/><circle cx="7" cy="8" r="5" fill="#9a7951"/>
+    </g>
+    <g id="ripple" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"><path d="M0 0q12 7 24 0t24 0"/></g>
+    <g id="paw" fill="currentColor">
+      <path d="M-20 14Q-23 1-10-9Q0-19 10-9Q23 1 20 14Q17 24 0 19Q-17 24-20 14"/>
+      <ellipse cx="-22" cy="-13" rx="7" ry="9"/><ellipse cx="-8" cy="-26" rx="7" ry="9"/>
+      <ellipse cx="9" cy="-26" rx="7" ry="9"/><ellipse cx="23" cy="-13" rx="7" ry="9"/>
+    </g>
+  </defs>
+  <g clip-path="url(#canvas)">
+    <rect width="1200" height="660" fill="url(#ocean)"/>
+    <circle cx="1075" cy="111" r="51" fill="#fff0b7"/>
+    <circle cx="1075" cy="111" r="70" fill="none" stroke="#fff6d5" stroke-width="2"/>
+    <g id="clouds" fill="#fff" opacity="0.75">
+      <path d="M859 163q-10-22 12-31q12-36 44-16q32-17 38 17q31 5 19 30Z"/>
+      <path d="M1119 229q-8-17 9-24q10-28 34-12q25-13 30 14q24 4 15 22Z"/>
+    </g>
+    <path d="M-25 594Q130 557 292 600T610 600T930 602T1230 572V680H-25Z" fill="#8edddc" opacity="0.45"/>
+    <path d="M-25 614Q130 577 292 620T610 620T930 622T1230 592" fill="none" stroke="#fff" stroke-width="3" opacity="0.6"/>
+    <g id="title-block" font-family="Segoe UI, Microsoft YaHei, PingFang SC, sans-serif">
+      <path d="M66 70h28m-14-14v28" fill="none" stroke="#16877e" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="80" cy="70" r="9" fill="none" stroke="#16877e" stroke-width="2"/>
+      <text x="111" y="78" fill="#267f80" font-size="23" font-weight="700" letter-spacing="3">帕鲁海岛管理站</text>
+      <text x="60" y="169" fill="#123f4b" font-size="75" font-weight="800" letter-spacing="-2.5">PalServerConsole</text>
+      <text x="65" y="251" fill="#123f4b" font-size="47" font-weight="700">服主的日常，</text>
+      <text x="65" y="314" fill="#123f4b" font-size="47" font-weight="700">在海岛上轻松打理。</text>
+      <path d="M67 338h156" stroke="#efb76f" stroke-width="7" stroke-linecap="round"/>
+      <text x="65" y="391" fill="#376d75" font-size="25">启停服务器，找到帕鲁与物资。</text>
+      <text x="65" y="430" fill="#376d75" font-size="25">配置与维护，也在同一个网页。</text>
+      <g id="metadata" font-size="21" font-weight="600" fill="#216e72">
+        <rect x="65" y="478" width="161" height="46" rx="23" fill="#fff" fill-opacity="0.75"/>
+        <text x="145.5" y="508" text-anchor="middle">Windows 本机</text>
+        <rect x="239" y="478" width="148" height="46" rx="23" fill="#fff" fill-opacity="0.75"/>
+        <text x="313" y="508" text-anchor="middle">只读世界快照</text>
+        <rect x="400" y="478" width="148" height="46" rx="23" fill="#fff" fill-opacity="0.75"/>
+        <text x="474" y="508" text-anchor="middle">桌面与手机</text>
+      </g>
+    </g>
+    <g id="island">
+      <path d="M615 435Q627 377 728 366Q745 324 849 345Q937 318 1002 358Q1119 355 1151 414Q1209 451 1158 501Q1096 565 962 552Q876 589 783 547Q678 565 630 507Q595 475 615 435Z" fill="url(#lagoon)" opacity="0.55"/>
+      <path d="M636 431Q654 387 740 384Q778 347 855 364Q932 345 997 379Q1097 372 1125 424Q1178 461 1130 496Q1061 538 963 528Q870 563 794 526Q701 544 661 500Q617 471 636 431Z" fill="#fff" fill-opacity="0.55"/>
+      <path d="M653 430Q670 395 748 398Q783 363 855 380Q927 359 994 394Q1084 388 1109 430Q1157 459 1114 486Q1055 522 960 510Q874 548 798 512Q718 529 678 491Q640 464 653 430Z" fill="#e9d5a3"/>
+      <path d="M653 420Q670 385 748 388Q783 353 855 370Q927 349 994 384Q1084 378 1109 420Q1157 449 1114 476Q1055 512 960 500Q874 538 798 502Q718 519 678 481Q640 454 653 420Z" fill="#fff0c7"/>
+      <path d="M681 417Q695 396 761 402Q787 370 857 389Q927 365 986 401Q1065 394 1088 426Q1121 445 1090 463Q1030 492 958 480Q875 515 804 482Q738 497 704 468Q668 446 681 417Z" fill="url(#grass)"/>
+      <path d="M710 411Q728 383 762 395Q791 359 830 395Q853 392 865 418Z" fill="#6ab69a"/>
+      <g id="mountains">
+        <path d="M687 405 751 277Q760 258 772 281L833 407Z" fill="url(#mountain)"/>
+        <path d="M761 271 761 405H833L772 281Q767 272 761 271Z" fill="#256e70"/>
+        <path d="m739 301 13-26q9-14 17 5l12 25-17-7-11 11Z" fill="#d9eee0"/>
+        <path d="M795 416 831 331Q839 316 847 333L889 419Z" fill="#72b39b"/>
+        <path d="M839 325V418H889L847 333Z" fill="#479486"/>
+      </g>
+      <path d="M792 453Q832 474 879 445T970 442T1057 445" fill="none" stroke="#d9efbb" stroke-width="14" stroke-linecap="round"/>
+      <path d="M792 453Q832 474 879 445T970 442T1057 445" fill="none" stroke="#fff5d2" stroke-width="5" stroke-dasharray="2 12" stroke-linecap="round"/>
+      <g id="lighthouse" transform="translate(928 328)">
+        <ellipse cy="100" rx="53" ry="20" fill="#3a927e" opacity="0.3"/>
+        <path d="M-36 94-23-37H23L36 94Z" fill="#fffbeb"/>
+        <path d="M13-37H23L36 94H20Z" fill="#e4e4c8"/>
+        <path d="M-30 57H30L26 19H-26Z" fill="#e7a078"/>
+        <path d="M-24-15H24L23-37H-23Z" fill="#e7a078"/>
+        <rect x="-30" y="-70" width="60" height="34" rx="4" fill="#247b7d"/>
+        <rect x="-20" y="-63" width="40" height="20" rx="2" fill="#ffedaa"/>
+        <path d="M0-63V-43" stroke="#247b7d" stroke-width="4"/>
+        <path d="M-40-72 0-98 40-72Z" fill="#174d59"/>
+        <path d="M0-101V-113" stroke="#174d59" stroke-width="4" stroke-linecap="round"/>
+        <path d="M-31-53-95-73V-35Z" fill="#fff3bf" opacity="0.65"/>
+        <path d="M31-53 108-75V-31Z" fill="#fff3bf" opacity="0.65"/>
+        <path d="M-9 94V73a9 9 0 0 1 18 0V94" fill="#247b7d"/>
+        <path d="M-43 96H43" stroke="#d0b983" stroke-width="7" stroke-linecap="round"/>
+      </g>
+      <g id="world-sign" transform="translate(779 442)">
+        <path d="M0 0V39" stroke="#9a7951" stroke-width="8"/>
+        <rect x="-35" y="-40" width="70" height="62" rx="13" fill="#f8f5dd"/>
+        <use href="#paw" transform="translate(0 -3) scale(0.69)" color="#2f8c79"/>
+      </g>
+      <g id="configuration-hut" transform="translate(1042 425)">
+        <path d="M-35 5V43L10 53 43 35V-2Z" fill="#f6e4b8"/>
+        <path d="M10 4V53L43 35V-2Z" fill="#e3c994"/>
+        <path d="M-49 6-5-36 55-9 10 15Z" fill="#237a7c"/>
+        <path d="M-5-36 55-9 10 15Z" fill="#165f69"/>
+        <rect x="-22" y="21" width="18" height="24" rx="2" fill="#2b7f79"/>
+        <path d="M25 22V36M19 29H31" stroke="#fff8db" stroke-width="4" stroke-linecap="round"/>
+      </g>
+      <use href="#palm" transform="translate(1081 345) scale(0.92)"/>
+      <use href="#palm" transform="translate(700 409) scale(0.66)"/>
+      <g id="shore-plants" fill="#258e79">
+        <path d="M847 492q-16-27-22-4q-4-34-15-7q-14-17-15 7Z"/>
+        <path d="M1002 489q-16-27-22-4q-4-34-15-7q-14-17-15 7Z"/>
+      </g>
+      <g id="backup-harbor">
+        <path d="M924 491 962 477 1017 524 979 540Z" fill="#a78254"/>
+        <path d="M924 491V501L979 550V540Z" fill="#886d4c"/>
+        <path d="M979 540V550L1017 534V524Z" fill="#795e42"/>
+        <path d="m938 502 38-14m-26 25 38-14m-25 25 37-15m-24 26 37-15" stroke="#d3b078" stroke-width="3"/>
+        <path d="M933 490V510M1009 524V545" stroke="#795e42" stroke-width="6" stroke-linecap="round"/>
+        <g transform="translate(927 464)" stroke="#99784b" stroke-width="2.5" stroke-linejoin="round">
+          <path d="m0 0 24-9 23 13-24 10Z" fill="#f4d9a0"/>
+          <path d="M0 0V27L23 42V14Z" fill="#d6b17b"/>
+          <path d="M23 14V42L47 31V4Z" fill="#b99461"/>
+          <path d="m12 8 24-10M23 24l24-10M11 7V34" fill="none"/>
+        </g>
+        <g id="life-ring" transform="translate(981 492) rotate(-25)">
+          <circle r="20" fill="#fff8df"/>
+          <circle r="17" fill="none" stroke="#e59b73" stroke-width="10" stroke-dasharray="15 12"/>
+          <circle r="10" fill="#a78254"/>
+        </g>
+      </g>
+    </g>
+    <g id="sailing-route" fill="none" stroke="#399a9d" stroke-width="2.5" stroke-linecap="round">
+      <path d="M570 567Q640 610 760 582T975 577" stroke-dasharray="5 11"/>
+      <path d="M570 567l3 14m-3-14 15 1"/>
+    </g>
+    <g id="boat" transform="translate(1054 569)">
+      <ellipse cy="24" rx="65" ry="10" fill="#289fa8" opacity="0.2"/>
+      <path d="M-51 2H51L29 25H-26Z" fill="#fff5d5"/>
+      <path d="M-51 2H51L44 10H-44Z" fill="#d99970"/>
+      <path d="M0 1V-84" stroke="#547d73" stroke-width="4" stroke-linecap="round"/>
+      <path d="M-5-76-5-8H-45Z" fill="#fffbed"/>
+      <path d="M7-62 39-8H7Z" fill="#f4d99d"/>
+      <path d="M-37 34q12 6 24 0m30 0q12 6 24 0" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+    </g>
+    <g id="sea-ripples" opacity="0.75">
+      <use href="#ripple" x="637" y="327"/><use href="#ripple" x="1150" y="343"/>
+      <use href="#ripple" x="1130" y="555"/><use href="#ripple" x="729" y="621"/>
+      <use href="#ripple" x="75" y="584"/><use href="#ripple" x="370" y="598"/>
+    </g>
+    <text x="65" y="619" fill="#367c81" font-family="Segoe UI, sans-serif" font-size="18" letter-spacing="3">YOUR PALWORLD. YOUR LITTLE ISLAND.</text>
+  </g>
+</svg>

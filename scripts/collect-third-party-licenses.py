@@ -45,7 +45,7 @@ def _license_text(distribution: Distribution) -> str:
             or filename.startswith("copying")
             or filename.startswith("notice")
         ):
-            candidate = Path(distribution.locate_file(relative_path))
+            candidate = Path(str(distribution.locate_file(relative_path)))
             if candidate.is_file():
                 candidate_files.append(candidate)
     unique_files = sorted(set(candidate_files), key=lambda path: str(path).casefold())
@@ -108,6 +108,12 @@ def _npm_runtime_packages(package_lock: Path) -> list[tuple[str, str, dict[str, 
         metadata = packages.get(lock_path)
         if not isinstance(metadata, dict):
             raise RuntimeError(f"Invalid npm lock entry: {lock_path}")
+        if metadata.get("link") is True:
+            target_path = metadata.get("resolved")
+            target = packages.get(target_path) if isinstance(target_path, str) else None
+            if not isinstance(target, dict):
+                raise RuntimeError(f"Invalid npm linked package entry: {lock_path}")
+            metadata = {**target, **metadata}
         version = metadata.get("version")
         if not isinstance(version, str) or not version:
             raise RuntimeError(f"npm lock entry has no version: {lock_path}")
@@ -149,11 +155,18 @@ def _render_npm_distributions(package_lock: Path, node_modules: Path) -> list[st
     sections = ["## npm runtime dependencies"]
     install_root = node_modules.resolve(strict=True).parent
     for name, lock_path, metadata in _npm_runtime_packages(package_lock):
-        package_root = (install_root / Path(lock_path)).resolve(strict=True)
+        linked_path = metadata.get("resolved") if metadata.get("link") is True else None
+        package_root = (
+            install_root / Path(linked_path)
+            if isinstance(linked_path, str)
+            else install_root / Path(lock_path)
+        ).resolve(strict=True)
         try:
-            package_root.relative_to(node_modules.resolve(strict=True))
+            package_root.relative_to(
+                install_root if linked_path is not None else node_modules.resolve(strict=True)
+            )
         except ValueError as error:
-            raise RuntimeError(f"npm package path escapes node_modules: {lock_path}") from error
+            raise RuntimeError(f"npm package path escapes install root: {lock_path}") from error
         installed = _read_json_object(package_root / "package.json")
         version = str(metadata["version"])
         if installed.get("name") != name or installed.get("version") != version:
@@ -161,9 +174,18 @@ def _render_npm_distributions(package_lock: Path, node_modules: Path) -> list[st
                 f"Installed npm package does not match package-lock: {name} {version}"
             )
         text = _npm_license_text(package_root)
-        if not text:
-            raise RuntimeError(f"No license text was found for npm package {name} {version}")
         license_expression = metadata.get("license") or installed.get("license") or "not declared"
+        if not text:
+            if (
+                metadata.get("link") is True
+                and installed.get("private") is True
+                and license_expression == "UNLICENSED"
+            ):
+                text = "Bundled private workspace package; no separate license file is declared."
+            else:
+                raise RuntimeError(
+                    f"No license text was found for npm package {name} {version}"
+                )
         sections.extend(
             [
                 "",

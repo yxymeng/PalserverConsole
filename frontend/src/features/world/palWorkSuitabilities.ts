@@ -1,0 +1,15 @@
+export const workSuitabilities: Record<string, { label: string; icon: string }> = {
+  EmitFlame: { label: "生火", icon: "/assets/work-suitabilities/T_icon_palwork_00.png" },
+  Watering: { label: "浇水", icon: "/assets/work-suitabilities/T_icon_palwork_01.png" },
+  Seeding: { label: "播种", icon: "/assets/work-suitabilities/T_icon_palwork_02.png" },
+  GenerateElectricity: { label: "发电", icon: "/assets/work-suitabilities/T_icon_palwork_03.png" },
+  Handcraft: { label: "手工作业", icon: "/assets/work-suitabilities/T_icon_palwork_04.png" },
+  Collection: { label: "采集", icon: "/assets/work-suitabilities/T_icon_palwork_05.png" },
+  Deforest: { label: "伐木", icon: "/assets/work-suitabilities/T_icon_palwork_06.png" },
+  Mining: { label: "采矿", icon: "/assets/work-suitabilities/T_icon_palwork_07.png" },
+  OilExtraction: { label: "原油提炼", icon: "/assets/work-suitabilities/T_icon_palwork_09.png" },
+  ProductMedicine: { label: "制药", icon: "/assets/work-suitabilities/T_icon_palwork_08.png" },
+  Cool: { label: "冷却", icon: "/assets/work-suitabilities/T_icon_palwork_10.png" },
+  Transport: { label: "搬运", icon: "/assets/work-suitabilities/T_icon_palwork_11.png" },
+  MonsterFarm: { label: "牧场", icon: "/assets/work-suitabilities/T_icon_palwork_12.png" },
+};

@@ -1,18 +1,26 @@
-import { AlertTriangle, Wrench } from "lucide-react";
+import { AlertTriangle, Clock3, Wrench } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import type { AuthStatus, OperationalHealth, ShellStatus } from "../../api/contracts";
+import type { AuthStatus, ConfigDocument, LiveSnapshot, OperationalHealth, ShellStatus } from "../../api/contracts";
 import { isAbortError, requestJson } from "../../api/client";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { useAbortableRequest } from "../../hooks/useAbortableRequest";
+import { displayValue } from "../../utils/format";
 import { LiveMonitoring } from "../monitoring/LiveMonitoring";
+import { serverStateLabel } from "../server/labels";
 import { ServerControlPanel } from "../server/ServerControlPanel";
 
-export function Overview({ shell, auth, onOpenMaintenance }: { shell: ShellStatus | null; auth: AuthStatus; onOpenMaintenance: () => void }) {
-  const [shellStatus, setShellStatus] = useState(shell);
+export function Overview({ shell, auth, onOpenMaintenance, onShellStatusChange }: { shell: ShellStatus | null; auth: AuthStatus; onOpenMaintenance: () => void; onShellStatusChange: (status: ShellStatus) => void }) {
+  const [config, setConfig] = useState<ConfigDocument | null>(null);
+  const [liveSnapshot, setLiveSnapshot] = useState<LiveSnapshot | null>(null);
+  const nextConfigSignal = useAbortableRequest();
 
-  useEffect(() => setShellStatus(shell), [shell]);
+  useEffect(() => {
+    requestJson<ConfigDocument>("/api/config/current", { signal: nextConfigSignal() })
+      .then(setConfig)
+      .catch((caught) => { if (!isAbortError(caught)) setConfig(null); });
+  }, [nextConfigSignal]);
 
   return (
     <div className="page-stack">
@@ -23,10 +31,10 @@ export function Overview({ shell, auth, onOpenMaintenance }: { shell: ShellStatu
           <AlertDescription>仅在可信内网使用，禁止将 PalServerConsole 暴露到公网。</AlertDescription>
         </Alert>
       )}
-      <HomeHero>
-        <ServerControlPanel auth={auth} initialStatus={shellStatus} onStatusChange={setShellStatus} />
+      <HomeHero status={shell} config={config} snapshot={liveSnapshot}>
+        <ServerControlPanel auth={auth} initialStatus={shell} onStatusChange={onShellStatusChange} />
       </HomeHero>
-      <LiveMonitoring auth={auth} embedded shell={shellStatus} />
+      <LiveMonitoring auth={auth} embedded onSnapshot={setLiveSnapshot} />
       <OperationalHealthNotice onOpenMaintenance={onOpenMaintenance} />
     </div>
   );
@@ -63,14 +71,27 @@ function OperationalHealthNotice({ onOpenMaintenance }: { onOpenMaintenance: () 
   );
 }
 
-function HomeHero({ children }: { children: ReactNode }) {
+function HomeHero({ children, status, config, snapshot }: { children: ReactNode; status: ShellStatus | null; config: ConfigDocument | null; snapshot: LiveSnapshot | null }) {
+  const fields = config?.effectiveSource === "world-option" ? config.worldOptionFields : config?.fields;
+  const serverName = configText(fields?.ServerName)
+    || displayValue(snapshot?.info.data, ["servername", "serverName", "ServerName"], "未命名的帕鲁世界");
+  const description = configText(fields?.ServerDescription) || "这个世界还没有介绍，可在“世界法则配置”中填写。";
+  const version = displayValue(snapshot?.info.data, ["version", "Version"], "");
   return (
-    <Card className="psc-home-command" aria-label="首页服务器控制">
+    <Card className="psc-home-command" role="region" aria-label="首页服务器控制">
       <div className="psc-home-command-grid">
         <div className="psc-home-command-copy">
           <CardHeader>
-            <CardTitle role="heading" aria-level={2}>服务器控制</CardTitle>
-            <CardDescription>操作会先确认目标与影响；关闭和重启会进入可取消的维护倒计时。</CardDescription>
+            <div className="psc-home-command-meta">
+              <span className="psc-home-state" data-state={status?.serverState || "loading"}>
+                <span aria-hidden="true" />
+                {status ? serverStateLabel(status.serverState) : "读取中"}
+              </span>
+              {version && <span className="psc-home-version">v{version.replace(/^v/i, "")}</span>}
+              <span className="psc-home-uptime"><Clock3 aria-hidden="true" />连续运行：<HomeUptime state={status?.serverState} startedAt={snapshot?.metrics.data.process?.startedAt} /></span>
+            </div>
+            <CardTitle role="heading" aria-level={2}>{serverName}</CardTitle>
+            <CardDescription>{description}</CardDescription>
           </CardHeader>
           <CardContent>{children}</CardContent>
         </div>
@@ -80,4 +101,31 @@ function HomeHero({ children }: { children: ReactNode }) {
       </div>
     </Card>
   );
+}
+
+function HomeUptime({ state, startedAt }: { state?: ShellStatus["serverState"]; startedAt?: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (state !== "running") return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [state]);
+
+  if (!state) return "读取中";
+  if (state !== "running") return "未运行";
+  if (!startedAt) return "不可用";
+  const seconds = Math.max(0, Math.floor(now / 1_000 - startedAt));
+  const days = Math.floor(seconds / 86_400);
+  const hours = Math.floor(seconds % 86_400 / 3_600);
+  const minutes = Math.floor(seconds % 3_600 / 60);
+  return days ? `${days} 天 ${hours} 小时` : hours ? `${hours} 小时 ${minutes} 分` : `${minutes} 分`;
+}
+
+function configText(value: string | undefined): string {
+  const text = value?.trim() || "";
+  if (text.length >= 2 && text.startsWith('"') && text.endsWith('"')) {
+    try { return JSON.parse(text) as string; } catch { return text.slice(1, -1); }
+  }
+  return text;
 }

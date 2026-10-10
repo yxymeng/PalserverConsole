@@ -20,6 +20,7 @@ import httpx
 import psutil
 
 from .config import redact_sensitive_text
+from .world_option import default_world_option_fields, read_world_option
 
 logger = logging.getLogger(__name__)
 
@@ -65,20 +66,42 @@ class ServerConnectionConfig:
     admin_password: SensitiveValue
 
 
-def read_connection_config(install_path: Path) -> ServerConnectionConfig:
+def _connection_text(install_path: Path, world_path: Path | None = None) -> str:
+    if world_path is not None and (world_path / "WorldOption.sav").is_file():
+        try:
+            _, _, saved = read_world_option(world_path / "WorldOption.sav")
+        except ValueError as error:
+            raise MonitoringConfigError(
+                "WORLD_OPTION_READ_FAILED", "Unable to read WorldOption.sav."
+            ) from error
+        fields = default_world_option_fields()
+        fields.update(saved)
+        values = ",".join(f"{key}={value}" for key, value in fields.items())
+        return f"OptionSettings=({values})"
     ini_path = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
     try:
-        text = ini_path.read_text(encoding="utf-8-sig")
+        return ini_path.read_text(encoding="utf-8-sig")
     except OSError as error:
         raise MonitoringConfigError(
             "INI_UNAVAILABLE", f"PalWorldSettings.ini: {type(error).__name__}"
         ) from error
-    return parse_connection_config(text)
 
 
-def read_admin_password(install_path: Path) -> str | None:
+def read_connection_config(
+    install_path: Path, world_path: Path | None = None,
+) -> ServerConnectionConfig:
+    return parse_connection_config(_connection_text(install_path, world_path))
+
+
+def read_admin_password(install_path: Path, world_path: Path | None = None) -> str | None:
     """Read the game administrator password without exposing it in a response or log."""
 
+    text = _connection_text(install_path, world_path)
+    password = _ini_value(text, "AdminPassword")
+    return password or None
+
+
+def read_base_camp_worker_max(install_path: Path) -> int:
     ini_path = install_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
     try:
         text = ini_path.read_text(encoding="utf-8-sig")
@@ -86,8 +109,20 @@ def read_admin_password(install_path: Path) -> str | None:
         raise MonitoringConfigError(
             "INI_UNAVAILABLE", f"PalWorldSettings.ini: {type(error).__name__}"
         ) from error
-    password = _ini_value(text, "AdminPassword")
-    return password or None
+    value = _ini_value(text, "BaseCampWorkerMaxNum")
+    if value is None:
+        return 15
+    try:
+        limit = int(value)
+    except ValueError as error:
+        raise MonitoringConfigError(
+            "BASE_CAMP_WORKER_MAX_INVALID", "BaseCampWorkerMaxNum must be an integer."
+        ) from error
+    if not 1 <= limit <= 50:
+        raise MonitoringConfigError(
+            "BASE_CAMP_WORKER_MAX_INVALID", "BaseCampWorkerMaxNum must be between 1 and 50."
+        )
+    return limit
 
 
 def parse_connection_config(text: str) -> ServerConnectionConfig:
@@ -114,7 +149,7 @@ def parse_connection_config(text: str) -> ServerConnectionConfig:
 
 def _ini_value(text: str, key: str) -> str | None:
     match = re.search(
-        rf"(?i)(?:^|[,(\rn])\s*{re.escape(key)}\s*=\s*(?:\"((?:\\\\.|[^\"\\\\])*)\"|([^,)\rn]+))",
+        rf'(?i)(?:^|[,(\rn])\s*{re.escape(key)}\s*=\s*(?:"((?:\\.|[^"\\])*)"|([^,)\rn]+))',
         text,
     )
     if match is None:
@@ -402,15 +437,22 @@ class _ProcessSample:
     write_bytes: int
 
 
+class _MemorySnapshot(Protocol):
+    total: int
+    available: int
+
+
 class ProcessMetricsCollector:
     def __init__(
         self,
         process_lookup: Callable[[Path], list[psutil.Process]] | None = None,
         clock: Callable[[], float] | None = None,
         logical_cpu_count: Callable[[], int | None] | None = None,
+        memory_snapshot: Callable[[], _MemorySnapshot] | None = None,
     ) -> None:
         self._process_lookup = process_lookup or self._find_processes
         self._clock = clock or time.monotonic
+        self._memory_snapshot = memory_snapshot or psutil.virtual_memory
         self._logical_cpu_count = max(
             1, int((logical_cpu_count or psutil.cpu_count)() or 1)
         )
@@ -418,11 +460,14 @@ class ProcessMetricsCollector:
         self._lock = threading.Lock()
 
     def collect(self, executable: Path) -> tuple[dict[str, object], str | None]:
+        host_memory_total, host_memory_available = self._host_memory()
         processes = self._process_lookup(executable)
         if not processes:
             with self._lock:
                 self._samples.clear()
-            return self._empty_metrics(), "PROCESS_NOT_RUNNING"
+            return self._empty_metrics(
+                host_memory_total, host_memory_available
+            ), "PROCESS_NOT_RUNNING"
 
         observed_at = self._clock()
         with self._lock:
@@ -496,6 +541,8 @@ class ProcessMetricsCollector:
             "cpuPercent": round(cpu_percent, 2),
             "cpuReady": sampled,
             "memoryBytes": memory,
+            "hostMemoryTotalBytes": host_memory_total,
+            "hostMemoryAvailableBytes": host_memory_available,
             # Keep cumulative counters for API compatibility; the UI uses the explicit rates below.
             "diskReadBytes": read_bytes,
             "diskWriteBytes": write_bytes,
@@ -505,13 +552,27 @@ class ProcessMetricsCollector:
             "startedAt": int(started_at) if started_at is not None else None,
         }, None
 
+    def _host_memory(self) -> tuple[int, int]:
+        try:
+            snapshot = self._memory_snapshot()
+            total = max(0, int(snapshot.total))
+            available = min(total, max(0, int(snapshot.available)))
+            return total, available
+        except (AttributeError, OSError, TypeError, ValueError, psutil.Error):
+            return 0, 0
+
     @staticmethod
-    def _empty_metrics() -> dict[str, object]:
+    def _empty_metrics(
+        host_memory_total: int = 0,
+        host_memory_available: int = 0,
+    ) -> dict[str, object]:
         return {
             "pids": [],
             "cpuPercent": 0.0,
             "cpuReady": False,
             "memoryBytes": 0,
+            "hostMemoryTotalBytes": host_memory_total,
+            "hostMemoryAvailableBytes": host_memory_available,
             "diskReadBytes": 0,
             "diskWriteBytes": 0,
             "diskReadBytesPerSecond": 0.0,
@@ -585,7 +646,7 @@ class MonitorCoordinator:
         rest_factory: Callable[[ServerConnectionConfig], RestReadonly] | None = None,
         rcon_factory: Callable[[ServerConnectionConfig], RconReadonly] | None = None,
         process_metrics: ProcessMetricsCollector | None = None,
-        interval_seconds: float = 5.0,
+        interval_seconds: float = 1.0,
         players_observer: Callable[[Any, str], None] | None = None,
         retry_base_seconds: float = 1.0,
         retry_max_seconds: float = 60.0,

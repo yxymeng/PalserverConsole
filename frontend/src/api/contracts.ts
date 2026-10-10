@@ -60,11 +60,21 @@ export type LiveSnapshot = {
   metrics: LiveValue<{ server?: Record<string, unknown>; process?: ProcessMetrics }>;
   settings: LiveValue<Record<string, unknown>>;
 };
+export type BannedPlayer = { userId: string };
+export type BanListResponse = {
+  items: BannedPlayer[];
+  source: string;
+  observedAt: number;
+  stale: boolean;
+  errorCode: string | null;
+};
 export type ProcessMetrics = {
   pids: number[];
   cpuPercent: number;
   cpuReady?: boolean;
   memoryBytes: number;
+  hostMemoryTotalBytes?: number;
+  hostMemoryAvailableBytes?: number;
   diskReadBytes: number;
   diskWriteBytes: number;
   diskReadBytesPerSecond?: number;
@@ -145,10 +155,26 @@ export type ApplicationUpdateStatus = {
   currentVersion: string;
   latestVersion: string;
   updateAvailable: boolean;
+  stale?: boolean;
   portable: boolean;
   releaseUrl: string | null;
   publishedAt: string | null;
   assetSizeBytes: number | null;
+  releaseNotes: string[];
+};
+export type ApplicationUpdateCheck = ApplicationUpdateStatus | {
+  state: "unavailable";
+  errorCode: string;
+  message: string;
+};
+
+export type ApplicationUpdateProgress = {
+  state: "idle" | "checking" | "downloading" | "validating" | "handoff" | "restart_scheduled" | "waiting_for_exit" | "installing" | "restarting" | "completed" | "failed";
+  step: number;
+  message: string;
+  updateId?: string;
+  errorCode?: string;
+  updatedAt?: number;
 };
 export type ApplicationUpdateResult = {
   message: string;
@@ -162,10 +188,13 @@ export type WorldPlayerListItem = {
   lastRecordedAt: string | null; progress: WorldPlayerProgress;
 };
 export type WorldPlayerProgressField = "discoveredPalSpecies" | "capturedPals" | "fastTravel" | "relics" | "memos" | "exploredAreas" | "fieldBosses" | "towerBosses" | "dungeonClears" | "oilRigClears" | "technologyPoints" | "ancientTechnologyPoints" | "recipes";
+export type WorldPlayerProgressTotalField = WorldPlayerProgressField | "oilRigLocations";
 export type WorldPlayerProgress = {
   state: "complete" | "partial" | "unavailable";
   values: Partial<Record<WorldPlayerProgressField, number>>;
   unavailable: WorldPlayerProgressField[];
+  totals?: Partial<Record<WorldPlayerProgressTotalField, number>>;
+  totalsDataVersion?: string | null;
 };
 export type WorldPalListItem = {
   id: string; ownerPlayerId: string | null; characterId: string; nickname: string | null; level: number | null;
@@ -245,14 +274,22 @@ export type WorldPalRosterResponse = WorldSnapshotContext & {
   total: number;
   careSummary: WorldPalCareSummary;
   passiveSkills: WorldPalSkill[];
+  passiveCatalog: WorldPalSkill[];
+  passiveCatalogErrorCode: string | null;
   metadata: WorldMetadataStatus;
 };
 export type WorldGuildListItem = {
   id: string; name: string; memberCount: number; baseCount: number;
+  adminPlayerId: string | null; adminPlayerName: string | null;
+  members: { id: string; name: string; level: number | null; role: "leader" | "member" }[];
 };
 export type WorldBaseListItem = {
   id: string; name: string; guildId: string | null; workerContainerId: string | null;
   x: number | null; y: number | null; z: number | null; guildName?: string;
+  workerCount: number;
+  /** Saved worker-container SlotNum; null when unavailable, not the configured ceiling. */
+  maxWorkerCount: number | null;
+  workers: WorldPalListItem[];
 };
 export type WorldInventoryListItem = {
   id: number; containerId: string; slotIndex: number; itemId: string; quantity: number; ownerKind: string;
@@ -279,6 +316,8 @@ export type WorldInventoryItem = {
   metadataLabel: "资料未收录" | null;
   totalQuantity: number;
   locationCount: number;
+  locationGroupCount: number;
+  locationPreview: WorldInventoryLocationGroup[];
 };
 export type WorldInventoryLocation = {
   id: number;
@@ -374,7 +413,7 @@ export type WorldEntityDetail = WorldSnapshotContext & (
   | WorldGuildDetail
   | WorldBaseDetail
 );
-export type Theme = "light" | "dark";
+export type Theme = "light" | "island" | "dark";
 
 export type BackupItem = { id: string; observedAt: number; sizeBytes: number; valid: boolean; missing: string[] };
 export type RestoreRecoveryJournal = {
@@ -478,5 +517,10 @@ export type ConfigDocument = {
   rawText: string;
   adminPasswordConfigured: boolean;
   worldOptionPresent?: boolean;
-  draft: (ConfigDocument & { state?: string; conflict?: Record<string, unknown> | null }) | null;
+  worldOptionPath?: string | null;
+  effectiveSource?: "ini" | "world-option";
+  worldOptionSchema?: string[];
+  worldOptionFields?: Record<string, string>;
+  worldOptionAdminPasswordConfigured?: boolean;
+  pendingApply?: { kind: "ini" | "world-option"; updatedAt: number } | null;
 };

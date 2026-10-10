@@ -30,9 +30,7 @@ from .persistence import (
 )
 from .steam import validate_executable
 
-OperationKind = Literal[
-    "start", "save", "stop", "restart", "force_stop", "apply_config_and_restart"
-]
+OperationKind = Literal["start", "save", "stop", "restart", "force_stop"]
 FORCE_CONFIRMATION_TTL_SECONDS = 120
 PROFILE_ERROR_CODES = frozenset(
     {
@@ -233,7 +231,7 @@ class LifecycleManager:
         self.rest_factory = rest_factory or (
             lambda config: PalServerRestController(config.rest_url, config.admin_password)
         )
-        self._config_apply: Callable[[], dict[str, object]] | None = None
+        self._pending_config_apply: Callable[[], dict[str, object]] | None = None
         self.audit_callback = audit_callback
         self.profile_provider = profile_provider
         self.now = now
@@ -241,15 +239,27 @@ class LifecycleManager:
         self._lock = threading.Lock()
         self._cancellations: dict[str, threading.Event] = {}
 
-    def set_config_apply(self, apply: Callable[[], dict[str, object]]) -> None:
-        """Register the only callback allowed to write a pending INI draft."""
-        self._config_apply = apply
+    def set_pending_config_apply(self, apply: Callable[[], dict[str, object]]) -> None:
+        """Register the only callback allowed to apply a pending game configuration."""
+        self._pending_config_apply = apply
 
     def status(self) -> ServerStatus:
         try:
             config = self.load_configuration()
         except LifecycleError as error:
             raw_executable = self.database.get_setting("server.executable")
+            if raw_executable:
+                try:
+                    executable = validate_executable(Path(raw_executable))
+                except (OSError, ValueError):
+                    pass
+                else:
+                    pids = self.process.matching_pids(executable)
+                    if pids:
+                        return {
+                            "configured": True, "state": "running", "pids": pids,
+                            "executablePath": str(executable), "errorCode": error.code,
+                        }
             if raw_executable and error.code in PROFILE_ERROR_CODES:
                 return {
                     "configured": True,
@@ -274,13 +284,16 @@ class LifecycleManager:
             "errorCode": None,
         }
 
-    def load_configuration(self) -> ServerConfiguration:
+    def _configuration_paths(self) -> tuple[Path, Path | None]:
         raw_executable = self.database.get_setting("server.executable")
         if not raw_executable:
             raise LifecycleError("SERVER_NOT_CONFIGURED", "尚未选择 PalServer.exe。")
+        world_path: Path | None = None
         if self.profile_provider is not None:
             try:
-                executable = self.profile_provider().executable_path
+                profile = self.profile_provider()
+                executable = profile.executable_path
+                world_path = profile.world_path
             except ProfileError as error:
                 raise LifecycleError(error.code, str(error)) from error
         else:
@@ -288,7 +301,11 @@ class LifecycleManager:
                 executable = validate_executable(Path(raw_executable))
             except (OSError, ValueError) as error:
                 raise LifecycleError("INVALID_SERVER_PATH", str(error)) from error
-        derived_url, password = _read_rest_configuration(executable.parent)
+        return executable, world_path
+
+    def load_configuration(self) -> ServerConfiguration:
+        executable, world_path = self._configuration_paths()
+        derived_url, password = _read_rest_configuration(executable.parent, world_path)
         return ServerConfiguration(
             executable=executable,
             arguments=parse_arguments(self.database.get_setting("server.arguments") or ""),
@@ -427,22 +444,19 @@ class LifecycleManager:
                 "RESTORE_RECOVERY_REQUIRED",
                 "未完成的备份恢复必须先 resume 或 rollback，未执行服务器操作。",
             )
-        config = self.load_configuration()
         if kind == "start":
-            self._start(operation_id, config)
-        elif kind == "save":
-            self._save(operation_id, config)
-        elif kind == "force_stop":
-            self._force_stop(operation_id, config)
-            self._complete_force_parent(operation_id, succeeded=True)
-        elif kind == "apply_config_and_restart":
-            self._apply_config_and_restart(
-                operation_id, config, countdown_seconds, message, cancel
-            )
+            self._start(operation_id)
         else:
-            self._stop_or_restart(
-                operation_id, config, kind == "restart", countdown_seconds, message, cancel
-            )
+            config = self.load_configuration()
+            if kind == "save":
+                self._save(operation_id, config)
+            elif kind == "force_stop":
+                self._force_stop(operation_id, config)
+                self._complete_force_parent(operation_id, succeeded=True)
+            else:
+                self._stop_or_restart(
+                    operation_id, config, kind == "restart", countdown_seconds, message, cancel
+                )
         final = self.database.operation(operation_id)
         result = "success"
         if final and final["state"] == "cancelled":
@@ -528,9 +542,12 @@ class LifecycleManager:
             # A console restart or another recovery path may have closed the parent.
             return
 
-    def _start(self, operation_id: str, config: ServerConfiguration) -> None:
-        if self.process.matching_pids(config.executable):
+    def _start(self, operation_id: str) -> None:
+        executable, _ = self._configuration_paths()
+        if self.process.matching_pids(executable):
             raise LifecycleError("ALREADY_RUNNING", "该安装路径的 PalServer 已在运行。")
+        self._apply_pending_config(operation_id)
+        config = self.load_configuration()
         self._transition(operation_id, "running", "starting")
         handle = self.process.start(config.executable, config.arguments)
         time.sleep(0.2)
@@ -555,39 +572,28 @@ class LifecycleManager:
     ) -> None:
         if not self._graceful_stop(operation_id, config, countdown_seconds, message, cancel):
             return
+        self._apply_pending_config(operation_id)
         if restart:
             self._restart(operation_id, config, error_code="RESTART_FAILED")
         self._transition(
             operation_id, "succeeded", "restarted" if restart else "stopped"
         )
 
-    def _apply_config_and_restart(
-        self,
-        operation_id: str,
-        config: ServerConfiguration,
-        countdown_seconds: int,
-        message: str,
-        cancel: threading.Event,
-    ) -> None:
-        if self._config_apply is None:
-            raise LifecycleError(
-                "CONFIG_APPLY_UNAVAILABLE", "配置应用器不可用，未执行停服或写入操作。"
-            )
-        if not self._graceful_stop(operation_id, config, countdown_seconds, message, cancel):
+    def _apply_pending_config(self, operation_id: str) -> None:
+        if self._pending_config_apply is None:
             return
-        self._transition(operation_id, "running", "applying_config")
         try:
-            self._config_apply()
+            result = self._pending_config_apply()
         except Exception as error:
             code = getattr(error, "code", "CONFIG_APPLY_FAILED")
             error_code = code if isinstance(code, str) else "CONFIG_APPLY_FAILED"
             raise LifecycleError(
                 error_code,
-                "配置应用失败，PalServer 已停止且不会重启。请检查草稿或备份后，"
-                f"使用普通 start 恢复服务。原因: {error}",
+                "待应用配置写入或回读校验失败，PalServer 不会启动。"
+                f"请检查配置备份后重试。原因: {error}",
             ) from error
-        self._restart(operation_id, config, error_code="HEALTH_CHECK_FAILED")
-        self._transition(operation_id, "succeeded", "applied_restarted")
+        if result.get("applied"):
+            self._transition(operation_id, "running", "config_applied")
 
     def _graceful_stop(
         self,
@@ -653,6 +659,7 @@ class LifecycleManager:
             raise LifecycleError(
                 "FORCE_STOP_FAILED", "PalServer process remained alive after kill()."
             )
+        self._apply_pending_config(operation_id)
         self._transition(operation_id, "succeeded", "force_stopped")
 
     def _require_running(self, config: ServerConfiguration) -> list[int]:
@@ -686,9 +693,11 @@ def _operation_request_fingerprint(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _read_rest_configuration(install_path: Path) -> tuple[str, SensitiveValue]:
+def _read_rest_configuration(
+    install_path: Path, world_path: Path | None = None,
+) -> tuple[str, SensitiveValue]:
     try:
-        connection = read_connection_config(install_path)
+        connection = read_connection_config(install_path, world_path)
     except MonitoringConfigError as error:
         raise LifecycleError(error.code, str(error)) from error
     if not connection.rest_enabled:

@@ -2,7 +2,7 @@
 
 PalserverConsole 的公开更新只能由仓库维护者在本地完成、验证后同步到 GitHub 并发布
 Release。普通用户不运行 FModel、CUE4Parse 或 metadata 生成器，也不向项目写入游戏数据；
-他们只下载维护者发布的 Windows portable，或在控制台“维护 → 服务器更新”中检查并安装
+他们只下载维护者发布的 Windows portable，或在控制台“维护 → 服务运维与告警”中检查并安装
 PalServerConsole 更新。
 
 ## Palworld 更新后的维护者流程
@@ -47,12 +47,24 @@ backend/palserver_console/metadata/data/world-metadata-v1.json
 
 - `GET /api/maintenance/application-update` 只读取固定仓库
   `yxymeng/PalserverConsole` 的 latest GitHub Release。
+- 控制台页面保持打开时，成功检查后约 24 小时自动复查；失败或返回旧结果后约 15 分钟重试。
+  维护页“服务运维与告警”中的“检查控制台更新”会跳过缓存立即检查；发现新版本时打开更新弹窗，
+  无更新时提示已是最新版本，失败时显示错误。GitHub 暂不可用且无缓存时返回
+  `state: unavailable`；已有检查结果则保留并标记为旧结果，没有结果才隐藏更新入口。
 - “检查更新”不会写文件；“更新”只允许从控制台本机发起。
 - 自动安装只支持 Windows portable。源码运行会提供 Release 链接，不执行自我覆盖。
 - portable 会下载到自己的 `data/application-updates/`，校验包结构后退出控制台，调用
   `apply-downloaded-update.ps1` 与现有 `upgrade-portable.ps1`。
 - 升级保留 `data/`，并沿用数据库备份、checksum、downgrade 阻止和 Program rollback。
 - 该入口不更新 PalServer，不修改真实 `.sav`，也不允许普通用户生成或上传 metadata。
+
+## 运维事件告警推送
+
+- “服务运维与告警”使用保存在本机后端的 HTTPS Webhook 地址和密钥；地址、密钥留空保存时沿用原值，API 不回显这两项。
+- 自动推送服务器启动、保存、停止、重启和强制停止操作的计划、开始、完成、取消或失败阶段；失败消息只包含错误标识。实际网络发送在后台执行，不阻塞服务器操作。
+- `POST /api/maintenance/notifications/test` 仅限本机且校验 CSRF，向已保存的接收端发送 `maintenance.test`，即使自动推送已停用也可测试连接。
+- 消息包含 `event`、`title`、`message`、`instanceId`、`occurredAt`，使用 `X-PalServerConsole-Signature: sha256=<HMAC-SHA256>` 对 UTF-8 JSON 请求体签名。
+- 这是通用签名 Webhook，需要接收端适配；不直接模拟 Discord、钉钉或企业微信的专用消息格式。SteamCMD 更新入口、API 和执行服务已移除。
 
 ## v0.2.0 本地发布检查
 

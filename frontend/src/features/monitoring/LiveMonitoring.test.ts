@@ -2,10 +2,19 @@ import { expect, test } from "vitest";
 
 import type { LiveSnapshot, WorldStatus } from "../../api/contracts";
 import {
+  gameActivityPresentation,
+  gameActivityTime,
+  isGameActivity,
   liveTitleText,
   onlinePlayersSummary,
   playerDataState,
+  playerLevelText,
+  playerPingPresentation,
+  playerSyncPresentation,
+  processMemoryPercent,
+  serverFrameSummary,
   worldStatusAfterResponse,
+  worldPlayerId,
 } from "./livePresentation";
 
 const snapshot = {
@@ -62,8 +71,8 @@ test("首页在线玩家摘要覆盖空、单人、多人、加载、错误与�
     value: "8 人",
     detail: "Player1、Player2、Player3 等 8 人",
   });
-  expect(onlinePlayersSummary([{}], "ready")).toEqual({ value: "1 人", detail: "未知玩家" });
-  expect(onlinePlayersSummary([], "loading")).toEqual({ value: "读取中", detail: "正在读取在线玩家" });
+  expect(onlinePlayersSummary([{}], "ready")).toEqual({ value: "1 人", detail: "未知训练家" });
+  expect(onlinePlayersSummary([], "loading")).toEqual({ value: "读取中", detail: "正在读取在线训练家" });
   expect(onlinePlayersSummary([], "error")).toEqual({ value: "—", detail: "在线数据不可用" });
   expect(onlinePlayersSummary([{ name: "一梦" }, { name: "Luna" }, { name: "Player3" }], "ready", true)).toEqual({
     value: "3 人",
@@ -84,4 +93,56 @@ test("世界快照 success -> failure -> success 不保留旧数据", () => {
   error = "";
   status = worldStatusAfterResponse(nextWorldStatus, error);
   expect(status?.gameTimeTicks).toBe(nextWorldStatus.gameTimeTicks);
+});
+
+test("在线训练家等级与 Ping 不使用参考仓库的模拟默认值", () => {
+  expect(playerLevelText({ level: 42 })).toBe("Lv.42");
+  expect(playerLevelText({})).toBe("不可用");
+  expect(playerPingPresentation({ ping: 28 }, "rest")).toEqual({ value: "28 ms", tone: "good" });
+  expect(playerPingPresentation({ ping: 78.5 }, "rest")).toEqual({ value: "78.5 ms", tone: "medium" });
+  expect(playerPingPresentation({ ping: 128 }, "rest")).toEqual({ value: "128 ms", tone: "high" });
+  expect(playerPingPresentation({ ping: 28 }, "rcon")).toEqual({ value: "不可用", tone: "unavailable" });
+  expect(playerPingPresentation({}, "rest")).toEqual({ value: "不可用", tone: "unavailable" });
+});
+
+test("在线训练家同步徽章区分 REST、RCON 与过期数据", () => {
+  expect(playerSyncPresentation()).toEqual({ label: "正在连接", state: "loading" });
+  expect(playerSyncPresentation({ data: [], source: "rest", observedAt: 1, stale: false, errorCode: null })).toEqual({ label: "实时同步", state: "live" });
+  expect(playerSyncPresentation({ data: [], source: "rcon", observedAt: 1, stale: false, errorCode: null })).toEqual({ label: "RCON 降级", state: "fallback" });
+  expect(playerSyncPresentation({ data: [], source: "rest", observedAt: 1, stale: true, errorCode: "REST_TIMEOUT" })).toEqual({ label: "数据不可用", state: "error" });
+});
+
+test("探索进度只使用可关联存档的 PlayerUId，不使用管理 User ID 或姓名猜配", () => {
+  expect(worldPlayerId({ playerId: "save-player-id", userId: "admin-user-id", name: "Alice" })).toBe("save-player-id");
+  expect(worldPlayerId({ playerUid: "rcon-player-id", steamId: "steam-id" })).toBe("rcon-player-id");
+  expect(worldPlayerId({ userId: "admin-user-id", name: "Alice" })).toBe("");
+});
+
+test("内存进度使用服务器主机真实物理内存计算并限制在百分比范围内", () => {
+  const process = {
+    pids: [123], cpuPercent: 0, memoryBytes: 4_294_967_296,
+    hostMemoryTotalBytes: 17_179_869_184,
+    diskReadBytes: 0, diskWriteBytes: 0,
+  };
+  expect(processMemoryPercent(process)).toBe(25);
+  expect(processMemoryPercent({ ...process, memoryBytes: 34_359_738_368 })).toBe(100);
+  expect(processMemoryPercent({ ...process, hostMemoryTotalBytes: 0 })).toBeNull();
+  expect(processMemoryPercent({ ...process, pids: [] })).toBeNull();
+});
+
+test("服务器帧率只显示 fps 数值与单位", () => {
+  expect(serverFrameSummary({ serverfps: 59.1 })).toEqual({ value: "59.1 fps" });
+  expect(serverFrameSummary({ ServerFPS: "60" })).toEqual({ value: "60 fps" });
+  expect(serverFrameSummary({ serverfps: 0 })).toEqual({ value: "不可用" });
+});
+
+test("首页游戏内动态只呈现真实的进出与聊天事件", () => {
+  const base = { id: 1, peerIp: null, result: "success", createdAt: 100, source: "player-diff", parserVersion: null };
+  const joined = { ...base, eventType: "player.joined", detail: { player: { name: "Luna" } } };
+  const chat = { ...base, id: 2, eventType: "chat.message", source: "palserver-log", detail: { name: "Luna", message: "一起打塔吗？" } };
+  expect(isGameActivity(joined)).toBe(true);
+  expect(isGameActivity({ ...base, eventType: "server.operation", detail: {} })).toBe(false);
+  expect(gameActivityPresentation(joined)).toEqual({ title: "Luna 进入了服务器", detail: "来自在线训练家状态变化" });
+  expect(gameActivityPresentation(chat)).toEqual({ title: "Luna 发言", detail: "一起打塔吗？" });
+  expect(gameActivityTime(100, 220)).toBe("2 分钟前");
 });

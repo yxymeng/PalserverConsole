@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi.testclient import TestClient
 
+from palserver_console.bans import read_banned_player_ids
 from palserver_console.config import AppSettings
 from palserver_console.main import create_app
 from palserver_console.monitoring import (
@@ -24,6 +25,7 @@ from palserver_console.monitoring import (
     SourceError,
     _safe_error_text,
     parse_connection_config,
+    read_base_camp_worker_max,
 )
 
 
@@ -92,6 +94,8 @@ class FakeProcessMetrics:
             "cpuPercent": 12.5,
             "cpuReady": True,
             "memoryBytes": 1048576,
+            "hostMemoryTotalBytes": 17179869184,
+            "hostMemoryAvailableBytes": 12884901888,
             "diskReadBytes": 10,
             "diskWriteBytes": 20,
             "diskReadBytesPerSecond": 1.0,
@@ -139,6 +143,15 @@ class FakeProcess:
         return self._children
 
 
+def test_monitor_defaults_to_one_second_refresh() -> None:
+    monitor = MonitorCoordinator(
+        config_loader=lambda: cast(Any, None),
+        process_metrics=FakeProcessMetrics(),  # type: ignore[arg-type]
+    )
+
+    assert monitor.interval_seconds == 1.0
+
+
 def test_process_metrics_include_oldest_process_start_time() -> None:
     collector = ProcessMetricsCollector(
         process_lookup=lambda _: cast(
@@ -169,6 +182,7 @@ def test_process_metrics_calculates_cpu_and_io_rates_from_two_samples() -> None:
         process_lookup=lambda _: cast(Any, [process]),
         clock=lambda: clock[0],
         logical_cpu_count=lambda: 2,
+        memory_snapshot=lambda: SimpleNamespace(total=16_384, available=12_288),
     )
 
     first, first_error = collector.collect(Path("C:/test/PalServer.exe"))
@@ -186,12 +200,28 @@ def test_process_metrics_calculates_cpu_and_io_rates_from_two_samples() -> None:
     assert second_error is None
     assert second["cpuPercent"] == 6.25
     assert second["memoryBytes"] == 2048
+    assert second["hostMemoryTotalBytes"] == 16_384
+    assert second["hostMemoryAvailableBytes"] == 12_288
     assert second["diskReadBytes"] == 300
     assert second["diskWriteBytes"] == 260
     assert second["diskReadBytesPerSecond"] == 100.0
     assert second["diskWriteBytesPerSecond"] == 30.0
     assert second["cpuReady"] is True
     assert second["ioReady"] is True
+
+
+def test_process_metrics_keep_host_memory_when_server_is_stopped() -> None:
+    collector = ProcessMetricsCollector(
+        process_lookup=lambda _: [],
+        memory_snapshot=lambda: SimpleNamespace(total=32_768, available=24_576),
+    )
+
+    metrics, error = collector.collect(Path("C:/test/PalServer.exe"))
+
+    assert error == "PROCESS_NOT_RUNNING"
+    assert metrics["memoryBytes"] == 0
+    assert metrics["hostMemoryTotalBytes"] == 32_768
+    assert metrics["hostMemoryAvailableBytes"] == 24_576
 
 
 def test_process_lookup_includes_palserver_descendants(
@@ -300,6 +330,14 @@ def test_connection_config_parses_ports_and_redacts_password() -> None:
     assert config.rcon_port == 25585
     assert "must-not-leak" not in repr(config)
     assert "must-not-leak" not in str(config.admin_password)
+
+
+def test_base_camp_worker_max_reads_configured_limit(tmp_path: Path) -> None:
+    ini = tmp_path / "Pal" / "Saved" / "Config" / "WindowsServer" / "PalWorldSettings.ini"
+    ini.parent.mkdir(parents=True)
+    ini.write_text("OptionSettings=(BaseCampWorkerMaxNum=25)", encoding="utf-8")
+
+    assert read_base_camp_worker_max(tmp_path) == 25
 
 
 def test_rest_error_redaction_consumes_complex_quoted_secret() -> None:
@@ -532,6 +570,11 @@ def test_m3_api_exposes_full_ip_sse_and_never_returns_admin_password(tmp_path: P
         players = client.get("/api/live/players")
         assert players.status_code == 200
         assert players.json()["data"][0]["ip"] == "203.0.113.9"
+        metrics = client.get("/api/live/metrics")
+        assert metrics.status_code == 200
+        process = metrics.json()["data"]["process"]
+        assert process["hostMemoryTotalBytes"] == 17_179_869_184
+        assert process["hostMemoryAvailableBytes"] == 12_884_901_888
         settings_response = client.get("/api/live/settings")
         assert "must-not-leak" not in settings_response.text
         assert settings_response.json()["data"]["AdminPassword"] == "[REDACTED]"
@@ -549,3 +592,47 @@ def test_m3_api_exposes_full_ip_sse_and_never_returns_admin_password(tmp_path: P
 
         assert any(getattr(route, "path", None) == "/api/events" for route in app.routes)
         assert "event: snapshot" in next(monitor.stream())
+
+
+def test_ban_list_reads_palserver_file_and_unbans_selected_user(tmp_path: Path) -> None:
+    install_path = tmp_path / "PalServer"
+    executable = install_path / "PalServer.exe"
+    world_path = install_path / "Pal" / "Saved" / "SaveGames" / "0" / "world-1"
+    ban_list_path = install_path / "Pal" / "Saved" / "SaveGames" / "banlist.txt"
+    world_path.mkdir(parents=True)
+    executable.write_bytes(b"")
+    (world_path / "Level.sav").write_bytes(b"test")
+    ban_list_path.write_text(
+        "\ufeffsteam_111\n# comment\nsteam_222\nsteam_111\n", encoding="utf-8"
+    )
+    assert read_banned_player_ids(install_path) == ["steam_111", "steam_222"]
+
+    monitor, rest, _ = _monitor()
+    settings = AppSettings(data_dir=tmp_path / "data", static_dir=tmp_path / "static")
+    app = create_app(settings, monitor=monitor)
+
+    with TestClient(
+        app,
+        base_url="http://127.0.0.1:8223",
+        client=("127.0.0.1", 50000),
+    ) as client:
+        deps = app.state.dependencies
+        deps.database.set_setting("server.executable", str(executable))
+        deps.database.save_server_profile(
+            str(executable), str(install_path), "world-1", str(world_path)
+        )
+        response = client.get("/api/live/bans")
+        assert response.status_code == 200
+        assert response.json()["items"] == [
+            {"userId": "steam_111"},
+            {"userId": "steam_222"},
+        ]
+        assert response.json()["source"] == "palserver-banlist"
+
+        auth = client.get("/api/auth/status").json()
+        unban = client.post(
+            "/api/live/players/steam_111/unban",
+            headers={"Origin": "http://127.0.0.1:8223", "X-CSRF-Token": auth["csrfToken"]},
+        )
+        assert unban.status_code == 200
+        assert rest.actions == [("unban", ("steam_111",))]

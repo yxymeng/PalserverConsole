@@ -12,7 +12,7 @@ test("UX-09：加载、错误重试和 LAN 登录在桌面与窄屏均可用", a
   });
 
   const navigation = page.goto("/");
-  await expect(page.getByText("正在连接本机控制台...")).toBeVisible();
+  await expect(page.getByRole("status", { name: "正在连接本机控制台" })).toBeVisible();
   resolveAuth?.();
   await navigation;
   await expect(page.getByRole("heading", { name: "局域网管理员登录" })).toBeVisible();

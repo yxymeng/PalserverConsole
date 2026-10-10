@@ -84,6 +84,7 @@ def router(deps: AppDependencies) -> APIRouter:
         page: int = 1,
         pageSize: int = 60,
         search: str | None = None,
+        characterId: str | None = None,
         marker: str = "all",
         sort: str = "balanced",
         care: str = "all",
@@ -97,6 +98,8 @@ def router(deps: AppDependencies) -> APIRouter:
         workSuitability: str | None = None,
         minWorkLevel: int = 1,
         passiveSkill: str | None = None,
+        passiveMatch: str = "all",
+        excludeNegativePassives: bool = False,
         location: str = "all",
         snapshotId: str | None = None,
     ) -> dict[str, object] | JSONResponse:
@@ -113,8 +116,10 @@ def router(deps: AppDependencies) -> APIRouter:
             return error_response(422, "INVALID_PAL_ROSTER_SORT", "帕鲁排序方式不正确。")
         if care not in {"all", "attention"}:
             return error_response(422, "INVALID_PAL_ROSTER_CARE", "帕鲁照护筛选条件不正确。")
-        if location not in {"all", "player", "base", "unassigned"}:
+        if location not in {"all", "player", "party", "storage", "base", "unassigned"}:
             return error_response(422, "INVALID_PAL_ROSTER_LOCATION", "帕鲁归属筛选条件不正确。")
+        if passiveMatch not in {"all", "any"}:
+            return error_response(422, "INVALID_PAL_PASSIVE_MATCH", "被动技能匹配方式不正确。")
         minimums = (minLevel, minRank, minRarity, minHpIv, minAttackIv, minDefenseIv, minAverageIv)
         if any(value is not None and value < 0 for value in minimums):
             return error_response(422, "INVALID_PAL_APTITUDE_FILTER", "帕鲁资质最低值不能小于 0。")
@@ -139,11 +144,22 @@ def router(deps: AppDependencies) -> APIRouter:
         )
         if len(passive_skills) > 12 or len(set(passive_skills)) != len(passive_skills):
             return error_response(422, "INVALID_PAL_PASSIVE_FILTER", "被动技能筛选条件不正确。")
+        character_ids = tuple(
+            name.strip() for name in (characterId or "").split(",") if name.strip()
+        )
+        if (
+            len(set(character_ids)) != len(character_ids)
+            or any(len(name) > 100 for name in character_ids)
+        ):
+            return error_response(
+                422, "INVALID_PAL_CHARACTER_FILTER", "帕鲁 Character ID 筛选条件不正确。"
+            )
         try:
             return deps.world.list_pal_roster(
                 page=page,
                 page_size=pageSize,
                 search=search,
+                character_ids=character_ids,
                 marker=marker,
                 sort=sort,
                 care=care,
@@ -157,6 +173,8 @@ def router(deps: AppDependencies) -> APIRouter:
                 work_suitabilities=work_suitabilities,
                 min_work_level=minWorkLevel,
                 passive_skills=passive_skills,
+                passive_match=passiveMatch,
+                exclude_negative_passives=excludeNegativePassives,
                 location=location,
                 snapshot_id=snapshotId,
             )

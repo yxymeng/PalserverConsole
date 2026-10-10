@@ -61,7 +61,7 @@ def test_published_build_docs_use_single_python_313_baseline() -> None:
     lock_header = (ROOT / "requirements.lock").read_text(encoding="utf-8").splitlines()[0]
 
     assert "64 位 CPython 3.13" in readme
-    assert "最终用户无需安装 Python/Node.js" in readme
+    assert "无需安装 Python 或 Node.js" in readme
     assert "/plan.md" in gitignore
     assert "/CODEX_OPTIMIZATION_ROADMAP.md" in gitignore
     assert lock_header == (

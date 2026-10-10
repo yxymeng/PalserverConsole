@@ -127,15 +127,6 @@ class NotificationStatusResponse(BaseModel):
     configured: bool
 
 
-class SteamCmdUpdateRequest(BaseModel):
-    steamCmdPath: str = Field(min_length=1, max_length=2048)
-    confirmation: Literal["UPDATE"]
-    countdownSeconds: int = Field(default=30, ge=5, le=600)
-    message: str = Field(
-        default="服务器将进行维护更新，请及时返回安全地点。", min_length=1, max_length=500
-    )
-
-
 class ApplicationUpdateRequest(BaseModel):
     expectedVersion: str = Field(pattern=r"^\d+\.\d+\.\d+$")
 
