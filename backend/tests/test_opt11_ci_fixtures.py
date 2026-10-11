@@ -79,12 +79,17 @@ def test_windows_ci_runs_required_checks_and_reports_private_fixture_state() -> 
         "pytest backend/tests",
         "npm.cmd ci",
         "npm.cmd run lint",
-        "npm.cmd run typecheck",
         "npm.cmd run test",
         "npm.cmd run build",
         "npm.cmd run test:e2e",
     )
     assert all(command in workflow for command in required_commands)
+    frontend_package = json.loads(
+        (ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
+    )
+    build_commands = frontend_package["scripts"]["build"].split("&&")
+    assert build_commands[0].split() == ["npm", "run", "typecheck"]
+    assert "npm.cmd run typecheck" not in workflow
     assert "workflow_dispatch:" in workflow
     assert "run_private_fixture" in workflow
     assert "PALSERVER_M5_LEVEL_SAV" in workflow

@@ -117,15 +117,11 @@ jobs:
         id: lint
         working-directory: frontend
         run: npm.cmd run lint
-      - name: TypeScript
-        id: typecheck
-        working-directory: frontend
-        run: npm.cmd run typecheck
       - name: Vitest
         id: unit_tests
         working-directory: frontend
         run: npm.cmd run test
-      - name: Build
+      - name: TypeScript and build
         id: build
         working-directory: frontend
         run: npm.cmd run build
@@ -142,9 +138,8 @@ jobs:
         run: |
           "## Frontend / Node.js 24 LTS" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "- lint: ${{ steps.lint.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          "- typecheck: ${{ steps.typecheck.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "- unit tests: ${{ steps.unit_tests.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-          "- build: ${{ steps.build.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          "- typecheck / build: ${{ steps.build.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "- Playwright: ${{ steps.e2e.outcome }}" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           "- real environment validation: not configured (manual private runner only)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
